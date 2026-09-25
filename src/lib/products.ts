@@ -70,6 +70,10 @@ export async function saveProduct(p: Product) {
   return put("products", p);
 }
 
+/* TK on the old labels = dead stock. Any value in that slot marks the piece as dead. */
+export const isDead = (p: Pick<Product, "tk">) => !!(p.tk && p.tk.trim());
+export const DEAD_MARK = "TK";
+
 export const label = (p: Pick<Product, "item" | "style" | "color">) =>
   [p.item, p.style, p.color].filter(Boolean).join(" · ") || "Unnamed product";
 

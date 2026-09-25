@@ -4,6 +4,7 @@ import { db, put, now, uid, type VoiceNote } from "../lib/db";
 import { transcribe } from "../lib/ai";
 import { toast, useApp } from "../lib/app";
 import { when } from "../lib/format";
+import { Icon } from "./Icon";
 
 /* Hold-free recorder: tap to start, tap to stop. Opus at ~24 kbps → a 1-minute note is ~180 KB. */
 export function useRecorder(maxSec = 120) {
@@ -37,7 +38,7 @@ export function MicButton({ onAudio, label = "🎙 Speak", busy }: { onAudio: (b
         if (r.recording) return r.stop();
         try { await r.start(onAudio); } catch { toast("Microphone not allowed — allow it in the browser's site settings", true); }
       }}>
-      {busy ? "Working…" : r.recording ? `■ Stop · ${r.secs}s` : label}
+      {busy ? "Working…" : r.recording ? `■ Stop · ${r.secs}s` : <><Icon n="mic" size={18} />{label.replace(/^🎙\s*/, "")}</>}
     </button>
   );
 }

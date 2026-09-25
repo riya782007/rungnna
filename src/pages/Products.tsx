@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, type Product } from "../lib/db";
 import { label, DEFAULT_TYPES, saveProduct } from "../lib/products";
-import { Head, Thumb, PhotoButton, useLocations, locName } from "../components/common";
+import { Head, Thumb, PhotoButton, useLocations, locName, DeadToggle } from "../components/common";
 import { WedgeInput } from "../components/Scanner";
 import { findByScan } from "../lib/products";
 import { go, toast } from "../lib/app";
@@ -18,6 +18,7 @@ export default function Products({ args }: { args: string[] }) {
 function ProductList() {
   const [q, setQ] = useState("");
   const [item, setItem] = useState("");
+  const [dead, setDead] = useState(false);
   const [limit, setLimit] = useState(60);
   const all = useLiveQuery(() => db.products.orderBy("updated_at").reverse().toArray(), [], []);
   const cells = useLiveQuery(() => db.stock.toArray(), [], []);
@@ -25,25 +26,23 @@ function ProductList() {
   const items = useMemo(() => [...new Set(all.filter(p => !p.deleted).map(p => p.item).filter(Boolean))].sort(), [all]);
   const list = useMemo(() => {
     const t = q.trim().toUpperCase().split(/\s+/).filter(Boolean);
-    return all.filter(p => !p.deleted && (!item || p.item === item) &&
+    return all.filter(p => !p.deleted && (!item || p.item === item) && (!dead || !!p.tk?.trim()) &&
       t.every(w => (p.code + " " + p.item + " " + p.style + " " + p.color + " " + p.tk + " " + p.barcodes.join(" ")).toUpperCase().includes(w)));
-  }, [all, q, item]);
+  }, [all, q, item, dead]);
   return (
     <div>
-      <Head eyebrow="Catalogue" title="Products" sub={`${all.filter(p => !p.deleted).length} products recorded`}>
-        <button className="btn p" onClick={() => go("scan")}>Scan & record</button>
-      </Head>
+      <Head title="Products" sub={`${all.filter(p => !p.deleted).length} products`} />
       <div className="card pad stack" style={{ marginBottom: 12 }}>
         <input className="in" placeholder="Search style, colour, item, code…" value={q} onChange={e => setQ(e.target.value)} />
         <WedgeInput autoFocus={false} placeholder="…or scan a label to open it" onCode={async raw => { const p = await findByScan(raw); p ? go("product/" + p.id) : toast("Not found", true); }} />
-        <div className="chips"><button className="chip" aria-pressed={!item} onClick={() => setItem("")}>All</button>
+        <div className="chips"><button className="chip" aria-pressed={!item && !dead} onClick={() => { setItem(""); setDead(false); }}>All</button><button className="chip" aria-pressed={dead} onClick={() => setDead(!dead)}>Dead stock (TK)</button>
           {items.map(i => <button key={i} className="chip" aria-pressed={item === i} onClick={() => setItem(i)}>{i}</button>)}</div>
       </div>
       <div className="stack" style={{ gap: 6 }}>
         {list.slice(0, limit).map(p => (
           <a key={p.id} className="item" href={"#/product/" + p.id}>
             <Thumb photo_id={p.photo_id} url={p.photo_url} text={p.item || p.style} />
-            <div className="grow"><div className="b sm">{label(p)}</div><div className="xs mut mono">{p.code}{p.tk ? " · TK " + p.tk : ""}</div></div>
+            <div className="grow"><div className="b sm">{label(p)}</div><div className="xs mut mono">{p.code}{p.tk ? " · dead stock" : ""}</div></div>
             <div style={{ textAlign: "right" }}><div className="mono b">{qty.get(p.id) || 0}</div><div className="xs mut">{p.rate ? rupees(p.rate) : "no rate"}</div></div>
           </a>))}
         {list.length > limit && <button className="btn" onClick={() => setLimit(limit + 100)}>Show more ({list.length - limit})</button>}
@@ -90,7 +89,7 @@ function ProductDetail({ id }: { id: string }) {
             <label className="f">Type<select className="in" value={p.type} onChange={e => set("type", e.target.value)}>{[...new Set([p.type, ...DEFAULT_TYPES])].map(t => <option key={t}>{t}</option>)}</select></label>
             <label className="f">Style<input className="in mono" value={p.style} onChange={e => set("style", e.target.value.toUpperCase())} /></label>
             <label className="f">Color<input className="in mono" value={p.color} onChange={e => set("color", e.target.value.toUpperCase())} /></label>
-            <label className="f">TK<input className="in" value={p.tk} onChange={e => set("tk", e.target.value)} /></label>
+            <div style={{ gridColumn: "1/-1" }}><DeadToggle value={p.tk} onChange={v => set("tk", v)} /></div>
             <label className="f">Rate ₹<input className="in hi mono" inputMode="decimal" value={p.rate ? String(p.rate / 100) : ""} onChange={e => set("rate", toPaise(e.target.value))} /></label>
             <label className="f">MRP ₹<input className="in mono" inputMode="decimal" value={p.mrp ? String(p.mrp / 100) : ""} onChange={e => set("mrp", toPaise(e.target.value))} /></label>
             <label className="f">Category<input className="in" value={p.category} onChange={e => set("category", e.target.value)} /></label>

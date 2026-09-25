@@ -4,12 +4,12 @@ import { rupees } from "./format";
 /* ---------------- shop profile (synced to every device) ---------------- */
 export interface Shop {
   name: string; tagline: string; address: string; phone: string; whatsapp: string; gstin: string;
-  state: string; upi: string; bank: string; terms: string; hsn: string; gst_rate: number; gst_mode: "exclusive" | "inclusive";
+  state: string; upi: string; bank: string; terms: string; hsn: string; gst_rate: number; gst_mode: "exclusive" | "inclusive"; max_disc: number;
 }
 export const DEFAULT_SHOP: Shop = {
   name: "RUNGNNA JEWELLERY & CO", tagline: "Fashion & Imitation Jewellery", address: "", phone: "", whatsapp: "", gstin: "",
   state: "", upi: "", bank: "", terms: "Goods once sold will not be taken back. Subject to local jurisdiction.",
-  hsn: "7117", gst_rate: 3, gst_mode: "exclusive",
+  hsn: "7117", gst_rate: 3, gst_mode: "exclusive", max_disc: 10,
 };
 export async function getShop(): Promise<Shop> {
   const c = await db.config.get("shop");

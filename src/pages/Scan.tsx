@@ -4,7 +4,7 @@ import { recordMovement, getSetting, setSetting, stockOf, type Product, type Sto
 import { parseLabel, FIELDS, type Parsed, type Pattern, type Field, guessSep, splitTokens } from "../lib/parse";
 import { findByScan, fromParsed, saveProduct, patterns, label, DEFAULT_ITEMS, DEFAULT_TYPES, distinct, itemNameFor } from "../lib/products";
 import { CameraScanner, WedgeInput } from "../components/Scanner";
-import { LocationSelect, PhotoButton, Thumb, Head, LOC_PREFIX, locName, useLocations } from "../components/common";
+import { LocationSelect, PhotoButton, Thumb, Head, LOC_PREFIX, locName, useLocations, DeadToggle } from "../components/common";
 import { useApp, toast, beep, go } from "../lib/app";
 import { toPaise, when } from "../lib/format";
 import { uid } from "../lib/db";
@@ -150,7 +150,7 @@ function HitPanel({ hit, loc, setLoc, onDone, onRetry }: { hit: Hit; loc: string
           </label>
           <label className="f">Style<input className="in mono" value={p.style} onChange={e => set("style", e.target.value.toUpperCase())} /></label>
           <label className="f">Color<input className="in mono" value={p.color} onChange={e => set("color", e.target.value.toUpperCase())} /></label>
-          <label className="f">TK<input className="in" value={p.tk} onChange={e => set("tk", e.target.value)} /></label>
+          <div style={{ gridColumn: "1/-1" }}><DeadToggle value={p.tk} onChange={v => set("tk", v)} /></div>
           <label className="f">Rate ₹<input className="in hi mono" inputMode="decimal" value={p.rate ? String(p.rate / 100) : ""} onChange={e => set("rate", toPaise(e.target.value))} /></label>
           <label className="f">Pieces per packet<input className="in mono" inputMode="numeric" value={p.pack || ""} placeholder="1" onChange={e => set("pack", parseInt(e.target.value.replace(/\D/g, "")) || undefined)} /></label>
           <label className="f">Item code (old software)<input className="in mono" inputMode="numeric" value={p.item_code || ""} onChange={e => set("item_code", e.target.value.replace(/\D/g, "") || undefined)} /></label>

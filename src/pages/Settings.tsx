@@ -8,6 +8,7 @@ import type { Pattern } from "../lib/parse";
 import { when } from "../lib/format";
 import { getShop, saveShop, counterCode, DEFAULT_SHOP, type Shop } from "../lib/billing";
 import { health, type Health } from "../lib/ai";
+import { can, ROLE_NOTE } from "../lib/roles";
 
 export default function Settings() {
   const { me, setMe } = useApp();
@@ -18,55 +19,73 @@ export default function Settings() {
   const file = useRef<HTMLInputElement>(null);
   useEffect(() => onSync(setSync) as any, []);
   useEffect(() => { getSetting<Pattern[]>("patterns", []).then(setPats); }, []);
+  const admin = can(me, "settings"), boss = can(me, "staff");
 
   return (
     <div>
-      <Head eyebrow={"This device · " + deviceId()} title="Settings" />
+      <Head title="Settings" sub={"This device · " + deviceId()} />
       <div className="split">
         <div className="stack">
-          <div className="card"><header><h3>Cloud backup &amp; sync</h3>
-            <span className={"pill " + (sync?.status === "idle" ? "ok" : sync?.status === "error" ? "bad" : "warn")}>{sync?.status}</span></header>
+          <div className="card pad stack">
+            <div className="row"><span className="avatar" style={{ width: 44, height: 44, fontSize: 17 }}>{me?.name.slice(0, 1)}</span>
+              <span className="grow"><b>{me?.name}</b><div className="xs mut">{me?.role} · {me ? ROLE_NOTE[me.role] : ""}</div></span>
+              <button className="btn sm" onClick={() => setMe(null)}>Switch person</button></div>
+            {me && <button className="btn sm" onClick={async () => {
+              const p = prompt(me.pin ? "New 4-digit PIN (leave empty to remove)" : "Set a 4-digit PIN so nobody else can use your name") ?? null;
+              if (p === null) return; if (p && !/^\d{4}$/.test(p)) return toast("PIN must be 4 digits", true);
+              const u = { ...me, pin: p }; await put("staff", u); setMe(u); toast(p ? "PIN saved" : "PIN removed");
+            }}>{me.pin ? "Change my PIN" : "Set my PIN"}</button>}
+            {me?.role === "owner" && !me.pin && <div className="note warn sm">Set a PIN — it's needed to approve big discounts and to keep your owner access safe.</div>}
+          </div>
+
+          <div className="card"><header><h3>Cloud backup</h3><span className="grow" />
+            <span className={"pill " + (!sync?.user ? "warn" : sync?.status === "idle" ? "ok" : sync?.status === "error" ? "bad" : "warn")}>{!sync?.user ? "not connected" : sync?.status === "idle" ? "all saved" : sync?.status}</span></header>
             <div className="pad stack">
-              <div className="sm">{sync?.pending || 0} changes waiting to upload{sync?.last ? ` · last synced ${when(sync.last)}` : ""}</div>
+              <div className="sm mut">{sync?.pending || 0} changes waiting{sync?.last ? ` · last saved ${when(sync.last)}` : ""}</div>
               {sync?.error && <div className="note bad">{sync.error}</div>}
-              {sync?.user ? <div className="row"><span className="sm grow">Signed in as <b>{sync.user}</b></span><button className="btn sm" onClick={() => syncNow()}>Sync now</button><button className="btn sm" onClick={signOut}>Sign out</button></div>
+              {sync?.user ? <div className="row"><span className="sm grow">Connected as <b>{sync.user}</b></span><button className="btn sm" onClick={() => syncNow()}>Sync now</button>{admin && <button className="btn sm" onClick={signOut}>Disconnect</button>}</div>
                 : <ShopLogin />}
             </div></div>
-          <div className="card"><header><h3>Staff on this system</h3></header>
-            <div className="pad stack">
+
+          {boss && <div className="card"><header><h3>People</h3></header>
+            <div className="list" style={{ border: 0, borderRadius: 0, boxShadow: "none" }}>
               {staff.filter(s => !s.deleted).map(s => (
-                <div key={s.id} className="row sm">
-                  <span className="grow"><b>{s.name}</b> <span className="mut">· {s.role}{s.pin ? " · PIN set" : ""}</span></span>
-                  {me?.id === s.id ? <span className="pill ok">you</span> : <button className="btn sm" onClick={() => setMe(s)}>Switch to</button>}
+                <div key={s.id} className="li">
+                  <span className="grow"><b className="sm">{s.name}</b>{me?.id === s.id && <span className="pill ok" style={{ marginLeft: 6 }}>you</span>}
+                    <div className="xs mut">{ROLE_NOTE[s.role]}{s.pin ? " · PIN set" : ""}{!s.active ? " · disabled" : ""}</div></span>
+                  <select className="in" style={{ width: 120, height: 34 }} value={s.role} disabled={s.id === me?.id}
+                    onChange={async e => { await put("staff", { ...s, role: e.target.value as Staff["role"] }); toast("Role changed"); }}>
+                    {ROLES.map(r => <option key={r}>{r}</option>)}</select>
                   <button className="btn sm" onClick={async () => { const n = prompt("Name", s.name); if (n) await put("staff", { ...s, name: n }); }}>Rename</button>
-                  {s.role !== "owner" && <button className="btn sm bad" onClick={async () => { await put("staff", { ...s, active: s.active ? 0 : 1 }); }}>{s.active ? "Disable" : "Enable"}</button>}
+                  {s.id !== me?.id && <button className="btn sm" onClick={async () => { await put("staff", { ...s, active: s.active ? 0 : 1 }); }}>{s.active ? "Disable" : "Enable"}</button>}
                 </div>))}
+            </div>
+            <div className="pad stack" style={{ borderTop: "1px solid var(--line-2)" }}>
               <div className="grid g3">
                 <input className="in" placeholder="Name" value={nm} onChange={e => setNm(e.target.value)} />
-                <select className="in" value={role} onChange={e => setRole(e.target.value as any)}>
-                  {["salesman", "helper", "packer", "cashier", "manager", "owner"].map(r => <option key={r}>{r}</option>)}</select>
-                <input className="in mono" placeholder="4-digit PIN (optional)" inputMode="numeric" maxLength={4} value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, ""))} />
+                <select className="in" value={role} onChange={e => setRole(e.target.value as any)}>{ROLES.map(r => <option key={r}>{r}</option>)}</select>
+                <input className="in mono" placeholder="PIN (optional)" inputMode="numeric" maxLength={4} value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, ""))} />
               </div>
               <button className="btn" onClick={async () => { if (!nm.trim()) return; await put("staff", newStaff(nm.trim(), role, pin)); setNm(""); setPin(""); toast("Added"); }}>Add person</button>
-            </div></div>
+            </div></div>}
         </div>
         <div className="stack">
-          <ShopProfile />
-          <Keys />
-          <div className="card"><header><h3>Label layouts learnt</h3></header>
+          {admin && <ShopProfile />}
+          {admin && <Keys />}
+          {admin && <div className="card"><header><h3>Label layouts learnt</h3></header>
             <div className="pad stack">
-              {!pats.length && <div className="mut sm">None yet. When a scanned label isn't understood, the scan screen asks you once which piece is which.</div>}
+              {!pats.length && <div className="mut sm">None yet. When a label isn't understood, the scan screen asks once which piece is which.</div>}
               {pats.map(p => (
-                <div key={p.id} className="row sm"><span className="grow"><b>{p.name}</b> · {p.count} pieces split by “{p.sep === "\\s" ? "space" : p.sep}” → {p.map.map(m => m || "–").join(", ")}</span>
+                <div key={p.id} className="row sm"><span className="grow"><b>{p.name}</b> · {p.count} pieces → {p.map.map(m => m || "–").join(", ")}</span>
                   <button className="btn sm bad" onClick={async () => { const n = pats.filter(x => x.id !== p.id); setPats(n); await setSetting("patterns", n); }}>Forget</button></div>))}
-            </div></div>
+            </div></div>}
           <div className="card"><header><h3>Backup file</h3></header>
             <div className="pad stack">
-              <div className="sm mut">Everything on this device in one file — keep a copy on a pen drive every week.</div>
+              <div className="sm mut">Everything on this device in one file. Keep a copy on a pen drive every week.</div>
               <div className="row">
                 <button className="btn" onClick={async () => { const b = await exportAll(); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `rungnna-backup-${new Date().toISOString().slice(0, 10)}.json`; a.click(); }}>Download backup</button>
                 <input ref={file} type="file" accept="application/json" hidden onChange={async e => { const f = e.target.files?.[0]; if (!f) return; try { await importAll(f); toast("Backup restored"); } catch (x: any) { toast(x.message, true); } }} />
-                <button className="btn" onClick={() => file.current?.click()}>Restore from file</button>
+                {admin && <button className="btn" onClick={() => file.current?.click()}>Restore from file</button>}
               </div>
             </div></div>
         </div>
@@ -74,6 +93,8 @@ export default function Settings() {
     </div>
   );
 }
+
+const ROLES: Staff["role"][] = ["owner", "manager", "cashier", "salesman", "helper", "packer"];
 
 export function ShopLogin({ onDone }: { onDone?: () => void }) {
   const [email, setEmail] = useState("shop@rungnna.in");
@@ -153,6 +174,7 @@ function ShopProfile() {
           {f("gstin", "GSTIN", "07ABCDE1234F1Z5")}{f("state", "State", "Delhi")}
           {f("upi", "UPI ID (for pay-QR on bills)", "rungnna@okaxis")}{f("hsn", "HSN code", "7117")}
           {f("gst_rate", "GST %", "3")}
+          <label className="f">Max discount without PIN (%)<input className="in" inputMode="decimal" value={s.max_disc ?? 10} onChange={e => setS({ ...s, max_disc: Number(e.target.value) || 0 })} /></label>
           <label className="f">GST on rates<select className="in" value={s.gst_mode} onChange={e => setS({ ...s, gst_mode: e.target.value as any })}><option value="exclusive">Added on top of rate</option><option value="inclusive">Already included in rate</option></select></label>
         </div>
         {f("address", "Address")}{f("bank", "Bank details", "HDFC · A/c 123… · IFSC …")}{f("terms", "Terms (bottom of bill)")}

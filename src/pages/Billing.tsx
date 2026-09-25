@@ -6,6 +6,8 @@ import { parseLabel } from "../lib/parse";
 import { newBill, lineFrom, totals, fixLine, finalize, holdBill, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
 import { voiceBill } from "../lib/ai";
 import { useApp, toast, beep, go } from "../lib/app";
+import { can } from "../lib/roles";
+import { Icon } from "../components/Icon";
 import { rupees, toPaise } from "../lib/format";
 import { CameraScanner } from "../components/Scanner";
 import { MicButton } from "../components/Voice";
@@ -34,6 +36,7 @@ export default function Billing({ args }: { args: string[] }) {
   const [due0, setDue0] = useState(0);
   const scanRef = useRef<HTMLInputElement>(null);
   const products = useLiveQuery(() => db.products.filter(p => !p.deleted).toArray(), [], []);
+  const pmap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
   const staff = useLiveQuery(() => db.staff.filter(s => !!s.active && !s.deleted).toArray(), [], []);
 
   /* load shop profile + a resumed bill (#/bill/<id>) or the unsaved draft on this device */
@@ -102,6 +105,14 @@ export default function Billing({ args }: { args: string[] }) {
   async function doSave(print = false, share = false) {
     if (!b || !t) return;
     if (!t.items.length) return toast("No items on the bill", true);
+    /* discount above the shop's limit needs an owner/manager PIN */
+    const list = t.items.reduce((a, l) => a + l.qty * l.rate, 0);
+    const offPct = list ? ((list - t.gross + t.discount) / list) * 100 : 0;
+    if (offPct > (shop.max_disc ?? 10) + 0.01 && !can(me, "discount")) {
+      const pin = prompt(`Discount is ${offPct.toFixed(1)}% — above the ${shop.max_disc ?? 10}% limit. Owner or manager PIN:`);
+      const ok = pin && (await db.staff.filter(x => (x.role === "owner" || x.role === "manager") && !!x.pin && x.pin === pin).count());
+      if (!ok) return toast("Discount not approved", true);
+    }
     if (b.bill_type === "gst" && !shop.gstin) toast("Tip: add the shop GSTIN in Settings → Shop profile", true);
     const done = await finalize(b, shop.state, b.party_name);
     toast(`Saved ${done.no} · ${rupees(done.net)}`);
@@ -186,7 +197,7 @@ export default function Billing({ args }: { args: string[] }) {
           <div className="card pad stack" style={{ gap: 8 }}>
             <div className="row scanrow">
               <div className="wedge grow" style={{ position: "relative" }}>
-                <span aria-hidden>▥</span>
+                <Icon n="scan" size={20} />
                 <input ref={scanRef} autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Scan label, or type style / item (F7)"
                   onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); suggestions.length === 1 && q.length < 20 ? (addProduct(suggestions[0]), setQ("")) : onCode(q); } }} />
                 {suggestions.length > 0 && q.length < 25 && (
@@ -196,7 +207,7 @@ export default function Billing({ args }: { args: string[] }) {
                       <span className="grow"><b>{p.style || p.code}</b> <span className="mut">{p.item} · {p.color}</span></span>
                       <span className="mono">{p.rate ? rupees(p.rate) : ""}{p.pack ? " ×" + p.pack : ""}</span></button>))}</div>)}
               </div>
-              <button className={"btn " + (cam ? "dk" : "")} onClick={() => setCam(!cam)} title="Camera scan">📷</button>
+              <button className={"btn " + (cam ? "dk" : "")} onClick={() => setCam(!cam)} title="Camera scan" aria-label="Camera scan"><Icon n="camera" size={20} /></button>
               <MicButton onAudio={a => doVoice(a)} busy={aiBusy} label="🎙 Speak order" />
             </div>
             {cam && <div style={{ maxWidth: 420 }}><CameraScanner onCode={c => onCode(c)} /></div>}
@@ -210,17 +221,17 @@ export default function Billing({ args }: { args: string[] }) {
                   <tr key={l.id} className="ln">
                     <td className="mut" data-l="#">{i + 1}</td>
                     <td data-l="Box"><input className="cell" style={{ width: 38 }} inputMode="numeric" value={l.box_no} onChange={e => setLine(l.id, { box_no: parseInt(e.target.value) || 1 })} /></td>
-                    <td data-l=""><b>{l.item || "—"}</b> <span className="mono">{l.style}</span> <span className="mut">{l.color}</span></td>
+                    <td data-l=""><b>{l.item || "—"}</b> <span className="mono">{l.style}</span> <span className="mut">{l.color}</span>{l.product_id && pmap.get(l.product_id)?.tk?.trim() ? <span className="pill warn" style={{ marginLeft: 6 }}>dead stock</span> : null}</td>
                     <td className="r" data-l="Packets">{l.pack > 1 ? <span className="row" style={{ gap: 2, justifyContent: "flex-end", flexWrap: "nowrap" }}>
                       <input className="cell r" style={{ width: 44 }} inputMode="numeric" value={l.pkts || ""} onChange={e => setLine(l.id, { pkts: parseInt(e.target.value) || 0 })} /><span className="xs mut">×{l.pack}</span></span> : <span className="mut">—</span>}</td>
                     <td className="r" data-l="Pieces"><input className="cell r" style={{ width: 56 }} inputMode="numeric" value={l.qty || ""} disabled={l.pack > 1 && l.pkts > 0}
                       onChange={e => setLine(l.id, { qty: parseInt(e.target.value) || 0, pkts: 0 })} /></td>
-                    <td className="r" data-l="Rate ₹"><input className="cell r" style={{ width: 70 }} inputMode="decimal" value={l.rate ? l.rate / 100 : ""} onChange={e => setLine(l.id, { rate: toPaise(e.target.value) })} /></td>
+                    <td className="r" data-l="Rate ₹"><input className="cell r" style={{ width: 70 }} inputMode="decimal" disabled={!can(me, "rates") && !!(l.product_id && pmap.get(l.product_id)?.rate)} value={l.rate ? l.rate / 100 : ""} onChange={e => setLine(l.id, { rate: toPaise(e.target.value) })} /></td>
                     <td className="r" data-l="Disc"><input className="cell r" style={{ width: 54 }} placeholder="—" value={l.disc} onChange={e => setLine(l.id, { disc: e.target.value })} /></td>
                     <td className="r mono b" data-l="Amount">{(l.amount / 100).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
                     <td data-l=""><button className="x" aria-label="Remove line" onClick={() => dropLine(l.id)}>✕</button></td>
                   </tr>))}
-                {!t.items.length && <tr><td colSpan={9} className="mut" style={{ padding: 28, textAlign: "center" }}>Scan a label, type a style, or tap 🎙 and say the order.<br /><span className="xs">e.g. “do packet K5208 white, ek darjan jhumki gold”</span></td></tr>}
+                {!t.items.length && <tr><td colSpan={9} className="mut" style={{ padding: 28, textAlign: "center" }}>Scan a label, type a style, or tap Speak order and say it.<br /><span className="xs">e.g. “do packet K5208 white, ek darjan jhumki gold”</span></td></tr>}
               </tbody>
             </table>
           </div>

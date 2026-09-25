@@ -5,7 +5,7 @@ import { db, getSetting, setSetting, recordMovement, type Product } from "../lib
 import { qrSvg } from "../lib/qr";
 import { ownPayload } from "../lib/parse";
 import { blankProduct, saveProduct, findByScan, distinct, DEFAULT_ITEMS, DEFAULT_TYPES, label, itemCodeFor } from "../lib/products";
-import { Head, LocationSelect } from "../components/common";
+import { Head, LocationSelect, DeadToggle } from "../components/common";
 import { WedgeInput } from "../components/Scanner";
 import { useApp, toast } from "../lib/app";
 import { toPaise } from "../lib/format";
@@ -103,7 +103,7 @@ export default function Labels({ args }: { args: string[] }) {
                   <select className="in" value={form.type} onChange={e => set("type", e.target.value)}>{DEFAULT_TYPES.map(t => <option key={t}>{t}</option>)}</select></label>
                 <label className="f">STYLE<input className="in mono" value={form.style} onChange={e => set("style", e.target.value.toUpperCase())} placeholder="K5209/59SH" /></label>
                 <label className="f">COLOR<input className="in mono" value={form.color} onChange={e => set("color", e.target.value.toUpperCase())} placeholder="K/GBN" /></label>
-                <label className="f">TK<input className="in" value={form.tk} onChange={e => set("tk", e.target.value)} /></label>
+                <div style={{ gridColumn: "1/-1" }}><DeadToggle value={form.tk} onChange={v => set("tk", v)} /></div>
                 <label className="f">ITEM CODE (old software)<input className="in mono" inputMode="numeric" value={form.item_code || ""} placeholder="auto" onChange={e => set("item_code", e.target.value.replace(/\D/g, "") || undefined)} /></label>
                 <label className="f">RATE ₹<input className="in hi mono" inputMode="decimal" value={form.rate ? String(form.rate / 100) : ""} onChange={e => set("rate", toPaise(e.target.value))} /></label>
                 <label className="f">QTY (pieces per packet — prints as ₹RATE X QTY PCS)<input className="in mono" inputMode="numeric" value={qty} onChange={e => setQty(e.target.value.replace(/\D/g, ""))} /></label>

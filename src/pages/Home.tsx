@@ -1,114 +1,111 @@
 import { useMemo } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../lib/db";
-import { Head, useLocations } from "../components/common";
-import { useApp, go } from "../lib/app";
+import { useLocations } from "../components/common";
+import { Icon } from "../components/Icon";
+import { useApp } from "../lib/app";
+import { can } from "../lib/roles";
 import { rupees, when } from "../lib/format";
-import { label } from "../lib/products";
+import { label, isDead } from "../lib/products";
 import { due } from "../lib/billing";
 
-/* The owner's one-glance screen: how much is recorded, where it sits, what moved today. */
+/* One glance: money today, what needs a hand, where the stock sits. Nothing else. */
 export default function Home() {
   const { me } = useApp();
+  const money = can(me, "sales");
   const locs = useLocations();
+  const start = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.toISOString(); }, []);
   const products = useLiveQuery(() => db.products.filter(p => !p.deleted).toArray(), [], []);
   const cells = useLiveQuery(() => db.stock.toArray(), [], []);
-  const start = new Date(); start.setHours(0, 0, 0, 0);
-  const today = useLiveQuery(() => db.movements.where("at").aboveOrEqual(start.toISOString()).toArray(), [], []);
-  const recent = useLiveQuery(() => db.movements.orderBy("at").reverse().limit(12).toArray(), [], []);
-  const staff = useLiveQuery(() => db.staff.toArray(), [], []);
-  const bills = useLiveQuery(() => db.bills.where("at").aboveOrEqual(start.toISOString()).filter(b => !b.deleted).toArray(), [], []);
+  const recent = useLiveQuery(() => db.movements.orderBy("at").reverse().limit(8).toArray(), [], []);
+  const bills = useLiveQuery(() => db.bills.where("at").aboveOrEqual(start).filter(b => !b.deleted).toArray(), [start], []);
   const held = useLiveQuery(() => db.bills.where("status").equals("hold").filter(b => !b.deleted && !b.no).count(), [], 0);
-  const sales = useMemo(() => {
-    const f = bills.filter(b => b.status === "final");
-    const sum = (x: typeof f) => x.reduce((a, b) => a + b.net, 0);
-    const pay: Record<string, number> = {};
-    f.forEach(b => b.payments.forEach(p => { if (p.mode !== "credit") pay[p.mode] = (pay[p.mode] || 0) + p.amount; }));
-    return { n: f.length, total: sum(f), gst: sum(f.filter(b => b.bill_type === "gst")), est: sum(f.filter(b => b.bill_type === "estimate")),
-      credit: f.reduce((a, b) => a + Math.max(0, due(b)), 0), pcs: f.reduce((a, b) => a + b.total_qty, 0), pay, voids: bills.filter(b => b.status === "void").length };
-  }, [bills]);
 
   const s = useMemo(() => {
-    const bucketIds = new Set(locs.filter(l => l.kind === "bucket").map(l => l.id));
-    const rate = new Map(products.map(p => [p.id, p.rate]));
-    let pcs = 0, value = 0, flagged = 0;
-    const floor = new Map<string, number>();
-    const perProd = new Map<string, number>();
+    const bucket = new Set(locs.filter(l => l.kind === "bucket").map(l => l.id));
+    const byId = new Map(products.map(p => [p.id, p]));
+    let pcs = 0, value = 0, flagged = 0, deadPcs = 0, deadVal = 0;
+    const floor = new Map<string, number>(); const perProd = new Map<string, number>();
     cells.forEach(c => {
-      if (bucketIds.has(c.loc_id)) { flagged += c.qty; return; }
-      pcs += c.qty; value += c.qty * (rate.get(c.product_id) || 0);
+      if (bucket.has(c.loc_id)) { flagged += c.qty; return; }
+      const p = byId.get(c.product_id);
+      pcs += c.qty; value += c.qty * (p?.rate || 0);
+      if (p && isDead(p)) { deadPcs += c.qty; deadVal += c.qty * p.rate; }
       const f = locs.find(l => l.id === c.loc_id)?.floor || "?";
       floor.set(f, (floor.get(f) || 0) + c.qty);
       perProd.set(c.product_id, (perProd.get(c.product_id) || 0) + c.qty);
     });
-    const noPhoto = products.filter(p => !p.photo_id && !p.photo_url).length;
-    const noRate = products.filter(p => !p.rate).length;
-    const noStock = products.filter(p => !(perProd.get(p.id) || 0)).length;
-    const newToday = products.filter(p => p.created_at >= start.toISOString()).length;
-    const pcsToday = today.filter(m => m.kind === "intake").reduce((a, m) => a + m.qty, 0);
-    const byStaff = new Map<string, number>();
-    today.forEach(m => byStaff.set(m.by_staff, (byStaff.get(m.by_staff) || 0) + m.qty));
-    return { pcs, value, flagged, floor, noPhoto, noRate, noStock, newToday, pcsToday, byStaff };
-  }, [cells, products, locs, today]);
+    const fin = bills.filter(b => b.status === "final");
+    const collected = fin.reduce((a, b) => a + b.payments.filter(p => p.mode !== "credit").reduce((x, p) => x + p.amount, 0) + b.advance, 0);
+    return {
+      pcs, value, flagged, floor, deadPcs, deadVal,
+      noPhoto: products.filter(p => !p.photo_id && !p.photo_url).length, noRate: products.filter(p => !p.rate).length,
+      sales: fin.reduce((a, b) => a + b.net, 0), n: fin.length, sold: fin.reduce((a, b) => a + b.total_qty, 0),
+      gst: fin.filter(b => b.bill_type === "gst").reduce((a, b) => a + b.net, 0), collected,
+      credit: fin.reduce((a, b) => a + Math.max(0, due(b)), 0),
+    };
+  }, [cells, products, locs, bills]);
 
-  const pName = (id: string) => products.find(p => p.id === id);
-  const locCode = (id: string | null) => (id ? locs.find(l => l.id === id)?.code || "" : "");
   const maxF = Math.max(1, ...s.floor.values());
+  const floorName = (f: string) => (f === "G" ? "Ground" : f === "GD" ? "Godown" : f === "?" ? "Unplaced" : "Floor " + f);
+  const pName = (id: string) => products.find(p => p.id === id);
+  const hour = new Date().getHours();
+  const todo = [
+    held ? { t: `${held} bill${held > 1 ? "s" : ""} on hold`, to: "bill", n: held } : null,
+    s.noRate ? { t: "Products without a rate", to: "products", n: s.noRate } : null,
+    s.noPhoto ? { t: "Products without a photo", to: "products", n: s.noPhoto } : null,
+    s.deadPcs ? { t: `Dead stock (TK) · ${money ? rupees(s.deadVal) : ""}`, to: "products", n: s.deadPcs } : null,
+    s.flagged ? { t: "Pieces marked damaged / missing", to: "racks", n: s.flagged } : null,
+  ].filter(Boolean) as { t: string; to: string; n: number }[];
 
   return (
     <div>
-      <Head eyebrow={new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })} title={`Namaste${me ? ", " + me.name : ""}`}>
-        <button className="btn g big" onClick={() => go("bill")}>₹ New bill</button>
-        <button className="btn p big" onClick={() => go("scan")}>▥ Scan & record</button>
-      </Head>
-      <div className="salesband">
-        <div><span className="k">Today's sales</span><b>{rupees(sales.total)}</b><span className="xs">{sales.n} bills · {sales.pcs} pcs</span></div>
-        <div><span className="k">GST invoices</span><b>{rupees(sales.gst)}</b></div>
-        <div><span className="k">Estimates</span><b>{rupees(sales.est)}</b></div>
-        <div><span className="k">Collected</span><b>{rupees(Object.values(sales.pay).reduce((a, x) => a + x, 0))}</b><span className="xs">{Object.entries(sales.pay).map(([m, v]) => m.toUpperCase() + " " + rupees(v)).join(" · ") || "—"}</span></div>
-        <div><span className="k">On credit</span><b style={{ color: sales.credit ? "#F2A7B8" : undefined }}>{rupees(sales.credit)}</b><span className="xs">{held} on hold{sales.voids ? ` · ${sales.voids} cancelled` : ""}</span></div>
+      <div className="head"><div>
+        <div className="eyebrow">{new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}</div>
+        <h1 className="h1">{hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening"}, {me?.name}</h1>
+      </div></div>
+
+      {money && (
+        <div className="hero">
+          <div><span className="k">Sales today</span><b>{rupees(s.sales)}</b><span className="xs">{s.n} bills · {s.sold} pieces</span></div>
+          <div><span className="k">Collected</span><b>{rupees(s.collected)}</b></div>
+          <div><span className="k">On credit</span><b style={{ color: s.credit ? "var(--bad)" : undefined }}>{rupees(s.credit)}</b></div>
+          <div><span className="k">GST invoices</span><b>{rupees(s.gst)}</b></div>
+        </div>)}
+
+      <div className="quick">
+        {can(me, "bill") && <a href="#/bill" className="gold"><span className="i"><Icon n="plus" /></span>New bill</a>}
+        <a href="#/scan"><span className="i"><Icon n="scan" /></span>Scan & record</a>
+        <a href="#/move"><span className="i"><Icon n="stock" /></span>Move stock</a>
+        {can(me, "ai") ? <a href="#/ask"><span className="i"><Icon n="ask" /></span>Ask the shop</a> : <a href="#/labels"><span className="i"><Icon n="print" /></span>Print labels</a>}
       </div>
-      <div className="grid g4" style={{ marginBottom: 12 }}>
-        <div className="tile"><div className="k">Products recorded</div><div className="v">{products.length.toLocaleString("en-IN")}</div><div className="xs mut">+{s.newToday} today</div></div>
-        <div className="tile"><div className="k">Pieces on racks</div><div className="v">{s.pcs.toLocaleString("en-IN")}</div><div className="xs mut">+{s.pcsToday} recorded today</div></div>
-        <div className="tile"><div className="k">Stock value at rate</div><div className="v">{rupees(s.value)}</div><div className="xs mut">{s.noRate} products have no rate</div></div>
-        <div className="tile"><div className="k">Damaged / missing</div><div className="v" style={{ color: s.flagged ? "var(--rose)" : undefined }}>{s.flagged}</div><div className="xs mut">pieces in status buckets</div></div>
-      </div>
+
       <div className="split">
         <div className="stack">
-          <div className="card"><header><h3>Pieces by floor</h3></header>
-            <div className="pad stack">
-              {[...s.floor.entries()].sort().map(([f, n]) => (
-                <div key={f} className="row" style={{ flexWrap: "nowrap" }}>
-                  <span className="sm" style={{ width: 70 }}>{f === "G" ? "Ground" : f === "GD" ? "Godown" : "Floor " + f}</span>
-                  <span className="grow" style={{ background: "var(--cream)", borderRadius: 6, height: 14, overflow: "hidden" }}>
-                    <span style={{ display: "block", height: "100%", width: (n / maxF) * 100 + "%", background: "var(--em)", borderRadius: 6 }} /></span>
-                  <b className="mono sm" style={{ width: 64, textAlign: "right" }}>{n.toLocaleString("en-IN")}</b>
-                </div>))}
-              {!s.floor.size && <div className="mut sm">Nothing on racks yet. <a href="#/racks">Create racks</a>, then <a href="#/scan">scan</a>.</div>}
-            </div></div>
-          <div className="card"><header><h3>Needs attention</h3></header>
-            <div className="pad stack" style={{ gap: 6 }}>
-              <a className="item" href="#/products"><span className="grow sm">Products without a photo</span><b className="mono">{s.noPhoto}</b></a>
-              <a className="item" href="#/products"><span className="grow sm">Products without a rate</span><b className="mono">{s.noRate}</b></a>
-              <a className="item" href="#/products"><span className="grow sm">Products with zero stock</span><b className="mono">{s.noStock}</b></a>
-            </div></div>
-          <div className="card"><header><h3>Recorded today, by person</h3></header>
-            <div className="pad stack" style={{ gap: 6 }}>
-              {[...s.byStaff.entries()].map(([id, n]) => <div key={id} className="row between sm"><span>{staff.find(x => x.id === id)?.name || "—"}</span><b className="mono">{n} pcs</b></div>)}
-              {!s.byStaff.size && <div className="mut sm">No activity yet today.</div>}
-            </div></div>
+          {todo.length > 0 && <div><div className="eyebrow" style={{ margin: "0 4px 8px" }}>Needs attention</div>
+            <div className="list">{todo.map(x => <a key={x.t} href={"#/" + x.to}><span className="grow sm">{x.t}</span><b className="mono">{x.n}</b><Icon n="chev" size={16} /></a>)}</div></div>}
+          <div className="card pad stack">
+            <div className="row between"><b>Stock on racks</b><span className="mono b">{s.pcs.toLocaleString("en-IN")} pcs{money ? " · " + rupees(s.value) : ""}</span></div>
+            {[...s.floor.entries()].sort().map(([f, n]) => (
+              <div key={f} className="stack" style={{ gap: 6 }}>
+                <div className="row between sm"><span>{floorName(f)}</span><span className="mono mut">{n.toLocaleString("en-IN")}</span></div>
+                <div className="bar"><span style={{ width: (n / maxF) * 100 + "%" }} /></div>
+              </div>))}
+            {!s.floor.size && <div className="mut sm">Nothing on racks yet — create racks, then scan.</div>}
+          </div>
         </div>
-        <div className="card"><header><h3>Latest movements</h3><a className="btn sm" style={{ marginLeft: "auto" }} href="#/activity">All</a></header>
-          <div className="pad stack" style={{ gap: 8 }}>
+        <div>
+          <div className="row between" style={{ margin: "0 4px 8px" }}><span className="eyebrow">Latest activity</span><a className="xs mut" href="#/activity">See all</a></div>
+          <div className="list">
             {recent.map(m => { const p = pName(m.product_id); return (
-              <a key={m.id} className="row sm" href={"#/product/" + m.product_id} style={{ color: "inherit", textDecoration: "none", flexWrap: "nowrap" }}>
-                <span className="pill">{m.kind}</span>
-                <span className="grow" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p ? label(p) : "…"} <span className="mut">{locCode(m.from_loc)}{m.from_loc && m.to_loc ? " → " : ""}{locCode(m.to_loc)}</span></span>
-                <b className="mono">{m.qty}</b><span className="xs mut" style={{ whiteSpace: "nowrap" }}>{when(m.at)}</span>
-              </a>); })}
-            {!recent.length && <div className="mut sm">Nothing yet.</div>}
-          </div></div>
+              <a key={m.id} href={"#/product/" + m.product_id}>
+                <span className="grow" style={{ minWidth: 0 }}>
+                  <div className="sm" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p ? label(p) : "…"}</div>
+                  <div className="xs mut">{m.kind} · {when(m.at)}</div>
+                </span><b className="mono">{m.kind === "sale" || m.kind === "damage" || m.kind === "missing" ? "−" : ""}{m.qty}</b></a>); })}
+            {!recent.length && <div className="empty"><b>Quiet so far</b>Scans, moves and sales show up here.</div>}
+          </div>
+        </div>
       </div>
     </div>
   );

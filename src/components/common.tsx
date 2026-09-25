@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, type Location } from "../lib/db";
 import { photoSrc, savePhoto } from "../lib/image";
+import { Icon } from "./Icon";
 
 export const LOC_PREFIX = "RJLOC|";
 
@@ -53,7 +54,7 @@ export function PhotoButton({ value, onChange, label = "Photo" }: { value?: stri
           setBusy(true); try { onChange(await savePhoto(f)); } finally { setBusy(false); e.target.value = ""; }
         }} />
       <button type="button" className="btn sm" onClick={() => ref.current?.click()} disabled={busy}>
-        {busy ? "Saving…" : value ? "Retake " + label.toLowerCase() : "📷 " + label}
+        {busy ? "Saving…" : value ? "Retake " + label.toLowerCase() : <><Icon n="camera" size={17} />{label}</>}
       </button>
       {value && <button type="button" className="btn sm bad" onClick={() => onChange(undefined)}>Remove</button>}
     </div>
@@ -64,7 +65,7 @@ export function Head({ eyebrow, title, sub, children }: { eyebrow?: string; titl
   return (
     <div className="head">
       <div>
-        {eyebrow && <div className="eyebrow">{eyebrow}</div>}
+        
         <h1 className="h1">{title}</h1>
         {sub && <p className="mut sm" style={{ margin: "4px 0 0", maxWidth: "62ch" }}>{sub}</p>}
       </div>
@@ -83,4 +84,18 @@ export function Modal({ onClose, children, title }: { onClose: () => void; child
       </div>
     </div>
   );
+}
+
+/* iOS-style switch */
+export function Switch({ on, onChange, label, hint }: { on: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} className="switch" onClick={() => onChange(!on)}>
+      <span className="grow" style={{ textAlign: "left" }}><span className="sm b" style={{ display: "block" }}>{label}</span>{hint && <span className="xs mut">{hint}</span>}</span>
+      <span className="knob" />
+    </button>
+  );
+}
+/* TK on the shop's labels means dead stock. */
+export function DeadToggle({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return <Switch on={!!value?.trim()} onChange={v => onChange(v ? "TK" : "")} label="Dead stock (TK)" hint="Not selling any more — shown on the dashboard, flagged at billing" />;
 }

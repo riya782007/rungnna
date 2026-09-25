@@ -62,6 +62,14 @@ export interface Party extends Row {
   address: string; city: string; state: string; pin: string;
   photo_id?: string; photo_url?: string;
   tier: "retail" | "wholesale" | "dealer"; credit_limit: number; notes: string;
+  opening_balance?: number; // paise they owed before this system (+) or we owed them (−)
+}
+
+/* Money received from a customer outside a bill. Spread over their oldest dues automatically. */
+export interface Receipt extends Row {
+  no: string; party_id: string; party_name: string; amount: number; mode: Payment["mode"]; note: string;
+  allocations: { bill_id: string; bill_no: string; amount: number }[]; opening_part: number; unallocated: number;
+  device: string; by_staff: string; at: string;
 }
 
 export interface BillLine {
@@ -119,6 +127,7 @@ class RungnnaDB extends Dexie {
   voice_notes!: Table<VoiceNote, string>;
   voice_blobs!: Table<VoiceBlob, string>;
   config!: Table<Config, string>;
+  receipts!: Table<Receipt, string>;
 
   constructor() {
     super("rungnna");
@@ -143,6 +152,7 @@ class RungnnaDB extends Dexie {
       voice_blobs: "id, uploaded",
       config: "id, updated_at",
     });
+    this.version(4).stores({ receipts: "id, party_id, at, updated_at" });
   }
 }
 
@@ -165,7 +175,7 @@ export function deviceId(): string {
 }
 
 /* ---- write helpers: every write lands locally first, then queues for the cloud ---- */
-type Syncable = "products" | "locations" | "movements" | "staff" | "parties" | "bills" | "voice_notes" | "config";
+type Syncable = "products" | "locations" | "movements" | "staff" | "parties" | "bills" | "voice_notes" | "config" | "receipts";
 
 export async function put<T extends Row>(table: Syncable, row: T) {
   row.updated_at = now();

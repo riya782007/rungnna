@@ -7,7 +7,7 @@ import { db, getSetting, setSetting, rebuildStock, now } from "./db";
    - Conflicts: last write wins by updated_at for master data; movements are append-only,
      so two phones recording at the same time can never overwrite each other. */
 
-const TABLES = ["config", "staff", "locations", "parties", "products", "movements", "bills", "voice_notes"] as const;
+const TABLES = ["config", "staff", "locations", "parties", "products", "movements", "bills", "receipts", "voice_notes"] as const;
 const PHOTO_TABLES = ["products", "movements", "bills", "parties"];
 type T = (typeof TABLES)[number];
 

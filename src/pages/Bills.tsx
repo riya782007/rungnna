@@ -3,6 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, type Bill, type Payment } from "../lib/db";
 import { due, getShop, voidBill, convertToGst, shareBill, billText, waLink, DEFAULT_SHOP, type Shop } from "../lib/billing";
 import { useApp, toast, go } from "../lib/app";
+import { can } from "../lib/roles";
 import { rupees, toPaise, when } from "../lib/format";
 import { Head, Thumb } from "../components/common";
 import { VoiceNotes } from "../components/Voice";
@@ -69,7 +70,7 @@ function BillView({ id }: { id: string }) {
   useEffect(() => { getShop().then(setShop); }, []);
   if (!b) return <div className="card pad">Loading…</div>;
   const d = due(b);
-  const boss = me?.role === "owner" || me?.role === "manager";
+  const boss = can(me, "void");
   const addPayment = async (mode: Payment["mode"]) => {
     const amt = toPaise(payAmt || String(d / 100)); if (!amt) return;
     await put("bills", { ...b, payments: [...b.payments, { mode, amount: amt, ref: "Received " + new Date().toLocaleDateString("en-IN") }], paid: b.paid + amt });

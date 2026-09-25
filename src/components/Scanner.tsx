@@ -1,3 +1,4 @@
+import { Icon } from "./Icon";
 import { useEffect, useRef, useState } from "react";
 
 /* One scanner for everything: phone/tablet camera (QR + 1D barcodes) and the
@@ -116,7 +117,7 @@ export function WedgeInput({ onCode, placeholder, autoFocus = true }: { onCode: 
   }, [autoFocus]);
   return (
     <div className="wedge">
-      <span aria-hidden>▥</span>
+      <Icon n="scan" size={20} />
       <input ref={ref} value={v} autoFocus={autoFocus} placeholder={placeholder || "Scan with the gun, or type a code and press Enter (F7)"}
         onChange={e => setV(e.target.value)}
         onKeyDown={e => { if (e.key === "Enter" && v.trim()) { onCode(v.trim()); setV(""); } }}

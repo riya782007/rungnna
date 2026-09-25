@@ -1,46 +1,63 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { AppProvider, useApp, useRoute, Toasts, go } from "./lib/app";
 import { startSync, onSync, type SyncState } from "./lib/sync";
 import { warmScanner } from "./components/Scanner";
 import { SearchPalette } from "./components/Search";
+import { Icon } from "./components/Icon";
+import { can } from "./lib/roles";
 import Home from "./pages/Home";
-import Scan from "./pages/Scan";
-import Labels from "./pages/Labels";
-import Racks from "./pages/Racks";
-import Move from "./pages/Move";
-import Products from "./pages/Products";
-import Activity from "./pages/Activity";
-import Billing from "./pages/Billing";
-import Bills from "./pages/Bills";
-import Customers from "./pages/Customers";
-import Ask from "./pages/Ask";
-import Settings, { WhoAreYou } from "./pages/Settings";
+import { WhoAreYou } from "./pages/Settings";
 
-/* Sidebar grouped the way a jewellery counter thinks: sell → stock → know → set up. */
-const NAV: { g: string; items: [string, string, string, string?][] }[] = [
-  { g: "Sell", items: [["bill", "New bill", "₹", "F2"], ["bills", "Bills", "▤"], ["customers", "Customers", "☺"]] },
-  { g: "Stock", items: [["scan", "Scan & record", "▥"], ["products", "Products", "✦"], ["labels", "QR labels", "▣"], ["racks", "Floors & racks", "▦"], ["move", "Move & transfer", "⇄"]] },
-  { g: "Know", items: [["home", "Dashboard", "◈"], ["ask", "Ask the shop", "✨"], ["activity", "Activity log", "❑"]] },
-  { g: "Setup", items: [["settings", "Settings", "⚙"]] },
+/* Pages load on first visit (fast start); the service worker keeps every piece for offline use. */
+const Billing = lazy(() => import("./pages/Billing"));
+const Bills = lazy(() => import("./pages/Bills"));
+const Customers = lazy(() => import("./pages/Customers"));
+const Ask = lazy(() => import("./pages/Ask"));
+const Scan = lazy(() => import("./pages/Scan"));
+const Labels = lazy(() => import("./pages/Labels"));
+const Racks = lazy(() => import("./pages/Racks"));
+const Move = lazy(() => import("./pages/Move"));
+const Products = lazy(() => import("./pages/Products"));
+const Activity = lazy(() => import("./pages/Activity"));
+const Settings = lazy(() => import("./pages/Settings"));
+
+/* Five places. Everything else is a tab inside one of them. */
+type Sec = { key: string; label: string; icon: string; tabs?: [string, string][] };
+const SECTIONS: Sec[] = [
+  { key: "home", label: "Home", icon: "home" },
+  { key: "sell", label: "Sell", icon: "sell", tabs: [["bill", "New bill"], ["bills", "Bills"], ["customers", "Customers"]] },
+  { key: "stock", label: "Stock", icon: "stock", tabs: [["products", "Products"], ["scan", "Scan & record"], ["labels", "Labels"], ["racks", "Racks"], ["move", "Move"], ["activity", "Activity"]] },
+  { key: "ask", label: "Ask", icon: "ask" },
+  { key: "settings", label: "Settings", icon: "settings" },
 ];
-const TABS: [string, string, string][] = [["home", "Home", "◈"], ["products", "Stock", "✦"], ["bill", "Bill", "₹"], ["scan", "Scan", "▥"], ["more", "More", "☰"]];
+const sectionOf = (r: string) => (["bill", "bills", "customers"].includes(r) ? "sell" : ["products", "product", "scan", "labels", "racks", "move", "activity"].includes(r) ? "stock" : r === "ask" || r === "settings" ? r : "home");
+const lastTab: Record<string, string> = { sell: "bill", stock: "products" };
 
-function SyncChip() {
+function useSync() {
   const [s, setS] = useState<SyncState>();
   const [online, setOnline] = useState(navigator.onLine);
   useEffect(() => onSync(setS) as any, []);
   useEffect(() => { const a = () => setOnline(true), b = () => setOnline(false); addEventListener("online", a); addEventListener("offline", b); return () => { removeEventListener("online", a); removeEventListener("offline", b); }; }, []);
-  const txt = !online ? "Offline · saving here" : s?.status === "syncing" ? "Syncing…" : s?.status === "error" ? "Sync problem" : s?.user ? "Backed up" : "Not connected";
-  const cls = !online || s?.status === "error" || !s?.user ? "warn" : "ok";
-  return <a href="#/settings" className={"pill " + cls} style={{ textDecoration: "none" }}><i className={"dot " + cls} />{txt}{s?.pending ? ` · ${s.pending}` : ""}</a>;
+  const txt = !online ? "Offline — saving on this device" : s?.status === "syncing" ? "Syncing…" : s?.status === "error" ? "Sync problem" : s?.user ? "All saved" : "Not connected";
+  const cls = !online || !s?.user ? "warn" : s?.status === "error" ? "bad" : "";
+  return { txt, cls, pending: s?.pending || 0 };
+}
+function Status() {
+  const s = useSync();
+  return <a href="#/settings" className="status"><i className={"dot " + s.cls} />{s.txt}{s.pending ? ` · ${s.pending}` : ""}</a>;
 }
 
+function Loading() { return <div className="stack"><div className="skel" style={{ height: 40, width: 220 }} /><div className="skel" style={{ height: 180 }} /><div className="skel" style={{ height: 120 }} /></div>; }
+
 function Shell() {
-  const { me, ready } = useApp();
+  const { me, setMe, ready } = useApp();
   const [route, args] = useRoute();
   const [pal, setPal] = useState(false);
-  const [more, setMore] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+  const sec = sectionOf(route);
   useEffect(() => { startSync(); warmScanner(); }, []);
+  useEffect(() => { if (sec === "sell" || sec === "stock") lastTab[sec] = route === "product" ? "products" : route; window.scrollTo({ top: 0 }); }, [route]);
+  useEffect(() => { const f = () => setScrolled(scrollY > 4); addEventListener("scroll", f, { passive: true }); return () => removeEventListener("scroll", f); }, []);
   useEffect(() => {
     const f = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPal(true); }
@@ -48,60 +65,75 @@ function Shell() {
     };
     addEventListener("keydown", f); return () => removeEventListener("keydown", f);
   }, [route]);
-  useEffect(() => setMore(false), [route]);
   if (!ready) return null;
   if (!me) return <WhoAreYou />;
-  const page = (() => {
-    switch (route) {
-      case "bill": return <Billing args={args} />;
-      case "bills": return <Bills args={args} />;
-      case "customers": return <Customers args={args} />;
-      case "ask": return <Ask />;
-      case "scan": return <Scan />;
-      case "labels": return <Labels args={args} />;
-      case "racks": return <Racks args={args} />;
-      case "move": return <Move args={args} />;
-      case "products": return <Products args={[]} />;
-      case "product": return <Products args={args} />;
-      case "activity": return <Activity />;
-      case "settings": return <Settings />;
-      default: return <Home />;
-    }
-  })();
-  const on = (k: string) => route === k || (k === "products" && route === "product");
-  const wide = route === "bill";
+
+  const visible = SECTIONS.filter(s => (s.key !== "sell" || can(me, "bill")) && (s.key !== "ask" || can(me, "ai")));
+  const cur = SECTIONS.find(s => s.key === sec)!;
+  const hrefOf = (s: Sec) => "#/" + (s.tabs ? lastTab[s.key] || s.tabs[0][0] : s.key);
+  const tabs = cur.tabs?.filter(([k]) => k !== "bill" || can(me, "bill"));
+  const tabOn = (k: string) => route === k || (k === "products" && route === "product");
+
+  let page: ReactNode;
+  switch (route) {
+    case "bill": page = can(me, "bill") ? <Billing args={args} /> : <NoAccess />; break;
+    case "bills": page = can(me, "bill") ? <Bills args={args} /> : <NoAccess />; break;
+    case "customers": page = can(me, "bill") ? <Customers args={args} /> : <NoAccess />; break;
+    case "ask": page = can(me, "ai") ? <Ask /> : <NoAccess />; break;
+    case "scan": page = <Scan />; break;
+    case "labels": page = <Labels args={args} />; break;
+    case "racks": page = <Racks args={args} />; break;
+    case "move": page = <Move args={args} />; break;
+    case "products": page = <Products args={[]} />; break;
+    case "product": page = <Products args={args} />; break;
+    case "activity": page = <Activity />; break;
+    case "settings": page = <Settings />; break;
+    default: page = <Home />;
+  }
+
   return (
     <div className="shell">
       <aside className="rail">
         <div className="brand"><span className="mark">R</span><div><b>Rungnna</b><span>Jewellery &amp; Co</span></div></div>
-        <button className="railsearch" onClick={() => setPal(true)}>⌕ Search <kbd>Ctrl K</kbd></button>
-        {NAV.map(g => (
-          <div key={g.g} className="navg"><div className="navh">{g.g}</div>
-            {g.items.map(([k, t, i, key]) => <a key={k} href={"#/" + k} className={"nav" + (on(k) ? " on" : "") + (k === "bill" ? " cta" : "")}><i>{i}</i><span className="grow">{t}</span>{key && <kbd>{key}</kbd>}</a>)}</div>))}
-        <div className="railfoot"><span>Signed in: <b>{me.name}</b> · {me.role}</span></div>
+        {can(me, "bill") && <a href="#/bill" className="newbill"><Icon n="plus" size={18} />New bill<kbd style={{ background: "rgba(255,255,255,.15)", color: "#fff" }}>F2</kbd></a>}
+        <button className="railsearch" onClick={() => setPal(true)}><Icon n="search" size={17} /><span className="grow">Search</span><kbd>Ctrl K</kbd></button>
+        {visible.map(s => <a key={s.key} href={hrefOf(s)} className={"nav" + (sec === s.key ? " on" : "")}><Icon n={s.icon} /><span className="grow">{s.label}</span></a>)}
+        <div className="railfoot">
+          <Status />
+          <button className="me" onClick={() => setMe(null)} title="Switch person">
+            <span className="av">{me.name.slice(0, 1).toUpperCase()}</span>
+            <span className="grow"><b className="sm">{me.name}</b><small>{me.role} · tap to switch</small></span><Icon n="lock" size={16} />
+          </button>
+        </div>
       </aside>
       <div className="main">
         <div className="top">
-          <b className="disp topbrand">Rungnna</b>
-          <button className="topsearch" onClick={() => setPal(true)}>⌕ <span>Search products, customers, bills…</span><kbd>Ctrl K</kbd></button>
+          <span className="brandm"><span className="mark">R</span>{cur.label === "Home" ? "Rungnna" : cur.label}</span>
           <span className="grow" />
-          <SyncChip />
-          <a href="#/settings" className="avatar" title={me.name}>{me.name.slice(0, 1).toUpperCase()}</a>
+          <button className="iconbtn" aria-label="Search" onClick={() => setPal(true)}><Icon n="search" size={18} /></button>
+          <button className="avatar" onClick={() => go("settings")} aria-label="Me">{me.name.slice(0, 1).toUpperCase()}</button>
         </div>
-        <main className={"page" + (wide ? " wide" : "")}>{page}</main>
+        {tabs && tabs.length > 1 && (
+          <div className={"subnav" + (scrolled ? " scrolled" : "")}>
+            <nav className="tabs">{tabs.map(([k, t]) => <a key={k} href={"#/" + k} className={tabOn(k) ? "on" : ""}>{t}</a>)}</nav>
+            <span className="grow" /><Status />
+          </div>)}
+        <main className={"page" + (route === "bill" ? " wide" : "")}>
+          <Suspense fallback={<Loading />}><div key={route + (args[0] || "")} className="pagein">{page}</div></Suspense>
+        </main>
       </div>
-      <nav className="tabbar">{TABS.map(([k, t, i]) => k === "more"
-        ? <button key={k} className={more ? "on" : ""} onClick={() => setMore(!more)}><i>{i}</i>{t}</button>
-        : <a key={k} href={"#/" + k} className={(on(k) ? "on " : "") + (k === "bill" ? "scan" : "")}><i>{i}</i>{t}</a>)}</nav>
-      {more && <div className="moresheet" onClick={() => setMore(false)}>
-        <div className="card pad" onClick={e => e.stopPropagation()}>
-          {NAV.map(g => <div key={g.g} className="stack" style={{ gap: 4, marginBottom: 10 }}><div className="navh dark">{g.g}</div>
-            <div className="grid g3" style={{ gap: 6 }}>{g.items.map(([k, t, i]) => <a key={k} href={"#/" + k} className="moreitem"><i>{i}</i>{t}</a>)}</div></div>)}
-          <button className="btn w" onClick={() => { setMore(false); setPal(true); }}>⌕ Search everything</button>
-        </div></div>}
+      <nav className="tabbar">
+        {[visible.find(s => s.key === "home"), visible.find(s => s.key === "sell")].filter(Boolean).map(s => <a key={s!.key} href={hrefOf(s!)} className={sec === s!.key ? "on" : ""}><Icon n={s!.icon} size={22} />{s!.label}</a>)}
+        <a href="#/scan" className="fab"><span className="c"><Icon n="scan" size={24} sw={2} /></span></a>
+        {[visible.find(s => s.key === "stock"), visible.find(s => s.key === "ask") || visible.find(s => s.key === "settings")].filter(Boolean).map(s => <a key={s!.key} href={hrefOf(s!)} className={sec === s!.key ? "on" : ""}><Icon n={s!.icon} size={22} />{s!.label}</a>)}
+      </nav>
       {pal && <SearchPalette onClose={() => setPal(false)} />}
     </div>
   );
+}
+
+function NoAccess() {
+  return <div className="card empty"><b>Not available for your role</b>Ask the owner to change your role in Settings → Staff.</div>;
 }
 
 export default function App() {
