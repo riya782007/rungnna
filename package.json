@@ -1,0 +1,30 @@
+{
+  "name": "rungnna-shop-os",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.117.1",
+    "barcode-detector": "3.2.2",
+    "dexie": "4.4.6",
+    "dexie-react-hooks": "1.1.7",
+    "qrcode-generator": "2.0.4",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.3",
+    "@types/react-dom": "18.3.0",
+    "@vitejs/plugin-react": "4.3.4",
+    "typescript": "5.6.3",
+    "vite": "6.0.7",
+    "vite-plugin-pwa": "0.21.1",
+    "vitest": "2.1.8"
+  }
+}

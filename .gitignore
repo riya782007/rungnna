@@ -1,0 +1,5 @@
+node_modules
+dist
+public/zxing_reader.wasm
+.env.local
+.env*.local
