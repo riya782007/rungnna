@@ -75,7 +75,7 @@ export default function Home() {
 
       <div className="quick">
         {can(me, "bill") && <a href="#/bill" className="gold"><span className="i"><Icon n="plus" /></span>New bill</a>}
-        <a href="#/scan"><span className="i"><Icon n="scan" /></span>Scan & record</a>
+        <a href="#/stockin"><span className="i"><Icon n="scan" /></span>Stock in</a>
         <a href="#/move"><span className="i"><Icon n="stock" /></span>Move stock</a>
         {can(me, "ai") ? <a href="#/ask"><span className="i"><Icon n="ask" /></span>Ask the shop</a> : <a href="#/labels"><span className="i"><Icon n="print" /></span>Print labels</a>}
       </div>

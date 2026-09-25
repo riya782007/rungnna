@@ -314,3 +314,4 @@ tr.click{cursor:pointer}tr.click:hover td{background:var(--bg)}
 .switch .knob::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .22s var(--ease)}
 .switch[aria-checked="true"] .knob{background:var(--ink)}
 .switch[aria-checked="true"] .knob::after{transform:translateX(18px)}
+.brand .mark{color:#2A1E05;font-size:17px}

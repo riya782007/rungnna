@@ -26,7 +26,7 @@ async function getDetector(): Promise<any> {
 /* warm it up early so the first scan is instant */
 export const warmScanner = () => { getDetector().catch(() => {}); };
 
-export function CameraScanner({ onCode, paused = false }: { onCode: (text: string, format: string) => void; paused?: boolean }) {
+export function CameraScanner({ onCode, paused = false, gap = 2500 }: { onCode: (text: string, format: string) => void; paused?: boolean; gap?: number }) {
   const video = useRef<HTMLVideoElement>(null);
   const flash = useRef<HTMLDivElement>(null);
   const [err, setErr] = useState("");
@@ -69,7 +69,7 @@ export function CameraScanner({ onCode, paused = false }: { onCode: (text: strin
           if (found && found.length) {
             const { rawValue, format } = found[0];
             const t = Date.now();
-            if (rawValue && !(rawValue === last.current.t && t - last.current.at < 2500)) {
+            if (rawValue && !(rawValue === last.current.t && t - last.current.at < gap)) {
               last.current = { t: rawValue, at: t };
               flash.current?.classList.remove("go"); void flash.current?.offsetWidth; flash.current?.classList.add("go");
               cb.current(rawValue, format);

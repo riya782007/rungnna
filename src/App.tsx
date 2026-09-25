@@ -19,6 +19,8 @@ const Racks = lazy(() => import("./pages/Racks"));
 const Move = lazy(() => import("./pages/Move"));
 const Products = lazy(() => import("./pages/Products"));
 const Activity = lazy(() => import("./pages/Activity"));
+const StockIn = lazy(() => import("./pages/StockIn"));
+const Import = lazy(() => import("./pages/Import"));
 const Settings = lazy(() => import("./pages/Settings"));
 
 /* Five places. Everything else is a tab inside one of them. */
@@ -26,11 +28,11 @@ type Sec = { key: string; label: string; icon: string; tabs?: [string, string][]
 const SECTIONS: Sec[] = [
   { key: "home", label: "Home", icon: "home" },
   { key: "sell", label: "Sell", icon: "sell", tabs: [["bill", "New bill"], ["bills", "Bills"], ["customers", "Customers"]] },
-  { key: "stock", label: "Stock", icon: "stock", tabs: [["products", "Products"], ["scan", "Scan & record"], ["labels", "Labels"], ["racks", "Racks"], ["move", "Move"], ["activity", "Activity"]] },
+  { key: "stock", label: "Stock", icon: "stock", tabs: [["products", "Products"], ["stockin", "Stock in"], ["scan", "Scan & record"], ["labels", "Labels"], ["racks", "Racks"], ["move", "Move"], ["activity", "Activity"], ["import", "Import"]] },
   { key: "ask", label: "Ask", icon: "ask" },
   { key: "settings", label: "Settings", icon: "settings" },
 ];
-const sectionOf = (r: string) => (["bill", "bills", "customers"].includes(r) ? "sell" : ["products", "product", "scan", "labels", "racks", "move", "activity"].includes(r) ? "stock" : r === "ask" || r === "settings" ? r : "home");
+const sectionOf = (r: string) => (["bill", "bills", "customers"].includes(r) ? "sell" : ["products", "product", "stockin", "scan", "labels", "racks", "move", "activity", "import"].includes(r) ? "stock" : r === "ask" || r === "settings" ? r : "home");
 const lastTab: Record<string, string> = { sell: "bill", stock: "products" };
 
 function useSync() {
@@ -71,7 +73,7 @@ function Shell() {
   const visible = SECTIONS.filter(s => (s.key !== "sell" || can(me, "bill")) && (s.key !== "ask" || can(me, "ai")));
   const cur = SECTIONS.find(s => s.key === sec)!;
   const hrefOf = (s: Sec) => "#/" + (s.tabs ? lastTab[s.key] || s.tabs[0][0] : s.key);
-  const tabs = cur.tabs?.filter(([k]) => k !== "bill" || can(me, "bill"));
+  const tabs = cur.tabs?.filter(([k]) => (k !== "bill" || can(me, "bill")) && (k !== "import" || can(me, "settings")));
   const tabOn = (k: string) => route === k || (k === "products" && route === "product");
 
   let page: ReactNode;
@@ -87,6 +89,8 @@ function Shell() {
     case "products": page = <Products args={[]} />; break;
     case "product": page = <Products args={args} />; break;
     case "activity": page = <Activity />; break;
+    case "stockin": page = <StockIn args={args} />; break;
+    case "import": page = can(me, "settings") ? <Import /> : <NoAccess />; break;
     case "settings": page = <Settings />; break;
     default: page = <Home />;
   }
@@ -124,7 +128,7 @@ function Shell() {
       </div>
       <nav className="tabbar">
         {[visible.find(s => s.key === "home"), visible.find(s => s.key === "sell")].filter(Boolean).map(s => <a key={s!.key} href={hrefOf(s!)} className={sec === s!.key ? "on" : ""}><Icon n={s!.icon} size={22} />{s!.label}</a>)}
-        <a href="#/scan" className="fab"><span className="c"><Icon n="scan" size={24} sw={2} /></span></a>
+        <a href="#/stockin" className="fab"><span className="c"><Icon n="scan" size={24} sw={2} /></span></a>
         {[visible.find(s => s.key === "stock"), visible.find(s => s.key === "ask") || visible.find(s => s.key === "settings")].filter(Boolean).map(s => <a key={s!.key} href={hrefOf(s!)} className={sec === s!.key ? "on" : ""}><Icon n={s!.icon} size={22} />{s!.label}</a>)}
       </nav>
       {pal && <SearchPalette onClose={() => setPal(false)} />}

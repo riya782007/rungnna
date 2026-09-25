@@ -23,6 +23,7 @@ export interface Product extends Row {
   item_code?: string;      // numeric item code from the old software (202 = F-RING)
   ref?: string;            // 4th field of the old label (meaning to be confirmed)
   pack?: number;           // pieces per packet (the X12PCS on the label)
+  cost?: number;           // last purchase cost per piece, paise (owner/manager only)
   created_by: string;
   created_at: string;
 }
@@ -93,6 +94,14 @@ export interface Bill extends Row {
   device: string; by_staff: string; at: string;
 }
 
+/* Stock coming in: from a supplier bill, or just a counting session into a rack. */
+export interface PurchaseLine { id: string; product_id: string; code: string; item: string; style: string; color: string; pack: number; pkts: number; qty: number; cost: number; rate: number; isNew?: boolean }
+export interface Purchase extends Row {
+  no: string; status: "draft" | "final"; supplier_id?: string; supplier_name: string; supplier_bill: string; loc_id: string;
+  items: PurchaseLine[]; total_qty: number; total_cost: number; note: string; photo_id?: string; photo_url?: string;
+  device: string; by_staff: string; at: string;
+}
+
 export interface VoiceNote extends Row {
   entity: string; entity_id: string; seconds: number; transcript: string; url?: string; by_staff: string; at: string;
 }
@@ -128,6 +137,7 @@ class RungnnaDB extends Dexie {
   voice_blobs!: Table<VoiceBlob, string>;
   config!: Table<Config, string>;
   receipts!: Table<Receipt, string>;
+  purchases!: Table<Purchase, string>;
 
   constructor() {
     super("rungnna");
@@ -153,6 +163,7 @@ class RungnnaDB extends Dexie {
       config: "id, updated_at",
     });
     this.version(4).stores({ receipts: "id, party_id, at, updated_at" });
+    this.version(5).stores({ purchases: "id, no, status, supplier_id, at, updated_at" });
   }
 }
 
@@ -175,7 +186,7 @@ export function deviceId(): string {
 }
 
 /* ---- write helpers: every write lands locally first, then queues for the cloud ---- */
-type Syncable = "products" | "locations" | "movements" | "staff" | "parties" | "bills" | "voice_notes" | "config" | "receipts";
+type Syncable = "products" | "locations" | "movements" | "staff" | "parties" | "bills" | "voice_notes" | "config" | "receipts" | "purchases";
 
 export async function put<T extends Row>(table: Syncable, row: T) {
   row.updated_at = now();

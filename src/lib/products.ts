@@ -55,7 +55,9 @@ export function fromParsed(x: Parsed, by: string): Product {
 export async function itemNameFor(icode?: string) {
   if (!icode) return "";
   const hit = await db.products.where("item_code").equals(icode).filter(p => !!p.item && !p.deleted).first();
-  return hit?.item || "";
+  if (hit?.item) return hit.item;
+  const map = (await db.config.get("item_codes"))?.value as Record<string, string> | undefined; // imported item list
+  return map?.[icode] || "";
 }
 export async function itemCodeFor(item: string) {
   if (!item) return "";
