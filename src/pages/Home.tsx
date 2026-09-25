@@ -8,6 +8,7 @@ import { can } from "../lib/roles";
 import { rupees, when } from "../lib/format";
 import { label, isDead } from "../lib/products";
 import { due } from "../lib/billing";
+import { usePrivate, maskNote } from "../lib/privacy";
 
 /* One glance: money today, what needs a hand, where the stock sits. Nothing else. */
 export default function Home() {
@@ -18,8 +19,9 @@ export default function Home() {
   const products = useLiveQuery(() => db.products.filter(p => !p.deleted).toArray(), [], []);
   const cells = useLiveQuery(() => db.stock.toArray(), [], []);
   const recent = useLiveQuery(() => db.movements.orderBy("at").reverse().limit(8).toArray(), [], []);
-  const bills = useLiveQuery(() => db.bills.where("at").aboveOrEqual(start).filter(b => !b.deleted).toArray(), [start], []);
-  const held = useLiveQuery(() => db.bills.where("status").equals("hold").filter(b => !b.deleted && !b.no).count(), [], 0);
+  const priv = usePrivate();
+  const bills = useLiveQuery(() => db.bills.where("at").aboveOrEqual(start).filter(b => !b.deleted && (priv || b.bill_type !== "estimate")).toArray(), [start, priv], []);
+  const held = useLiveQuery(() => db.bills.where("status").equals("hold").filter(b => !b.deleted && !b.no && (priv || b.bill_type !== "estimate")).count(), [priv], 0);
 
   const s = useMemo(() => {
     const bucket = new Set(locs.filter(l => l.kind === "bucket").map(l => l.id));

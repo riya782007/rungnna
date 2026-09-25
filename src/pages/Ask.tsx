@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { db } from "../lib/db";
 import { ask, transcribe, health, type Health } from "../lib/ai";
 import { due } from "../lib/billing";
+import { visibleBill } from "../lib/privacy";
 import { Head } from "../components/common";
 import { MicButton } from "../components/Voice";
 import { toast } from "../lib/app";
@@ -10,7 +11,7 @@ import { toast } from "../lib/app";
 async function shopContext() {
   const d30 = new Date(Date.now() - 30 * 864e5).toISOString();
   const [bills, products, stock, parties, locs] = await Promise.all([
-    db.bills.where("at").aboveOrEqual(d30).filter(b => !b.deleted).toArray(),
+    db.bills.where("at").aboveOrEqual(d30).filter(b => visibleBill(b)).toArray(),
     db.products.filter(p => !p.deleted).toArray(), db.stock.toArray(), db.parties.filter(p => !p.deleted).toArray(), db.locations.toArray()]);
   const fin = bills.filter(b => b.status === "final");
   const byDay: Record<string, { sales: number; bills: number; gst: number; estimate: number }> = {};

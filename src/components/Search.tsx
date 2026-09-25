@@ -3,6 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../lib/db";
 import { go } from "../lib/app";
 import { rupees } from "../lib/format";
+import { usePrivate, visibleBill } from "../lib/privacy";
 
 /* Ctrl+K anywhere: jump to any product, customer, bill or screen. */
 const SCREENS: [string, string][] = [["bill", "New bill"], ["bills", "Bills register"], ["customers", "Customers"], ["scan", "Scan & record"], ["products", "Products"],
@@ -15,6 +16,7 @@ export function SearchPalette({ onClose }: { onClose: () => void }) {
   const products = useLiveQuery(() => db.products.filter(p => !p.deleted).toArray(), [], []);
   const parties = useLiveQuery(() => db.parties.filter(p => !p.deleted).toArray(), [], []);
   const bills = useLiveQuery(() => db.bills.orderBy("at").reverse().limit(500).toArray(), [], []);
+  const open = usePrivate();
   const res = useMemo(() => {
     const w = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const m = (s: string) => w.every(x => s.toLowerCase().includes(x));
@@ -23,10 +25,10 @@ export function SearchPalette({ onClose }: { onClose: () => void }) {
     if (w.length) {
       products.filter(p => m([p.style, p.item, p.color, p.code, p.item_code].join(" "))).slice(0, 8).forEach(p => out.push({ k: "Product", t: [p.item, p.style, p.color].filter(Boolean).join(" · "), s: p.rate ? rupees(p.rate) : "", to: "product/" + p.id }));
       parties.filter(p => m(p.name + " " + p.phone + " " + p.city)).slice(0, 6).forEach(p => out.push({ k: "Customer", t: p.name, s: p.phone, to: "customers/" + p.id }));
-      bills.filter(b => m(b.no + " " + b.party_name + " " + b.party_phone)).slice(0, 6).forEach(b => out.push({ k: "Bill", t: b.no || "on hold", s: b.party_name + " · " + rupees(b.net), to: (b.status === "hold" ? "bill/" : "bills/") + b.id }));
+      bills.filter(b => visibleBill(b, open) && m(b.no + " " + b.party_name + " " + b.party_phone)).slice(0, 6).forEach(b => out.push({ k: "Bill", t: b.no || "on hold", s: b.party_name + " · " + rupees(b.net), to: (b.status === "hold" ? "bill/" : "bills/") + b.id }));
     }
     return out.slice(0, 24);
-  }, [q, products, parties, bills]);
+  }, [q, products, parties, bills, open]);
   useEffect(() => { ref.current?.focus(); }, []);
   useEffect(() => setI(0), [q]);
   const pick = (to: string) => { go(to); onClose(); };

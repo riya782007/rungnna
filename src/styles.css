@@ -343,6 +343,8 @@ img,svg,video,canvas{max-width:100%}
   .pos{padding-bottom:90px}
 }
 .pos-top .pos-cust{flex:1 1 240px}
+.pos-title{display:flex;flex-direction:column;gap:0;padding:4px 6px;min-width:120px;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;cursor:default}
+.pos-title b{font-size:18px;letter-spacing:-.01em}
 .pos-top .pos-no{flex:0 0 auto}
 @media(max-width:600px){.pos-top .seg{width:100%}.pos-top .seg button{flex:1}.pos-top label.f{flex:1 1 140px}}
 /* iPhone/Android: 16px inputs never trigger zoom-on-focus */

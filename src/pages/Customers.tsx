@@ -9,6 +9,7 @@ import { rupees, toPaise, when } from "../lib/format";
 import { Head, PhotoButton, Thumb } from "../components/common";
 import { Icon } from "../components/Icon";
 import { VoiceNotes } from "../components/Voice";
+import { usePrivate } from "../lib/privacy";
 
 /* Customers: who buys, what they owe, one tap to collect or remind. */
 export default function Customers({ args }: { args: string[] }) {
@@ -21,7 +22,8 @@ function PartyList() {
   const parties = useLiveQuery(() => db.parties.filter(p => !p.deleted).toArray(), [], []);
   const stamp = useLiveQuery(async () => (await db.bills.count()) + ":" + (await db.receipts.count()) + ":" + (await db.bills.orderBy("updated_at").last())?.updated_at, [], "");
   const [bal, setBal] = useState<Map<string, number>>(new Map());
-  useEffect(() => { balances().then(setBal); }, [stamp, parties.length]);
+  const priv = usePrivate();
+  useEffect(() => { balances().then(setBal); }, [stamp, parties.length, priv]);
   const list = useMemo(() => parties
     .filter(p => (!q || (p.name + " " + p.phone + " " + p.city).toLowerCase().includes(q.toLowerCase())) && (!onlyDue || (bal.get(p.id) || 0) > 0))
     .sort((a, z) => (bal.get(z.id) || 0) - (bal.get(a.id) || 0) || a.name.localeCompare(z.name)), [parties, q, onlyDue, bal]);
@@ -52,7 +54,8 @@ function PartyList() {
 function PartyView({ id }: { id: string }) {
   const { me } = useApp();
   const p0 = useLiveQuery(() => db.parties.get(id), [id]);
-  const bills = useLiveQuery(() => db.bills.where("party_id").equals(id).filter(b => !b.deleted).reverse().sortBy("at"), [id], []);
+  const priv = usePrivate();
+  const bills = useLiveQuery(() => db.bills.where("party_id").equals(id).filter(b => !b.deleted && (priv || b.bill_type !== "estimate")).reverse().sortBy("at"), [id, priv], []);
   const rc = useLiveQuery(() => db.receipts.where("party_id").equals(id).count(), [id], 0);
   const [p, setP] = useState<Party | null>(null);
   const [led, setLed] = useState<{ entries: Entry[]; balance: number } | null>(null);
@@ -63,7 +66,7 @@ function PartyView({ id }: { id: string }) {
   const [tab, setTab] = useState<"account" | "bills" | "details">("account");
   const [printing, setPrinting] = useState(false);
   useEffect(() => { if (p0) setP({ ...p0 }); }, [p0?.updated_at]);
-  useEffect(() => { if (p0) ledger(p0).then(setLed); }, [p0?.updated_at, bills, rc]);
+  useEffect(() => { if (p0) ledger(p0).then(setLed); }, [p0?.updated_at, bills, rc, priv]);
   useEffect(() => { getShop().then(setShop); }, []);
   useEffect(() => { if (!printing) return; const t = setTimeout(() => { window.print(); setPrinting(false); }, 200); return () => clearTimeout(t); }, [printing]);
   if (!p || !p0) return <div className="skel" style={{ height: 200 }} />;

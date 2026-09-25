@@ -9,6 +9,7 @@ import { go, toast } from "../lib/app";
 import { rupees, toPaise, when } from "../lib/format";
 import { describePhoto } from "../lib/ai";
 import { VoiceNotes } from "../components/Voice";
+import { usePrivate, maskNote } from "../lib/privacy";
 
 export default function Products({ args }: { args: string[] }) {
   if (args[0]) return <ProductDetail id={args[0]} />;
@@ -53,6 +54,7 @@ function ProductList() {
 }
 
 function ProductDetail({ id }: { id: string }) {
+  const priv = usePrivate();
   const locs = useLocations();
   const p0 = useLiveQuery(() => db.products.get(id), [id]);
   const stock = useLiveQuery(() => db.stock.where("product_id").equals(id).toArray(), [id], []);
@@ -117,7 +119,7 @@ function ProductDetail({ id }: { id: string }) {
                   {m.photo_id || m.photo_url ? <Thumb photo_id={m.photo_id} url={m.photo_url} size={36} /> : null}
                   <div className="grow">
                     <b>{m.kind}</b> {m.qty} pcs {locOf(m.from_loc) && "from " + locOf(m.from_loc)} {locOf(m.to_loc) && "→ " + locOf(m.to_loc)}
-                    <div className="xs mut">{when(m.at)} · {m.person_type} {m.person_name} · by {staff.find(s => s.id === m.by_staff)?.name || "—"}{m.note ? " · " + m.note : ""}</div>
+                    <div className="xs mut">{when(m.at)} · {m.person_type} {m.person_name} · by {staff.find(s => s.id === m.by_staff)?.name || "—"}{maskNote(m.note, priv) ? " · " + maskNote(m.note, priv) : ""}</div>
                   </div>
                 </div>))}
             </div></div>

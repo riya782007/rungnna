@@ -7,6 +7,7 @@ import { newBill, lineFrom, totals, fixLine, finalize, holdBill, due, getShop, n
 import { voiceBill } from "../lib/ai";
 import { useApp, toast, beep, go } from "../lib/app";
 import { can } from "../lib/roles";
+import { usePrivate, unlock, lockNow, getPrivate, isOpen } from "../lib/privacy";
 import { Icon } from "../components/Icon";
 import { rupees, toPaise } from "../lib/format";
 import { CameraScanner } from "../components/Scanner";
@@ -18,7 +19,7 @@ import { PrintBill, type PrintFormat } from "../components/Invoice";
    every action on a function key, works with no internet (numbers come from this counter's own series). */
 
 const KEYS: [string, string][] = [["F2", "New"], ["F3", "Customer"], ["F4", "Hold"], ["F5", "Held"], ["F6", "Next box"], ["F7", "Scan"],
-  ["F8", "Save"], ["F9", "Save+Print"], ["F10", "WhatsApp"], ["F12", "GST/Est"]];
+  ["F8", "Save"], ["F9", "Save+Print"], ["F10", "WhatsApp"]];
 
 export default function Billing({ args }: { args: string[] }) {
   const { me } = useApp();
@@ -35,6 +36,8 @@ export default function Billing({ args }: { args: string[] }) {
   const [nextNo, setNextNo] = useState("");
   const [due0, setDue0] = useState(0);
   const scanRef = useRef<HTMLInputElement>(null);
+  /* private estimates: hidden until the owner's code is entered */
+  const priv = usePrivate();
   const products = useLiveQuery(() => db.products.filter(p => !p.deleted).toArray(), [], []);
   const pmap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
   const staff = useLiveQuery(() => db.staff.filter(s => !!s.active && !s.deleted).toArray(), [], []);
@@ -46,7 +49,7 @@ export default function Billing({ args }: { args: string[] }) {
       setFmt(await getSetting<PrintFormat>("print_fmt", "a5"));
       if (args[0]) { const x = await db.bills.get(args[0]); if (x) { setB(x); return; } }
       const d = await getSetting<Bill | null>("draft_bill", null);
-      setB(d && d.status === "hold" && !d.no ? d : newBill(me?.id || "", s, await getSetting("default_bill_type", "estimate")));
+      setB(d && d.status === "hold" && !d.no && (d.bill_type !== "estimate" || isOpen()) ? d : newBill(me?.id || "", s, "gst"));
     })();
   }, [args[0]]);
   useEffect(() => { if (b && !b.no) setSetting("draft_bill", b); }, [b]);
@@ -54,9 +57,21 @@ export default function Billing({ args }: { args: string[] }) {
     const cc = await counterCode(); const n = (await getSetting<number>(`seq_${seriesOf(b.bill_type)}_${fy()}_${cc}`, 0)) + 1;
     setNextNo(`${seriesOf(b.bill_type)}/${fy()}/${cc}-${String(n).padStart(4, "0")}`);
   })(); }, [b?.bill_type]);
-  useEffect(() => { b?.party_id ? partyDue(b.party_id).then(setDue0) : setDue0(0); }, [b?.party_id]);
+  useEffect(() => { b?.party_id ? partyDue(b.party_id).then(setDue0) : setDue0(0); }, [b?.party_id, priv]);
 
   const t = useMemo(() => (b ? totals(b, shop.state) : null), [b, shop.state]);
+  const [askCode, setAskCode] = useState(false);
+  useEffect(() => {
+    if (priv || !b || b.bill_type !== "estimate") return;
+    // locked while an estimate was open: park it out of sight, continue with a GST invoice
+    (async () => { if (b.items.length) await holdBill(totals(b, shop.state)); await setSetting("draft_bill", null); setB(newBill(me?.id || "", shop, "gst")); })();
+  }, [priv]);
+  const press = useRef<any>(0);
+  const hintProps = {
+    onDoubleClick: () => !priv && setAskCode(true),
+    onPointerDown: () => { press.current = setTimeout(() => !priv && setAskCode(true), 700); },
+    onPointerUp: () => clearTimeout(press.current), onPointerLeave: () => clearTimeout(press.current),
+  };
   const set = (patch: Partial<Bill>) => setB(x => (x ? { ...x, ...patch } : x));
   const setLine = (id: string, patch: Partial<BillLine>) => setB(x => x ? { ...x, items: x.items.map(l => (l.id === id ? fixLine({ ...l, ...patch }) : l)) } : x);
   const dropLine = (id: string) => setB(x => x ? { ...x, items: x.items.filter(l => l.id !== id) } : x);
@@ -78,6 +93,11 @@ export default function Billing({ args }: { args: string[] }) {
   /* a scan or Enter in the box: find the product; unknown shop labels create the product on the spot */
   async function onCode(raw: string) {
     const r = raw.trim(); if (!r) return;
+    if (r.startsWith("#") && r.length > 1) { // typed code in the scan box
+      setQ("");
+      if (await unlock(r.slice(1))) { set({ bill_type: "estimate" }); beep(); } else { beep(false); toast("Not found", true); }
+      return;
+    }
     let p = await findByScan(r);
     if (!p) {
       const parsed = parseLabel(r, await patterns());
@@ -153,7 +173,7 @@ export default function Billing({ args }: { args: string[] }) {
       const k = e.key;
       if (!/^F\d+$/.test(k)) return;
       e.preventDefault();
-      if (k === "F2") { setB(newBill(me?.id || "", shop, b?.bill_type || "estimate")); setBox(1); }
+      if (k === "F2") { setB(newBill(me?.id || "", shop, priv ? b?.bill_type || "gst" : "gst")); setBox(1); }
       if (k === "F3") setCustOpen(true);
       if (k === "F4") doHold();
       if (k === "F5") setHeld(true);
@@ -162,7 +182,7 @@ export default function Billing({ args }: { args: string[] }) {
       if (k === "F8") doSave(false);
       if (k === "F9") doSave(true);
       if (k === "F10") doSave(false, true);
-      if (k === "F12") set({ bill_type: b?.bill_type === "gst" ? "estimate" : "gst" });
+      if (k === "F12") priv ? set({ bill_type: b?.bill_type === "gst" ? "estimate" : "gst" }) : setAskCode(true);
     };
     addEventListener("keydown", f); return () => removeEventListener("keydown", f);
   });
@@ -174,10 +194,11 @@ export default function Billing({ args }: { args: string[] }) {
   return (
     <div className="pos">
       <div className="pos-top card">
-        <div className="seg" role="group" aria-label="Bill type">
+        {priv ? <div className="seg" role="group" aria-label="Bill type">
           <button aria-pressed={b.bill_type === "estimate"} onClick={() => set({ bill_type: "estimate" })}>Estimate</button>
           <button aria-pressed={b.bill_type === "gst"} onClick={() => set({ bill_type: "gst" })}>GST Invoice</button>
-        </div>
+          <button onClick={() => lockNow()} title="Lock estimates" aria-label="Lock estimates"><Icon n="lock" size={15} /></button>
+        </div> : <div className="pos-title" {...hintProps}><b>Tax invoice</b><span className="xs mut">{b.gst_rate}% GST</span></div>}
         <div className="pos-no"><span className="xs mut">{b.no ? "Bill no" : "Next no"}</span><b className="mono">{b.no || nextNo}</b></div>
         <button className="pos-cust" onClick={() => setCustOpen(true)}>
           <span className="xs mut">Customer · F3</span>
@@ -275,6 +296,7 @@ export default function Billing({ args }: { args: string[] }) {
         <button className="btn g" onClick={() => doSave(false, true)}>Save & Send</button><button className="btn p" onClick={() => doSave(false)}>Save</button></div>
 
       {custOpen && <CustomerPicker bill={b} onPick={p => { set(p); setCustOpen(false); scanRef.current?.focus(); }} onClose={() => setCustOpen(false)} />}
+      {askCode && <CodePrompt onDone={ok => { setAskCode(false); if (ok) set({ bill_type: "estimate" }); }} />}
       {held && <HeldBills onPick={x => { setB(x); setHeld(false); }} onClose={() => setHeld(false)} />}
       {printing && <PrintBill b={printing.bill} shop={shop} format={printing.fmt} onDone={() => setPrinting(null)} />}
     </div>
@@ -331,7 +353,8 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
 }
 
 function HeldBills({ onPick, onClose }: { onPick: (b: Bill) => void; onClose: () => void }) {
-  const list = useLiveQuery(() => db.bills.where("status").equals("hold").filter(b => !b.deleted && !b.no).reverse().sortBy("at"), [], []);
+  const open = usePrivate();
+  const list = useLiveQuery(() => db.bills.where("status").equals("hold").filter(b => !b.deleted && !b.no && (open || b.bill_type !== "estimate")).reverse().sortBy("at"), [open], []);
   return (
     <Modal title="Bills on hold" onClose={onClose}>
       <div className="stack" style={{ gap: 6 }}>
@@ -344,6 +367,24 @@ function HeldBills({ onPick, onClose }: { onPick: (b: Bill) => void; onClose: ()
           </div>))}
         {!list.length && <div className="mut sm">Nothing on hold.</div>}
       </div>
+    </Modal>
+  );
+}
+
+/* The discreet door to estimates: the owner's hint, then the code. Nothing on screen says "estimate". */
+function CodePrompt({ onDone }: { onDone: (ok: boolean) => void }) {
+  const [hint, setHint] = useState<string | null>(null);
+  const [code, setCode] = useState("");
+  const [bad, setBad] = useState(false);
+  useEffect(() => { getPrivate().then(c => setHint(c ? c.hint || "" : null)); }, []);
+  return (
+    <Modal title="Enter code" onClose={() => onDone(false)}>
+      <form className="stack" onSubmit={async e => { e.preventDefault(); if (await unlock(code)) onDone(true); else { setBad(true); setCode(""); } }}>
+        {hint === null ? <div className="sm mut">No code has been set on this system yet. The owner sets it in Settings.</div>
+          : <>{hint && <div className="sm mut">Hint: {hint}</div>}
+            <input className={"in mono" + (bad ? " bad" : "")} type="password" inputMode="numeric" autoFocus autoComplete="off" value={code} onChange={e => { setCode(e.target.value); setBad(false); }} />
+            <button className="btn p">Open</button></>}
+      </form>
     </Modal>
   );
 }

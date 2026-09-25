@@ -1,11 +1,14 @@
 import { db, put, uid, now, deviceId, getSetting, setSetting, type Bill, type Party, type Payment, type Receipt } from "./db";
 import { due, fy, counterCode, type Shop } from "./billing";
 import { rupees } from "./format";
+import { isOpen } from "./privacy";
 
 /* A customer's account, the way a khata reads: what they bought (debit), what they paid (credit), balance. */
 export type Entry = { at: string; kind: "opening" | "bill" | "paid" | "receipt"; ref: string; id?: string; debit: number; credit: number; balance: number; note?: string };
 
-const counted = (b: Bill) => b.status === "final" && !b.deleted;
+const counted = (b: Bill) => b.status === "final" && !b.deleted && (isOpen() || b.bill_type !== "estimate");
+/* while estimates are locked, the part of a receipt that went to an estimate is left out too */
+const visibleAmount = (r: Receipt) => (isOpen() ? r.amount : r.amount - r.allocations.filter(a => /^EST\//.test(a.bill_no)).reduce((x, a) => x + a.amount, 0));
 const fromReceipt = (p: Payment) => (p.ref || "").startsWith("RCPT");
 
 export async function ledger(party: Party): Promise<{ entries: Entry[]; balance: number; openingLeft: number }> {
@@ -20,7 +23,7 @@ export async function ledger(party: Party): Promise<{ entries: Entry[]; balance:
     const paid = b.advance + b.payments.filter(p => p.mode !== "credit" && !fromReceipt(p)).reduce((a, p) => a + p.amount, 0);
     if (paid) raw.push({ at: b.at, kind: "paid", ref: "Paid on " + b.no, id: b.id, debit: 0, credit: paid });
   }
-  for (const r of rcpts) raw.push({ at: r.at, kind: "receipt", ref: r.no + " · " + r.mode.toUpperCase(), id: r.id, debit: 0, credit: r.amount, note: r.note });
+  for (const r of rcpts) { const amt = visibleAmount(r); if (amt) raw.push({ at: r.at, kind: "receipt", ref: r.no + " · " + r.mode.toUpperCase(), id: r.id, debit: 0, credit: amt, note: r.note }); }
   raw.sort((a, z) => (a.at < z.at ? -1 : a.at > z.at ? 1 : a.kind === "bill" ? -1 : 1));
   let bal = 0;
   const entries = raw.map(e => ({ ...e, balance: (bal += e.debit - e.credit) }));
@@ -71,6 +74,6 @@ export async function balances(): Promise<Map<string, number>> {
   const m = new Map<string, number>();
   parties.forEach(p => m.set(p.id, p.opening_balance || 0));
   bills.forEach(b => { if (!b.party_id) return; const paid = b.advance + b.payments.filter(p => p.mode !== "credit" && !fromReceipt(p)).reduce((a, p) => a + p.amount, 0); m.set(b.party_id, (m.get(b.party_id) || 0) + b.net - paid); });
-  rcpts.forEach(r => m.set(r.party_id, (m.get(r.party_id) || 0) - r.amount));
+  rcpts.forEach(r => m.set(r.party_id, (m.get(r.party_id) || 0) - visibleAmount(r)));
   return m;
 }

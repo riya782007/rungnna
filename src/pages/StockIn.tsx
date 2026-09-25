@@ -101,6 +101,7 @@ function StockInSession() {
             {!p.loc_id && <div className="note warn sm">Pick the rack first — every packet you scan goes there.</div>}
           </div>
 
+          <NameUnknown lines={t.items} onNamed={(code, name) => setP(x => x && { ...x, items: x.items.map(l => (l.item === "ITEM " + code ? { ...l, item: name } : l)) })} />
           <div className="list">
             {t.items.map(l => (
               <div key={l.id} className="li" style={{ background: flash === l.product_id ? "var(--gold-l)" : undefined, transition: "background .4s" }}>
@@ -195,6 +196,31 @@ function StockInView({ id }: { id: string }) {
           <b className="mono">{l.qty}</b>
           {l.isNew && <a className="btn sm" href={"#/labels/" + l.product_id}><Icon n="print" size={15} />Label</a>}
         </div>))}</div>
+    </div>
+  );
+}
+
+/* Old labels carry only an item number (202). Ask once per number; every product and every future label gets the name. */
+function NameUnknown({ lines, onNamed }: { lines: PurchaseLine[]; onNamed: (code: string, name: string) => void }) {
+  const codes = [...new Set(lines.filter(l => /^ITEM \d+$/.test(l.item)).map(l => l.item.slice(5)))];
+  const [v, setV] = useState<Record<string, string>>({});
+  if (!codes.length) return null;
+  return (
+    <div className="card pad stack" style={{ borderColor: "#E3CF9E", background: "var(--gold-l)" }}>
+      <b className="sm">Name {codes.length > 1 ? "these item numbers" : "this item number"} once</b>
+      {codes.map(c => (
+        <form key={c} className="row" style={{ flexWrap: "nowrap" }} onSubmit={async e => {
+          e.preventDefault(); const name = (v[c] || "").trim().toUpperCase(); if (!name) return;
+          const ps = await db.products.where("item_code").equals(c).toArray();
+          for (const pr of ps) if (!pr.item) await put("products", { ...pr, item: name });
+          const map = ((await db.config.get("item_codes"))?.value || {}) as Record<string, string>;
+          await put("config", { id: "item_codes", value: { ...map, [c]: name }, updated_at: new Date().toISOString() } as any);
+          onNamed(c, name); toast(`Item ${c} = ${name} — remembered for every label`);
+        }}>
+          <span className="mono b" style={{ width: 70 }}>Item {c}</span>
+          <input className="in grow" placeholder="e.g. F-RING" value={v[c] || ""} onChange={e => setV({ ...v, [c]: e.target.value })} />
+          <button className="btn p">Save</button>
+        </form>))}
     </div>
   );
 }

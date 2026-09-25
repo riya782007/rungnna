@@ -1,5 +1,6 @@
 import { db, put, uid, now, deviceId, getSetting, setSetting, type Bill, type BillLine, type BillType, type Movement, type Party, type Product, type Config } from "./db";
 import { rupees } from "./format";
+import { isOpen } from "./privacy";
 
 /* ---------------- shop profile (synced to every device) ---------------- */
 export interface Shop {
@@ -150,7 +151,7 @@ export function newParty(name = "", phone = ""): Party {
     tier: "wholesale", credit_limit: 0, notes: "", updated_at: now() };
 }
 export async function partyDue(party_id: string) {
-  const bs = await db.bills.where("party_id").equals(party_id).filter(b => b.status === "final" && !b.deleted).toArray();
+  const bs = await db.bills.where("party_id").equals(party_id).filter(b => b.status === "final" && !b.deleted && (isOpen() || b.bill_type !== "estimate")).toArray();
   return bs.reduce((a, b) => a + due(b), 0);
 }
 
@@ -231,3 +232,26 @@ export async function shareBill(b: Bill, shop: Shop) {
 }
 
 export async function lastBills(n = 50) { return db.bills.orderBy("at").reverse().filter(b => !b.deleted).limit(n).toArray(); }
+
+/* Owner-only: remove estimates for good. The rows are emptied and marked deleted on every device and in the cloud.
+   returnStock = the goods never left (a quotation) → pieces go back to the racks they came from. */
+export async function deleteEstimates(bills: Bill[], returnStock: boolean, by: string) {
+  let n = 0;
+  for (const b of bills) {
+    if (b.bill_type !== "estimate" || b.deleted) continue;
+    await db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock], async () => {
+      if (returnStock && b.status === "final") {
+        const outs = await db.movements.where("ref_bill").equals(b.id).filter(m => m.kind === "sale" && !m.deleted).toArray();
+        for (const m of outs) {
+          await put("movements", { ...m, id: uid(), kind: "return", from_loc: null, to_loc: m.from_loc, note: "Estimate removed", at: now(), updated_at: now(), by_staff: by });
+          if (m.from_loc) { const k = m.product_id + "|" + m.from_loc; const c = await db.stock.get(k); await db.stock.put({ key: k, product_id: m.product_id, loc_id: m.from_loc, qty: (c?.qty || 0) + m.qty }); }
+        }
+      }
+      // keep only the id and number as a tombstone so other devices know to drop it
+      await put("bills", { ...b, deleted: 1, items: [], payments: [], party_id: undefined, party_name: "", party_phone: "", party_gstin: "", party_state: "",
+        remarks: "", gross: 0, discount: 0, packing: 0, gst: 0, cgst: 0, sgst: 0, igst: 0, net: 0, advance: 0, paid: 0, total_qty: 0, void_reason: "Deleted by " + by });
+    });
+    n++;
+  }
+  return n;
+}

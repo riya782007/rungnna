@@ -9,6 +9,7 @@ import { when } from "../lib/format";
 import { getShop, saveShop, counterCode, DEFAULT_SHOP, type Shop } from "../lib/billing";
 import { health, type Health } from "../lib/ai";
 import { can, ROLE_NOTE } from "../lib/roles";
+import { getPrivate, setCode, lockNow, usePrivate } from "../lib/privacy";
 
 export default function Settings() {
   const { me, setMe } = useApp();
@@ -70,6 +71,7 @@ export default function Settings() {
             </div></div>}
         </div>
         <div className="stack">
+          {boss && <PrivateCard />}
           {admin && <ShopProfile />}
           {admin && <Keys />}
           {admin && <div className="card"><header><h3>Label layouts learnt</h3></header>
@@ -203,6 +205,34 @@ function Keys() {
         {row(h?.whatsapp_api, "WHATSAPP_TOKEN + WHATSAPP_PHONE_NUMBER_ID", "optional automatic sending; tap-to-send works without it")}
         {row(h?.supabase, "SUPABASE_URL + SUPABASE_ANON_KEY", "lets the server check the shop login")}
         <div className="xs mut">Keys are added in Vercel → project rungnna_shop_os → Settings → Environment Variables, then Deployments → ⋯ → Redeploy. They never go into the app itself.</div>
+      </div></div>
+  );
+}
+
+/* Owner only: the code that opens estimates. Staff never see estimates or this card. */
+function PrivateCard() {
+  const open = usePrivate();
+  const [has, setHas] = useState<boolean | null>(null);
+  const [code, setCodeV] = useState(""); const [again, setAgain] = useState(""); const [hint, setHint] = useState(""); const [min, setMin] = useState(10);
+  useEffect(() => { getPrivate().then(c => { setHas(!!c); if (c) { setHint(c.hint); setMin(c.minutes || 10); } }); }, []);
+  return (
+    <div className="card"><header><h3>Private estimates</h3><span className="grow" /><span className={"pill " + (open ? "warn" : "ok")}>{open ? "open on this device" : "hidden"}</span></header>
+      <div className="pad stack">
+        <div className="sm mut">Estimates are hidden from everyone. To open them on the bill screen: long-press or double-tap “Tax invoice”, or type # and your code in the scan box, then Enter. They lock again after {min} idle minutes or when the app is closed.</div>
+        <div className="grid g2">
+          <input className="in mono" type="password" inputMode="numeric" autoComplete="new-password" placeholder={has ? "New code" : "Choose a code (4+ digits)"} value={code} onChange={e => setCodeV(e.target.value)} />
+          <input className="in mono" type="password" inputMode="numeric" autoComplete="new-password" placeholder="Same code again" value={again} onChange={e => setAgain(e.target.value)} />
+          <input className="in" placeholder="Hint only you understand (optional)" value={hint} onChange={e => setHint(e.target.value)} />
+          <label className="f">Lock after (minutes idle)<input className="in mono" inputMode="numeric" value={min} onChange={e => setMin(parseInt(e.target.value) || 10)} /></label>
+        </div>
+        <div className="row">
+          <button className="btn p" onClick={async () => {
+            if (code.length < 4) return toast("Use at least 4 characters", true);
+            if (code !== again) return toast("The two codes don't match", true);
+            await setCode(code, hint.trim(), Math.max(1, Math.min(120, min))); setCodeV(""); setAgain(""); setHas(true); lockNow(); toast("Code saved on every counter");
+          }}>{has ? "Change code" : "Set code"}</button>
+          {open && <button className="btn" onClick={() => lockNow()}>Lock now</button>}
+        </div>
       </div></div>
   );
 }
