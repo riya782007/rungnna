@@ -17,7 +17,7 @@ export default defineConfig({
     copyWasm(),
     react(),
     VitePWA({
-      registerType: "autoUpdate",
+      registerType: "prompt",
       includeAssets: ["icon.svg", "zxing_reader.wasm"],
       workbox: {
         globPatterns: ["**/*.{js,css,html,svg,png,wasm,woff2}"],

@@ -1,5 +1,6 @@
-import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
-import { AppProvider, useApp, useRoute, Toasts, go } from "./lib/app";
+import { lazy, Suspense, useEffect, useState, Component, type ReactNode } from "react";
+import { onUpdate, applyUpdate } from "./lib/update";
+import { AppProvider, useApp, useRoute, Toasts, go, toast } from "./lib/app";
 import { startSync, onSync, type SyncState } from "./lib/sync";
 import { warmScanner } from "./components/Scanner";
 import { SearchPalette } from "./components/Search";
@@ -58,6 +59,10 @@ function Shell() {
   const [scrolled, setScrolled] = useState(false);
   const sec = sectionOf(route);
   useEffect(() => { startSync(); warmScanner(); }, []);
+  useEffect(() => {
+    const f = (e: PromiseRejectionEvent) => { const m = String(e.reason?.message || e.reason || ""); if (m && !/abort/i.test(m)) toast(m.slice(0, 120), true); };
+    addEventListener("unhandledrejection", f); return () => removeEventListener("unhandledrejection", f);
+  }, []);
   useEffect(() => { if (sec === "sell" || sec === "stock") lastTab[sec] = route === "product" ? "products" : route; window.scrollTo({ top: 0 }); }, [route]);
   useEffect(() => { const f = () => setScrolled(scrollY > 4); addEventListener("scroll", f, { passive: true }); return () => removeEventListener("scroll", f); }, []);
   useEffect(() => {
@@ -99,7 +104,7 @@ function Shell() {
     <div className="shell">
       <aside className="rail">
         <div className="brand"><span className="mark">R</span><div><b>Rungnna</b><span>Jewellery &amp; Co</span></div></div>
-        {can(me, "bill") && <a href="#/bill" className="newbill"><Icon n="plus" size={18} />New bill<kbd style={{ background: "rgba(255,255,255,.15)", color: "#fff" }}>F2</kbd></a>}
+        {can(me, "bill") && <a href="#/bill" className="newbill"><Icon n="plus" size={18} /><span className="t">New bill</span><kbd style={{ background: "rgba(255,255,255,.15)", color: "#fff" }}>F2</kbd></a>}
         <button className="railsearch" onClick={() => setPal(true)}><Icon n="search" size={17} /><span className="grow">Search</span><kbd>Ctrl K</kbd></button>
         {visible.map(s => <a key={s.key} href={hrefOf(s)} className={"nav" + (sec === s.key ? " on" : "")}><Icon n={s.icon} /><span className="grow">{s.label}</span></a>)}
         <div className="railfoot">
@@ -119,11 +124,11 @@ function Shell() {
         </div>
         {tabs && tabs.length > 1 && (
           <div className={"subnav" + (scrolled ? " scrolled" : "")}>
-            <nav className="tabs">{tabs.map(([k, t]) => <a key={k} href={"#/" + k} className={tabOn(k) ? "on" : ""}>{t}</a>)}</nav>
+            <nav className="tabs">{tabs.map(([k, t]) => <a key={k} href={"#/" + k} className={tabOn(k) ? "on" : ""} ref={el => { if (el && tabOn(k)) el.scrollIntoView({ block: "nearest", inline: "center" }); }}>{t}</a>)}</nav>
             <span className="grow" /><Status />
           </div>)}
         <main className={"page" + (route === "bill" ? " wide" : "")}>
-          <Suspense fallback={<Loading />}><div key={route + (args[0] || "")} className="pagein">{page}</div></Suspense>
+          <Guard key={route + (args[0] || "")}><Suspense fallback={<Loading />}><div className="pagein">{page}</div></Suspense></Guard>
         </main>
       </div>
       <nav className="tabbar">
@@ -132,8 +137,34 @@ function Shell() {
         {[visible.find(s => s.key === "stock"), visible.find(s => s.key === "ask") || visible.find(s => s.key === "settings")].filter(Boolean).map(s => <a key={s!.key} href={hrefOf(s!)} className={sec === s!.key ? "on" : ""}><Icon n={s!.icon} size={22} />{s!.label}</a>)}
       </nav>
       {pal && <SearchPalette onClose={() => setPal(false)} />}
+      <UpdateBar />
     </div>
   );
+}
+
+/* One broken screen must never take the shop down: show a calm card, keep the rest working.
+   After an update the old screen files are gone — reload once to pick up the new ones. */
+class Guard extends Component<{ children: ReactNode }, { err: Error | null }> {
+  state = { err: null as Error | null };
+  static getDerivedStateFromError(err: Error) { return { err }; }
+  componentDidCatch(err: Error) {
+    const chunk = /dynamically imported module|Failed to fetch|Importing a module script failed|error loading/i.test(err.message);
+    if (chunk && !sessionStorage.getItem("rj_reloaded")) { sessionStorage.setItem("rj_reloaded", "1"); location.reload(); }
+    console.error(err);
+  }
+  render() {
+    if (!this.state.err) return this.props.children;
+    return <div className="card empty"><b>This screen hit a problem</b><div className="sm" style={{ margin: "6px 0 14px" }}>Your data is safe on this device. Try again, or go Home.</div>
+      <div className="row" style={{ justifyContent: "center" }}><button className="btn p" onClick={() => location.reload()}>Try again</button><a className="btn" href="#/home" onClick={() => this.setState({ err: null })}>Home</a></div>
+      <div className="xs mut" style={{ marginTop: 10 }}>{String(this.state.err.message).slice(0, 140)}</div></div>;
+  }
+}
+
+function UpdateBar() {
+  const [ready, setReady] = useState(false);
+  useEffect(() => onUpdate(() => setReady(true)), []);
+  if (!ready) return null;
+  return <div className="updatebar">New version ready<button className="btn sm" onClick={() => applyUpdate()}>Update</button></div>;
 }
 
 function NoAccess() {

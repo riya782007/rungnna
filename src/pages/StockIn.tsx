@@ -83,7 +83,7 @@ function StockInSession() {
   if (!p || !t) return <div className="skel" style={{ height: 240 }} />;
   const rack = locs.find(l => l.id === p.loc_id);
   return (
-    <div>
+    <div style={{ paddingBottom: 80 }}>
       <Head title="Stock in" sub="Stand at the rack, scan every packet, save once. New labels become products by themselves." />
       <div className="split">
         <div className="stack">
@@ -146,6 +146,8 @@ function StockInSession() {
           </div>}
         </aside>
       </div>
+      <div className="pos-mbar"><div><span className="xs">{t.items.length} lines · {rack ? rack.code : "no rack"}</span><b>{t.total_qty.toLocaleString("en-IN")} pcs</b></div>
+        <button className="btn p" disabled={busy} onClick={save}>Save stock in</button></div>
       {supOpen && <SupplierPicker onPick={(id, name) => { setP({ ...p, supplier_id: id, supplier_name: name }); setSupOpen(false); box.current?.focus(); }} onClose={() => setSupOpen(false)} />}
     </div>
   );

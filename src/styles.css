@@ -91,10 +91,10 @@ h1,h2,h3{margin:0;letter-spacing:-.01em}
 .g2{grid-template-columns:repeat(2,minmax(0,1fr))}
 .g3{grid-template-columns:repeat(3,minmax(0,1fr))}
 .g4{grid-template-columns:repeat(4,minmax(0,1fr))}
-@media(max-width:860px){.g4{grid-template-columns:repeat(2,minmax(0,1fr))}.g3{grid-template-columns:1fr 1fr}}
-@media(max-width:520px){.g2,.g3{grid-template-columns:1fr}}
+@media(max-width:860px){.g4{grid-template-columns:repeat(2,minmax(0,1fr))}.g3{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.g2,.g3{grid-template-columns:minmax(0,1fr)}}
 .split{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:16px;align-items:start}
-@media(max-width:960px){.split{grid-template-columns:1fr}}
+@media(max-width:960px){.split{grid-template-columns:minmax(0,1fr)}}
 .mut{color:var(--muted)} .sm{font-size:13.5px} .xs{font-size:12px} .b{font-weight:600}
 .h1{font-size:28px;line-height:1.15;font-weight:700;letter-spacing:-.025em}
 .eyebrow{font-size:12px;color:var(--muted);font-weight:500;margin-bottom:2px}
@@ -315,3 +315,41 @@ tr.click{cursor:pointer}tr.click:hover td{background:var(--bg)}
 .switch[aria-checked="true"] .knob{background:var(--ink)}
 .switch[aria-checked="true"] .knob::after{transform:translateX(18px)}
 .brand .mark{color:#2A1E05;font-size:17px}
+
+/* ---------- stability on small screens ---------- */
+.stack>*,.split>*,.grid>*{min-width:0}
+.row>.btn{flex-shrink:0}
+.page{overflow-x:clip}
+img,svg,video,canvas{max-width:100%}
+
+/* ---------- tablet: slim icon rail so the work area gets the room ---------- */
+@media(min-width:861px) and (max-width:1279px){
+  .shell{grid-template-columns:76px 1fr}
+  .rail{padding:16px 10px;align-items:center}
+  .brand{padding:2px 0 14px}.brand>div{display:none}
+  .newbill{width:52px;height:48px;padding:0;margin:0 0 10px}.newbill .t,.newbill kbd{display:none}
+  .railsearch{width:52px;justify-content:center;padding:0}.railsearch span,.railsearch kbd{display:none}
+  .nav{width:56px;height:48px;justify-content:center;padding:0;flex-direction:column;gap:2px;font-size:10.5px}
+  .nav .grow{flex:none;font-size:10.5px;line-height:1}
+  .railfoot{align-items:center}.railfoot .status{font-size:0;gap:0}.me{justify-content:center;padding:6px}.me .grow,.me>svg{display:none}
+  .subnav{padding:10px 20px}.page{padding:16px 20px 40px}
+}
+/* ---------- billing on tablets: one column, total pinned at the bottom ---------- */
+@media(max-width:1199px){
+  .pos-main{grid-template-columns:minmax(0,1fr)}
+  .pos-sum{position:static}
+  .pos-mbar{display:flex;position:fixed;left:auto;right:20px;bottom:16px;width:min(460px,calc(100vw - 120px));z-index:29;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--line);border-radius:18px;padding:10px 12px;gap:8px;align-items:center;box-shadow:0 12px 30px -14px rgba(0,0,0,.35)}
+  .pos-mbar>div{flex:1;display:flex;flex-direction:column;line-height:1.2}.pos-mbar b{font-size:22px;font-weight:700;letter-spacing:-.02em}
+  .pos{padding-bottom:90px}
+}
+.pos-top .pos-cust{flex:1 1 240px}
+.pos-top .pos-no{flex:0 0 auto}
+@media(max-width:600px){.pos-top .seg{width:100%}.pos-top .seg button{flex:1}.pos-top label.f{flex:1 1 140px}}
+/* iPhone/Android: 16px inputs never trigger zoom-on-focus */
+@media(max-width:860px){.in,.cell,.wedge input,select.in,textarea.in{font-size:16px}.pos-mbar{left:10px;right:10px;width:auto;bottom:calc(74px + env(safe-area-inset-bottom))}}
+.shell{min-height:100dvh}
+@supports(height:100dvh){.rail{height:100dvh}}
+/* update banner + crash card */
+.updatebar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom));z-index:95;display:flex;gap:10px;align-items:center;background:var(--ink);color:#fff;border-radius:999px;padding:8px 8px 8px 16px;box-shadow:0 12px 30px -10px rgba(0,0,0,.5);font-size:14px;animation:tin .3s var(--ease)}
+@media(min-width:861px){.updatebar{bottom:20px}}
+.updatebar .btn{height:34px;background:#fff;color:var(--ink);border:0}
