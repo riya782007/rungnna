@@ -6,6 +6,8 @@ import { useApp, toast, newStaff } from "../lib/app";
 import { onSync, signIn, signOut, syncNow, exportAll, importAll, type SyncState } from "../lib/sync";
 import type { Pattern } from "../lib/parse";
 import { when } from "../lib/format";
+import { getShop, saveShop, counterCode, DEFAULT_SHOP, type Shop } from "../lib/billing";
+import { health, type Health } from "../lib/ai";
 
 export default function Settings() {
   const { me, setMe } = useApp();
@@ -49,6 +51,8 @@ export default function Settings() {
             </div></div>
         </div>
         <div className="stack">
+          <ShopProfile />
+          <Keys />
           <div className="card"><header><h3>Label layouts learnt</h3></header>
             <div className="pad stack">
               {!pats.length && <div className="mut sm">None yet. When a scanned label isn't understood, the scan screen asks you once which piece is which.</div>}
@@ -130,5 +134,53 @@ export function WhoAreYou() {
         </div>
       </div>
     </div>
+  );
+}
+
+/* Shop profile: printed on every bill, shared by all counters. */
+function ShopProfile() {
+  const [s, setS] = useState<Shop>(DEFAULT_SHOP);
+  const [cc, setCc] = useState("");
+  const [def, setDef] = useState("estimate");
+  useEffect(() => { getShop().then(setS); counterCode().then(setCc); getSetting("default_bill_type", "estimate").then(setDef); }, []);
+  const f = (k: keyof Shop, lbl: string, ph = "") => <label className="f">{lbl}<input className="in" value={String(s[k] ?? "")} placeholder={ph} onChange={e => setS({ ...s, [k]: k === "gst_rate" ? Number(e.target.value) || 0 : e.target.value })} /></label>;
+  return (
+    <div className="card"><header><h3>Shop profile (printed on bills)</h3></header>
+      <div className="pad stack">
+        <div className="grid g2">
+          {f("name", "Shop name")}{f("tagline", "Tagline")}
+          {f("phone", "Phone")}{f("whatsapp", "WhatsApp number")}
+          {f("gstin", "GSTIN", "07ABCDE1234F1Z5")}{f("state", "State", "Delhi")}
+          {f("upi", "UPI ID (for pay-QR on bills)", "rungnna@okaxis")}{f("hsn", "HSN code", "7117")}
+          {f("gst_rate", "GST %", "3")}
+          <label className="f">GST on rates<select className="in" value={s.gst_mode} onChange={e => setS({ ...s, gst_mode: e.target.value as any })}><option value="exclusive">Added on top of rate</option><option value="inclusive">Already included in rate</option></select></label>
+        </div>
+        {f("address", "Address")}{f("bank", "Bank details", "HDFC · A/c 123… · IFSC …")}{f("terms", "Terms (bottom of bill)")}
+        <button className="btn p" onClick={async () => { await saveShop(s); toast("Shop profile saved — every counter gets it"); }}>Save shop profile</button>
+        <div className="grid g2">
+          <label className="f">This counter's code (in bill numbers)<input className="in mono" value={cc} maxLength={4} onChange={e => setCc(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))} onBlur={() => cc && setSetting("counter_code", cc)} /></label>
+          <label className="f">New bills start as<select className="in" value={def} onChange={e => { setDef(e.target.value); setSetting("default_bill_type", e.target.value); }}><option value="estimate">Estimate</option><option value="gst">GST invoice</option></select></label>
+        </div>
+        <div className="xs mut">Each counter numbers its own bills (e.g. RJ/26-27/C1-0001), so two counters can bill offline at the same time without ever clashing. Give every counter a different code.</div>
+      </div></div>
+  );
+}
+
+/* Which secret keys are filled in on Vercel (values are never shown). */
+function Keys() {
+  const [h, setH] = useState<Health | null>(null);
+  const [err, setErr] = useState("");
+  useEffect(() => { health().then(setH).catch(e => setErr(e.message)); }, []);
+  const row = (ok: boolean | undefined, name: string, what: string) => (
+    <div className="row sm" style={{ flexWrap: "nowrap" }}><span className={"pill " + (ok ? "ok" : "warn")}>{ok ? "ready" : "not added"}</span><span className="grow"><b>{name}</b> <span className="mut">— {what}</span></span></div>);
+  return (
+    <div className="card"><header><h3>AI &amp; WhatsApp keys</h3></header>
+      <div className="pad stack" style={{ gap: 8 }}>
+        {err && <div className="note warn sm">Can't check right now ({err}).</div>}
+        {row(h?.ai, "GEMINI_API_KEY", "voice orders, photo fill, Ask the shop")}
+        {row(h?.whatsapp_api, "WHATSAPP_TOKEN + WHATSAPP_PHONE_NUMBER_ID", "optional automatic sending; tap-to-send works without it")}
+        {row(h?.supabase, "SUPABASE_URL + SUPABASE_ANON_KEY", "lets the server check the shop login")}
+        <div className="xs mut">Keys are added in Vercel → project rungnna_shop_os → Settings → Environment Variables, then Deployments → ⋯ → Redeploy. They never go into the app itself.</div>
+      </div></div>
   );
 }

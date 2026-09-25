@@ -52,8 +52,45 @@ export interface Movement extends Row {
   photo_url?: string;
   note: string;
   device: string;
+  ref_bill?: string;       // the bill that caused this movement (sale / void return)
   at: string;              // when it happened
 }
+
+export interface Party extends Row {
+  kind: "customer" | "dealer" | "supplier";
+  name: string; alt_name: string; phone: string; gstin: string;
+  address: string; city: string; state: string; pin: string;
+  photo_id?: string; photo_url?: string;
+  tier: "retail" | "wholesale" | "dealer"; credit_limit: number; notes: string;
+}
+
+export interface BillLine {
+  id: string; product_id?: string; code: string; item: string; type: string; style: string; color: string;
+  box_no: number; pack: number; pkts: number; qty: number; rate: number; disc: string; amount: number;
+}
+export interface Payment { mode: "cash" | "upi" | "card" | "bank" | "credit"; amount: number; ref?: string }
+export type BillType = "gst" | "estimate";
+export type BillStatus = "hold" | "final" | "void" | "converted";
+
+export interface Bill extends Row {
+  no: string; series: string; bill_type: BillType; status: BillStatus;
+  party_id?: string; party_name: string; party_phone: string; party_gstin: string; party_state: string;
+  salesman: string; box_count: number; total_qty: number;
+  gross: number; discount: number; discount_pct: number; packing: number; adjust: number;
+  gst_mode: "exclusive" | "inclusive"; gst_rate: number; gst: number; cgst: number; sgst: number; igst: number;
+  net: number; advance: number; paid: number;
+  remarks: string; payments: Payment[]; items: BillLine[];
+  photo_id?: string; photo_url?: string; voice_id?: string;
+  converted_from?: string; converted_to?: string; void_reason?: string;
+  device: string; by_staff: string; at: string;
+}
+
+export interface VoiceNote extends Row {
+  entity: string; entity_id: string; seconds: number; transcript: string; url?: string; by_staff: string; at: string;
+}
+/* shop-wide settings that every device must share (name, GSTIN, UPI…) */
+export interface Config extends Row { value: any }
+export interface VoiceBlob { id: string; blob: Blob; uploaded: 0 | 1; url?: string; created_at: string }
 
 export interface Staff extends Row {
   name: string;
@@ -77,6 +114,11 @@ class RungnnaDB extends Dexie {
   photos!: Table<Photo, string>;
   outbox!: Table<Outbox, number>;
   stock!: Table<StockCell, string>;
+  parties!: Table<Party, string>;
+  bills!: Table<Bill, string>;
+  voice_notes!: Table<VoiceNote, string>;
+  voice_blobs!: Table<VoiceBlob, string>;
+  config!: Table<Config, string>;
 
   constructor() {
     super("rungnna");
@@ -92,6 +134,14 @@ class RungnnaDB extends Dexie {
     });
     this.version(2).stores({
       products: "id, code, *barcodes, style, item, item_code, color, updated_at, created_at",
+    });
+    this.version(3).stores({
+      movements: "id, product_id, from_loc, to_loc, kind, at, updated_at, ref_bill",
+      parties: "id, name, phone, kind, updated_at",
+      bills: "id, no, status, bill_type, party_id, at, updated_at",
+      voice_notes: "id, entity_id, updated_at",
+      voice_blobs: "id, uploaded",
+      config: "id, updated_at",
     });
   }
 }
@@ -115,7 +165,7 @@ export function deviceId(): string {
 }
 
 /* ---- write helpers: every write lands locally first, then queues for the cloud ---- */
-type Syncable = "products" | "locations" | "movements" | "staff";
+type Syncable = "products" | "locations" | "movements" | "staff" | "parties" | "bills" | "voice_notes" | "config";
 
 export async function put<T extends Row>(table: Syncable, row: T) {
   row.updated_at = now();

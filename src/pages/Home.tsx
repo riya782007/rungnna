@@ -5,6 +5,7 @@ import { Head, useLocations } from "../components/common";
 import { useApp, go } from "../lib/app";
 import { rupees, when } from "../lib/format";
 import { label } from "../lib/products";
+import { due } from "../lib/billing";
 
 /* The owner's one-glance screen: how much is recorded, where it sits, what moved today. */
 export default function Home() {
@@ -16,6 +17,16 @@ export default function Home() {
   const today = useLiveQuery(() => db.movements.where("at").aboveOrEqual(start.toISOString()).toArray(), [], []);
   const recent = useLiveQuery(() => db.movements.orderBy("at").reverse().limit(12).toArray(), [], []);
   const staff = useLiveQuery(() => db.staff.toArray(), [], []);
+  const bills = useLiveQuery(() => db.bills.where("at").aboveOrEqual(start.toISOString()).filter(b => !b.deleted).toArray(), [], []);
+  const held = useLiveQuery(() => db.bills.where("status").equals("hold").filter(b => !b.deleted && !b.no).count(), [], 0);
+  const sales = useMemo(() => {
+    const f = bills.filter(b => b.status === "final");
+    const sum = (x: typeof f) => x.reduce((a, b) => a + b.net, 0);
+    const pay: Record<string, number> = {};
+    f.forEach(b => b.payments.forEach(p => { if (p.mode !== "credit") pay[p.mode] = (pay[p.mode] || 0) + p.amount; }));
+    return { n: f.length, total: sum(f), gst: sum(f.filter(b => b.bill_type === "gst")), est: sum(f.filter(b => b.bill_type === "estimate")),
+      credit: f.reduce((a, b) => a + Math.max(0, due(b)), 0), pcs: f.reduce((a, b) => a + b.total_qty, 0), pay, voids: bills.filter(b => b.status === "void").length };
+  }, [bills]);
 
   const s = useMemo(() => {
     const bucketIds = new Set(locs.filter(l => l.kind === "bucket").map(l => l.id));
@@ -47,8 +58,16 @@ export default function Home() {
   return (
     <div>
       <Head eyebrow={new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })} title={`Namaste${me ? ", " + me.name : ""}`}>
+        <button className="btn g big" onClick={() => go("bill")}>₹ New bill</button>
         <button className="btn p big" onClick={() => go("scan")}>▥ Scan & record</button>
       </Head>
+      <div className="salesband">
+        <div><span className="k">Today's sales</span><b>{rupees(sales.total)}</b><span className="xs">{sales.n} bills · {sales.pcs} pcs</span></div>
+        <div><span className="k">GST invoices</span><b>{rupees(sales.gst)}</b></div>
+        <div><span className="k">Estimates</span><b>{rupees(sales.est)}</b></div>
+        <div><span className="k">Collected</span><b>{rupees(Object.values(sales.pay).reduce((a, x) => a + x, 0))}</b><span className="xs">{Object.entries(sales.pay).map(([m, v]) => m.toUpperCase() + " " + rupees(v)).join(" · ") || "—"}</span></div>
+        <div><span className="k">On credit</span><b style={{ color: sales.credit ? "#F2A7B8" : undefined }}>{rupees(sales.credit)}</b><span className="xs">{held} on hold{sales.voids ? ` · ${sales.voids} cancelled` : ""}</span></div>
+      </div>
       <div className="grid g4" style={{ marginBottom: 12 }}>
         <div className="tile"><div className="k">Products recorded</div><div className="v">{products.length.toLocaleString("en-IN")}</div><div className="xs mut">+{s.newToday} today</div></div>
         <div className="tile"><div className="k">Pieces on racks</div><div className="v">{s.pcs.toLocaleString("en-IN")}</div><div className="xs mut">+{s.pcsToday} recorded today</div></div>

@@ -7,7 +7,8 @@ import { db, getSetting, setSetting, rebuildStock, now } from "./db";
    - Conflicts: last write wins by updated_at for master data; movements are append-only,
      so two phones recording at the same time can never overwrite each other. */
 
-const TABLES = ["staff", "locations", "products", "movements"] as const;
+const TABLES = ["config", "staff", "locations", "parties", "products", "movements", "bills", "voice_notes"] as const;
+const PHOTO_TABLES = ["products", "movements", "bills", "parties"];
 type T = (typeof TABLES)[number];
 
 export type SyncState = { status: "local" | "idle" | "syncing" | "error" | "offline"; pending: number; last?: string; error?: string; user?: string };
@@ -55,7 +56,7 @@ async function uploadPhotos(c: SupabaseClient) {
     const url = c.storage.from("photos").getPublicUrl(path).data.publicUrl;
     await db.photos.update(p.id, { uploaded: 1, url });
     // stamp the url onto whatever row uses this photo
-    for (const t of ["products", "movements"] as const) {
+    for (const t of PHOTO_TABLES) {
       const rows = await (db as any)[t].filter((r: any) => r.photo_id === p.id).toArray();
       for (const r of rows) {
         r.photo_url = url; r.updated_at = now();
@@ -66,9 +67,24 @@ async function uploadPhotos(c: SupabaseClient) {
   }
 }
 
+/* Voice notes: small Opus/AAC clips, uploaded once, then the note row gets the link. */
+async function uploadVoice(c: SupabaseClient) {
+  const list = await db.voice_blobs.where("uploaded").equals(0).limit(10).toArray();
+  for (const v of list) {
+    const ext = v.blob.type.includes("mp4") ? "m4a" : v.blob.type.includes("ogg") ? "ogg" : "webm";
+    const path = `${v.created_at.slice(0, 7)}/${v.id}.${ext}`;
+    const up = await c.storage.from("voice").upload(path, v.blob, { contentType: (v.blob.type || "audio/webm").split(";")[0], upsert: true, cacheControl: "31536000" });
+    if (up.error) throw up.error;
+    const url = c.storage.from("voice").getPublicUrl(path).data.publicUrl;
+    await db.voice_blobs.update(v.id, { uploaded: 1, url });
+    const n = await db.voice_notes.get(v.id);
+    if (n) { n.url = url; n.updated_at = now(); await db.voice_notes.put(n); await db.outbox.add({ table: "voice_notes", row_id: n.id, at: n.updated_at, tries: 0 }); }
+  }
+}
+
 const strip = (t: T, r: any) => {
   const { photo_id, ...rest } = r;
-  if (t === "products" || t === "movements") return { ...rest, photo_id: photo_id || null };
+  if (PHOTO_TABLES.includes(t)) return { ...rest, photo_id: photo_id || null };
   return rest;
 };
 
@@ -129,6 +145,7 @@ export async function syncNow() {
   running = true; emit({ status: "syncing", error: undefined, user: data.session.user.email || "" });
   try {
     await uploadPhotos(c);
+    await uploadVoice(c).catch(() => { /* voice bucket missing must never block stock sync */ });
     await push(c);
     await pull(c);
     emit({ status: "idle", last: now() });
