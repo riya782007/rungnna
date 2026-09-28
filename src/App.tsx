@@ -15,6 +15,7 @@ const Bills = lazy(() => import("./pages/Bills"));
 const Customers = lazy(() => import("./pages/Customers"));
 const Ask = lazy(() => import("./pages/Ask"));
 const Scan = lazy(() => import("./pages/Scan"));
+const Recheck = lazy(() => import("./pages/Recheck"));
 const Labels = lazy(() => import("./pages/Labels"));
 const Racks = lazy(() => import("./pages/Racks"));
 const Move = lazy(() => import("./pages/Move"));
@@ -29,11 +30,11 @@ type Sec = { key: string; label: string; icon: string; tabs?: [string, string][]
 const SECTIONS: Sec[] = [
   { key: "home", label: "Home", icon: "home" },
   { key: "sell", label: "Sell", icon: "sell", tabs: [["bill", "New bill"], ["bills", "Bills"], ["customers", "Customers"]] },
-  { key: "stock", label: "Stock", icon: "stock", tabs: [["products", "Products"], ["stockin", "Stock in"], ["scan", "Scan & record"], ["labels", "Labels"], ["racks", "Racks"], ["move", "Move"], ["activity", "Activity"], ["import", "Import"]] },
+  { key: "stock", label: "Stock", icon: "stock", tabs: [["products", "Products"], ["stockin", "Stock in"], ["scan", "Scan & record"], ["recheck", "Recheck"], ["labels", "Labels"], ["racks", "Racks"], ["move", "Move"], ["activity", "Activity"], ["import", "Import"]] },
   { key: "ask", label: "Ask", icon: "ask" },
   { key: "settings", label: "Settings", icon: "settings" },
 ];
-const sectionOf = (r: string) => (["bill", "bills", "customers"].includes(r) ? "sell" : ["products", "product", "stockin", "scan", "labels", "racks", "move", "activity", "import"].includes(r) ? "stock" : r === "ask" || r === "settings" ? r : "home");
+const sectionOf = (r: string) => (["bill", "bills", "customers"].includes(r) ? "sell" : ["products", "product", "stockin", "scan", "recheck", "labels", "racks", "move", "activity", "import"].includes(r) ? "stock" : r === "ask" || r === "settings" ? r : "home");
 const lastTab: Record<string, string> = { sell: "bill", stock: "products" };
 
 function useSync() {
@@ -88,6 +89,7 @@ function Shell() {
     case "customers": page = can(me, "bill") ? <Customers args={args} /> : <NoAccess />; break;
     case "ask": page = can(me, "ai") ? <Ask /> : <NoAccess />; break;
     case "scan": page = <Scan />; break;
+    case "recheck": page = <Recheck args={args} />; break;
     case "labels": page = <Labels args={args} />; break;
     case "racks": page = <Racks args={args} />; break;
     case "move": page = <Move args={args} />; break;
