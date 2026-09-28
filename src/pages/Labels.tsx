@@ -9,6 +9,8 @@ import { Head, LocationSelect, DeadToggle } from "../components/common";
 import { WedgeInput } from "../components/Scanner";
 import { useApp, toast } from "../lib/app";
 import { toPaise } from "../lib/format";
+import { getRule, priceFromCost, type PricingRule } from "../lib/pricing";
+import { buildTSPL, labelFromProduct, printTSPL, directPrintSupported, connectSerial, serialSupported } from "../lib/tsc";
 
 /* Label settings — every number is in millimetres so what you see is what the printer gets. */
 export type LabelCfg = {
@@ -16,7 +18,7 @@ export type LabelCfg = {
   w: number; h: number; cols: number; gapX: number; gapY: number;
   sheetW: number; sheetH: number; top: number; left: number; rows: number;
   qr: number; font: number; pad: number; offX: number; offY: number;
-  shop: string; format: "shop" | "rungnna"; layout: "shop" | "stack"; show: { shop: boolean; item: boolean; style: boolean; color: boolean; rate: boolean; tk: boolean; code: boolean; qty: boolean };
+  shop: string; format: "shop" | "rungnna"; layout: "shop" | "stack"; show: { shop: boolean; item: boolean; style: boolean; color: boolean; rate: boolean; tk: boolean; code: boolean; qty: boolean; cost_code: boolean };
 };
 
 export const PRESETS: { key: string; name: string; cfg: Partial<LabelCfg> }[] = [
@@ -35,7 +37,7 @@ export const PRESETS: { key: string; name: string; cfg: Partial<LabelCfg> }[] = 
 export const DEFAULT_CFG: LabelCfg = {
   preset: "rj", mode: "roll", w: 50, h: 20, cols: 1, gapX: 0, gapY: 0, sheetW: 210, sheetH: 297, top: 0, left: 0, rows: 1,
   qr: 15, font: 7.5, pad: 1.2, offX: 0, offY: 0, shop: "RUNGNNA", format: "shop", layout: "shop",
-  show: { shop: true, item: true, style: true, color: true, rate: true, tk: false, code: false, qty: true },
+  show: { shop: true, item: true, style: true, color: true, rate: true, tk: false, code: false, qty: true, cost_code: false },
 };
 
 type Job = { p: Product; qtyOnLabel: number; copies: number };
@@ -50,9 +52,27 @@ export default function Labels({ args }: { args: string[] }) {
   const [addStock, setAddStock] = useState(false);
   const [loc, setLoc] = useState("");
   const [printing, setPrinting] = useState(false);
+  const [rule, setRule] = useState<PricingRule | null>(null);
+  const [cost, setCost] = useState("");          // ₹ cost entered by the operator
+  const vendors = useLiveQuery(() => db.parties.filter(p => p.kind === "supplier" && !p.deleted).toArray(), [], []);
   const items = useLiveQuery(() => distinct("item"), [], []);
 
   useEffect(() => { getSetting<LabelCfg>("label_cfg", DEFAULT_CFG).then(c => setCfg({ ...DEFAULT_CFG, ...c, show: { ...DEFAULT_CFG.show, ...c.show } })); }, []);
+  useEffect(() => { getRule().then(setRule); }, []);
+
+  /* Consistent pricing: the moment a cost is entered, the sell RATE and the
+     encrypted COST CODE are computed by the shop-wide rule — the same cost always
+     gives the same rate + code, on every device. The operator can still override
+     the rate by hand (that sets price_locked so the rule won't stomp it). */
+  const applyCost = (rupees: string) => {
+    setCost(rupees);
+    const r = rule; if (!r) return;
+    const paise = toPaise(rupees);
+    if (!paise) return;
+    const pack = Math.max(1, parseInt(qty) || 1);
+    const { rate, cost_code } = priceFromCost(paise, r, pack, form.type || "PCS");
+    setForm(f => ({ ...f, cost: paise, rate: f.price_locked ? f.rate : rate, cost_code }));
+  };
   useEffect(() => { if (args[0]) db.products.get(args[0]).then(p => { if (p) { setForm({ ...p }); setQty(String(p.pack || 1)); } }); }, [args[0]]);
   const upd = (patch: Partial<LabelCfg>) => { const c = { ...cfg, ...patch }; setCfg(c); setSetting("label_cfg", c); };
   const set = (k: keyof Product, v: any) => setForm(f => ({ ...f, [k]: v }));
@@ -64,7 +84,10 @@ export default function Labels({ args }: { args: string[] }) {
     const pack = Math.max(1, parseInt(qty) || 1);
     const item_code = form.item_code || (await itemCodeFor(form.item)) || undefined;
     const p = existing && existing.id !== form.id
-      ? { ...existing, rate: form.rate || existing.rate, tk: form.tk || existing.tk, pack, item_code: existing.item_code || item_code }
+      ? { ...existing, rate: form.rate || existing.rate, tk: form.tk || existing.tk, pack, item_code: existing.item_code || item_code,
+          // carry the new pricing / vendor / keying fields onto the matched product
+          cost: form.cost || existing.cost, cost_code: form.cost_code || existing.cost_code, price_locked: form.price_locked ?? existing.price_locked,
+          model: form.model || existing.model, vendor_id: form.vendor_id || existing.vendor_id, vendor_name: form.vendor_name || existing.vendor_name }
       : { ...form, pack, item_code, created_by: form.created_by || me?.id || "" };
     const saved = await saveProduct(p);
     const n = Math.max(1, parseInt(copies) || 1);
@@ -74,7 +97,7 @@ export default function Labels({ args }: { args: string[] }) {
     }
     setJobs(j => [...j, { p: saved, qtyOnLabel: Math.max(1, parseInt(qty) || 1), copies: n }]);
     toast(`${n} labels queued · ${label(saved)}`);
-    setForm(blankProduct(me?.id || "")); setQty("1");
+    setForm(blankProduct(me?.id || "")); setQty("1"); setCost("");
   };
 
   const flat = useMemo(() => jobs.flatMap(j => Array.from({ length: j.copies }, () => j)), [jobs]);
@@ -82,9 +105,34 @@ export default function Labels({ args }: { args: string[] }) {
 
   const doPrint = () => { setPrinting(true); setTimeout(() => { window.print(); setPrinting(false); }, 150); };
 
+  /* Direct-to-TSC: send TSPL for every queued label straight to the printer.
+     Falls back to the on-screen print sheet if the browser can't reach the printer. */
+  const doPrintTSC = async () => {
+    if (!flat.length) return;
+    try {
+      if (serialSupported()) { try { await connectSerial(); } catch { /* user may already have granted a port */ } }
+      let sent = 0;
+      for (const j of jobs) {
+        const qr = ownPayload({ ...j.p, pack: j.p.pack || j.qtyOnLabel }, cfg.format || "shop");
+        const lbl = labelFromProduct(j.p, {
+          qr, costCode: cfg.show.cost_code ? j.p.cost_code : undefined,
+          wmm: cfg.w, hmm: cfg.h, gapmm: cfg.gapY || 2, copies: j.copies,
+          offXmm: cfg.offX, offYmm: cfg.offY,
+        });
+        await printTSPL(buildTSPL(lbl));
+        sent += j.copies;
+      }
+      toast(`Sent ${sent} labels to the TSC printer`);
+    } catch (e: any) {
+      toast((e?.message || "Direct print failed") + " — using on-screen print instead", true);
+      doPrint();
+    }
+  };
+
   return (
     <div>
       <Head eyebrow="Barcode print" title="QR labels" sub="Same fields as the old BARCODE PRINT screen. Every label carries its own details inside the QR, so it scans even on a phone with no internet.">
+        {directPrintSupported() && <button className="btn dk" disabled={!total} onClick={doPrintTSC} title="Send straight to the TSC label printer">Print to TSC {total || ""}</button>}
         <button className="btn g" disabled={!total} onClick={doPrint}>Print {total || ""} labels</button>
       </Head>
       <div className="split">
@@ -103,9 +151,16 @@ export default function Labels({ args }: { args: string[] }) {
                   <select className="in" value={form.type} onChange={e => set("type", e.target.value)}>{DEFAULT_TYPES.map(t => <option key={t}>{t}</option>)}</select></label>
                 <label className="f">STYLE<input className="in mono" value={form.style} onChange={e => set("style", e.target.value.toUpperCase())} placeholder="K5209/59SH" /></label>
                 <label className="f">COLOR<input className="in mono" value={form.color} onChange={e => set("color", e.target.value.toUpperCase())} placeholder="K/GBN" /></label>
+                <label className="f">MODEL / ARTICLE No.<input className="in mono" value={form.model || ""} onChange={e => set("model", e.target.value.toUpperCase() || undefined)} placeholder="vendor's article no" /></label>
+                <label className="f">VENDOR
+                  <select className="in" value={form.vendor_id || ""} onChange={e => { const v = vendors.find(x => x.id === e.target.value); set("vendor_id", e.target.value || undefined); set("vendor_name", v?.name || undefined); }}>
+                    <option value="">—</option>{vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>
                 <div style={{ gridColumn: "1/-1" }}><DeadToggle value={form.tk} onChange={v => set("tk", v)} /></div>
                 <label className="f">ITEM CODE (old software)<input className="in mono" inputMode="numeric" value={form.item_code || ""} placeholder="auto" onChange={e => set("item_code", e.target.value.replace(/\D/g, "") || undefined)} /></label>
-                <label className="f">RATE ₹<input className="in hi mono" inputMode="decimal" value={form.rate ? String(form.rate / 100) : ""} onChange={e => set("rate", toPaise(e.target.value))} /></label>
+                <label className="f">COST ₹ (owner) — sets rate &amp; code automatically
+                  <input className="in mono" inputMode="decimal" value={cost} placeholder="enter cost" onChange={e => applyCost(e.target.value)} /></label>
+                <label className="f">RATE ₹ {form.cost_code && <span className="xs mut">code {form.cost_code}</span>}
+                  <input className="in hi mono" inputMode="decimal" value={form.rate ? String(form.rate / 100) : ""} onChange={e => { set("rate", toPaise(e.target.value)); set("price_locked", 1); }} /></label>
                 <label className="f">QTY (pieces per packet — prints as ₹RATE X QTY PCS)<input className="in mono" inputMode="numeric" value={qty} onChange={e => setQty(e.target.value.replace(/\D/g, ""))} /></label>
                 <label className="f">PRINT QTY (labels)<input className="in mono" inputMode="numeric" value={copies} onChange={e => setCopies(e.target.value.replace(/\D/g, ""))}
                   onKeyDown={e => e.key === "Enter" && addJob()} /></label>
@@ -151,6 +206,7 @@ export function LabelView({ cfg, p, qtyOnLabel = 1 }: { cfg: LabelCfg; p: Produc
         {s.color && p.color && <div>{p.color}</div>}
         {s.tk && p.tk && <div>TK {p.tk}</div>}
         {s.rate && p.rate > 0 && <div style={{ fontWeight: 800, fontSize: fs * 1.35 + "pt" }}>₹{p.rate / 100}{s.qty ? `X${pp.pack}${p.type || "PCS"}` : ""}</div>}
+        {s.cost_code && p.cost_code && <div style={{ fontFamily: "monospace", fontWeight: 700, fontSize: fs * 0.95 + "pt" }}>{p.cost_code}</div>}
         {s.code && <div style={{ fontFamily: "monospace", fontSize: fs * 0.8 + "pt" }}>{p.code}</div>}
       </div>
       <div className="q" style={{ width: q + "mm", height: q + "mm" }} dangerouslySetInnerHTML={{ __html: svg }} />
@@ -168,6 +224,7 @@ export function LabelView({ cfg, p, qtyOnLabel = 1 }: { cfg: LabelCfg; p: Produc
         {s.tk && p.tk && <div>TK {p.tk}</div>}
         {s.qty && <div>{qtyOnLabel} {p.type || "PCS"}</div>}
         {s.rate && p.rate > 0 && <div style={{ fontWeight: 800, fontSize: fs * 1.25 + "pt" }}>₹{p.rate / 100}</div>}
+        {s.cost_code && p.cost_code && <div style={{ fontFamily: "monospace", fontWeight: 700, fontSize: fs * 0.95 + "pt" }}>{p.cost_code}</div>}
         {s.code && <div style={{ fontFamily: "monospace", fontSize: fs * 0.85 + "pt" }}>{p.code}</div>}
       </div>
     </div>
