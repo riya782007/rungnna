@@ -10,6 +10,7 @@ import { rupees, toPaise, when } from "../lib/format";
 import { describePhoto } from "../lib/ai";
 import { VoiceNotes } from "../components/Voice";
 import { usePrivate, maskNote } from "../lib/privacy";
+import { getTaxonomy, allItems, type Taxonomy } from "../lib/taxonomy";
 
 export default function Products({ args }: { args: string[] }) {
   if (args[0]) return <ProductDetail id={args[0]} />;
@@ -61,8 +62,13 @@ function ProductDetail({ id }: { id: string }) {
   const moves = useLiveQuery(() => db.movements.where("product_id").equals(id).reverse().sortBy("at"), [id], []);
   const staff = useLiveQuery(() => db.staff.toArray(), [], []);
   const [p, setP] = useState<Product | null>(null);
+  const [tax, setTax] = useState<Taxonomy | null>(null);
+  const allProducts = useLiveQuery(() => db.products.toArray(), [], []);
   useEffect(() => { if (p0) setP({ ...p0 }); }, [p0?.updated_at]);
+  useEffect(() => { getTaxonomy().then(setTax); }, []);
   if (!p) return <div className="card pad">Loading…</div>;
+  const itemOpts = allItems(allProducts.map(x => x.item).filter(Boolean));
+  const colourNames = tax?.colours.map(c => c.name) || [];
   const set = (k: keyof Product, v: any) => setP({ ...p, [k]: v });
   const total = stock.reduce((a, c) => a + c.qty, 0);
   const locOf = (x: string | null) => (x ? locs.find(l => l.id === x)?.code || "?" : "");
@@ -87,14 +93,25 @@ function ProductDetail({ id }: { id: string }) {
               } catch (e: any) { toast(e.message, true); }
             }}>✨ Fill from photo</button>}</div>
           <div className="grid g2">
-            <label className="f">Item<input className="in" value={p.item} onChange={e => set("item", e.target.value.toUpperCase())} /></label>
+            <label className="f">Item
+              <input className="in" list={"pd-items-" + p.id} value={p.item} onChange={e => set("item", e.target.value.toUpperCase())} />
+              <datalist id={"pd-items-" + p.id}>{itemOpts.map(i => <option key={i} value={i} />)}</datalist></label>
             <label className="f">Type<select className="in" value={p.type} onChange={e => set("type", e.target.value)}>{[...new Set([p.type, ...DEFAULT_TYPES])].map(t => <option key={t}>{t}</option>)}</select></label>
-            <label className="f">Style<input className="in mono" value={p.style} onChange={e => set("style", e.target.value.toUpperCase())} /></label>
-            <label className="f">Color<input className="in mono" value={p.color} onChange={e => set("color", e.target.value.toUpperCase())} /></label>
+            <label className="f">Style
+              <input className="in mono" list={"pd-styles-" + p.id} value={p.style} onChange={e => set("style", e.target.value.toUpperCase())} />
+              <datalist id={"pd-styles-" + p.id}>{(tax?.styles || []).map(s => <option key={s} value={s} />)}</datalist></label>
+            <label className="f">Color
+              <input className="in mono" list={"pd-colours-" + p.id} value={p.color} onChange={e => set("color", e.target.value.toUpperCase())} />
+              <datalist id={"pd-colours-" + p.id}>{colourNames.map(c => <option key={c} value={c} />)}</datalist></label>
+            <label className="f">Category
+              <input className="in" list={"pd-cats-" + p.id} value={p.category} onChange={e => set("category", e.target.value)} />
+              <datalist id={"pd-cats-" + p.id}>{(tax?.categories || []).map(c => <option key={c} value={c} />)}</datalist></label>
+            <label className="f">Size
+              <input className="in" list={"pd-sizes-" + p.id} value={p.size || ""} onChange={e => set("size", e.target.value || undefined)} />
+              <datalist id={"pd-sizes-" + p.id}>{(tax?.sizes || []).map(s => <option key={s} value={s} />)}</datalist></label>
             <div style={{ gridColumn: "1/-1" }}><DeadToggle value={p.tk} onChange={v => set("tk", v)} /></div>
             <label className="f">Rate ₹<input className="in hi mono" inputMode="decimal" value={p.rate ? String(p.rate / 100) : ""} onChange={e => set("rate", toPaise(e.target.value))} /></label>
             <label className="f">MRP ₹<input className="in mono" inputMode="decimal" value={p.mrp ? String(p.mrp / 100) : ""} onChange={e => set("mrp", toPaise(e.target.value))} /></label>
-            <label className="f">Category<input className="in" value={p.category} onChange={e => set("category", e.target.value)} /></label>
             <label className="f">Pieces per packet<input className="in mono" inputMode="numeric" value={p.pack || ""} onChange={e => set("pack", parseInt(e.target.value.replace(/\D/g, "")) || undefined)} /></label>
             <label className="f">Item code (old software)<input className="in mono" inputMode="numeric" value={p.item_code || ""} onChange={e => set("item_code", e.target.value.replace(/\D/g, "") || undefined)} /></label>
           </div>

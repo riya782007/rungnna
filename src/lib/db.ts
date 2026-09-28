@@ -30,6 +30,10 @@ export interface Product extends Row {
   vendor_name?: string;    // denormalised for offline display / labels
   cost_code?: string;      // encrypted cost code printed on the label (from lib/pricing)
   price_locked?: 0 | 1;    // 1 = rate/cost_code were set by hand, don't overwrite from the rule
+  size?: string;           // size / measurement option (e.g. 2.4, Free size)
+  pro_photo_id?: string;   // polished catalogue image (local); replaces raw for the catalogue
+  pro_photo_url?: string;  // cloud copy of the polished catalogue image
+  catalogue?: 0 | 1;       // 1 = published to the shareable catalogue
   /* --- image recognition (hybrid matching) --- */
   embedding?: number[];    // visual feature vector for photo search (unit-normalised)
   embedding_dim?: number;  // length of the vector, so a model change can be detected

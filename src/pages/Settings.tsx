@@ -12,6 +12,7 @@ import { can, ROLE_NOTE } from "../lib/roles";
 import { getPrivate, setCode, lockNow, usePrivate } from "../lib/privacy";
 import { getRule, saveRule, validateKey, priceFromCost, DEFAULT_RULE, type PricingRule, type RoundTo } from "../lib/pricing";
 import { rupees, toPaise } from "../lib/format";
+import { getTaxonomy, addTo, removeFrom, addColour, removeColour, colourCodeFor, type Taxonomy } from "../lib/taxonomy";
 
 export default function Settings() {
   const { me, setMe } = useApp();
@@ -76,6 +77,7 @@ export default function Settings() {
           {boss && <PrivateCard />}
           {admin && <ShopProfile />}
           {admin && <PricingCard />}
+          {admin && <TaxonomyCard />}
           {admin && <Keys />}
           {admin && <div className="card"><header><h3>Label layouts learnt</h3></header>
             <div className="pad stack">
@@ -289,6 +291,70 @@ function PricingCard() {
 
         <button className="btn p" onClick={save} disabled={c.method === "letters" && !!keyErr}>Save pricing rule</button>
         <div className="xs mut">Tip: the code word is the whole secret — anyone who knows it can read a cost off a shelf tag. Share it only with people you trust, and change it here if it ever leaks.</div>
+      </div></div>
+  );
+}
+
+/* Owner/admin: the shop's master lists for CATEGORIES, STYLES, COLOURS and SIZES.
+   These power the dropdowns on the product screen and the catalogue. Add a colour
+   once and it's available on every device. Free text is still allowed on products;
+   this just keeps things consistent. */
+function TaxonomyCard() {
+  const [t, setT] = useState<Taxonomy | null>(null);
+  const [newCat, setNewCat] = useState("");
+  const [newStyle, setNewStyle] = useState("");
+  const [newSize, setNewSize] = useState("");
+  const [newColour, setNewColour] = useState("");
+  useEffect(() => { getTaxonomy().then(setT); }, []);
+  if (!t) return null;
+
+  const chipList = (field: "categories" | "styles" | "sizes", value: string, setValue: (v: string) => void, label: string) => (
+    <div className="stack" style={{ gap: 6 }}>
+      <div className="sm b">{label}</div>
+      <div className="chips">
+        {t[field].map(x => (
+          <span key={x} className="chip" style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+            {x}<button className="linkbtn" title="Remove" onClick={async () => setT(await removeFrom(field, x))}>✕</button>
+          </span>
+        ))}
+        {!t[field].length && <span className="xs mut">None yet.</span>}
+      </div>
+      <div className="row" style={{ gap: 6 }}>
+        <input className="in" style={{ minHeight: 34 }} placeholder={"Add " + label.toLowerCase().replace(/s$/, "")} value={value}
+          onChange={e => setValue(e.target.value)} onKeyDown={async e => { if (e.key === "Enter" && value.trim()) { setT(await addTo(field, value.trim())); setValue(""); } }} />
+        <button className="btn sm" onClick={async () => { if (value.trim()) { setT(await addTo(field, value.trim())); setValue(""); } }}>Add</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="card"><header><h3>Categories, styles &amp; colours</h3><span className="grow" /><span className="pill ok">used across the app</span></header>
+      <div className="pad stack" style={{ gap: 14 }}>
+        {chipList("categories", newCat, setNewCat, "Categories")}
+        {chipList("styles", newStyle, setNewStyle, "Styles")}
+        {chipList("sizes", newSize, setNewSize, "Sizes")}
+
+        <div className="stack" style={{ gap: 6 }}>
+          <div className="sm b">Colours <span className="xs mut">(the code prints on the label as {"{style}-{code}"})</span></div>
+          <div className="stack" style={{ gap: 4, maxHeight: 200, overflow: "auto" }}>
+            {t.colours.map(c => (
+              <div key={c.name} className="row between sm">
+                <span className="grow">{c.name}</span>
+                <span className="mono xs mut">{c.code}</span>
+                <button className="btn sm bad" onClick={async () => setT(await removeColour(c.name))}>Remove</button>
+              </div>
+            ))}
+            {!t.colours.length && <span className="xs mut">None yet.</span>}
+          </div>
+          <div className="row" style={{ gap: 6 }}>
+            <input className="in" style={{ minHeight: 34 }} placeholder="Add colour (e.g. Rani Pink)" value={newColour}
+              onChange={e => setNewColour(e.target.value)} onKeyDown={async e => { if (e.key === "Enter" && newColour.trim()) { setT(await addColour(newColour.trim())); setNewColour(""); } }} />
+            {newColour.trim() && <span className="pill">{colourCodeFor(newColour)}</span>}
+            <button className="btn sm" onClick={async () => { if (newColour.trim()) { setT(await addColour(newColour.trim())); setNewColour(""); } }}>Add</button>
+          </div>
+        </div>
+
+        <div className="xs mut">Changes save instantly and sync to every counter. To reset to a fresh starter set, clear a list and re-add — nothing here is fixed in code.</div>
       </div></div>
   );
 }
