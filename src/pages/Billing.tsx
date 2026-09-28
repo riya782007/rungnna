@@ -10,7 +10,7 @@ import { can } from "../lib/roles";
 import { usePrivate, unlock, lockNow, getPrivate, isOpen } from "../lib/privacy";
 import { Icon } from "../components/Icon";
 import { rupees, toPaise } from "../lib/format";
-import { CameraScanner } from "../components/Scanner";
+import { CameraScanner, useScannerGun } from "../components/Scanner";
 import { MicButton } from "../components/Voice";
 import { Modal, PhotoButton, Thumb } from "../components/common";
 import { PrintBill, type PrintFormat } from "../components/Invoice";
@@ -89,6 +89,12 @@ export default function Billing({ args }: { args: string[] }) {
       return { ...x, items: [...x.items, line] };
     });
   }
+
+  /* Hardware scanner gun works anywhere on the bill screen — even if the focus
+     isn't in the scan box (e.g. the operator tapped Remarks). The hook ignores
+     keystrokes while a real field is focused, so it never double-reads what the
+     scan box already handles. */
+  useScannerGun((code) => onCode(code));
 
   /* a scan or Enter in the box: find the product; unknown shop labels create the product on the spot */
   async function onCode(raw: string) {
