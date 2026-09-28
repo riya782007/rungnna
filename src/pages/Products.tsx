@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, type Product } from "../lib/db";
 import { label, DEFAULT_TYPES, saveProduct } from "../lib/products";
-import { Head, Thumb, PhotoButton, useLocations, locName, DeadToggle } from "../components/common";
+import { Head, Thumb, useLocations, locName, DeadToggle, ImageAssist } from "../components/common";
 import { WedgeInput } from "../components/Scanner";
 import { findByScan } from "../lib/products";
 import { go, toast } from "../lib/app";
@@ -74,18 +74,18 @@ function ProductDetail({ id }: { id: string }) {
       </Head>
       <div className="split">
         <div className="card pad stack">
-          <div className="row"><Thumb photo_id={p.photo_id} url={p.photo_url} text={p.item} size={96} /><PhotoButton value={p.photo_id} onChange={v => set("photo_id", v)} />
-            {(p.photo_id || p.photo_url) && <button className="btn sm" onClick={async () => {
-              try {
-                const blob = p.photo_id ? (await db.photos.get(p.photo_id))?.blob : await (await fetch(p.photo_url!)).blob();
-                if (!blob) return;
-                toast("Looking at the photo…");
-                const r = await describePhoto(blob);
-                setP(x => x && ({ ...x, item: x.item || (r.item || "").toUpperCase(), color: x.color || (r.color || "").toUpperCase(),
-                  notes: [x.notes, r.description, r.tags?.length ? "Tags: " + r.tags.join(", ") : ""].filter(Boolean).join("\n") }));
-                toast("Filled from photo — check and Save");
-              } catch (e: any) { toast(e.message, true); }
-            }}>✨ Fill from photo</button>}</div>
+          <ImageAssist product={p} onPhoto={v => set("photo_id", v)} />
+          {(p.photo_id || p.photo_url) && <button className="btn sm" onClick={async () => {
+            try {
+              const blob = p.photo_id ? (await db.photos.get(p.photo_id))?.blob : await (await fetch(p.photo_url!)).blob();
+              if (!blob) return;
+              toast("Looking at the photo…");
+              const r = await describePhoto(blob);
+              setP(x => x && ({ ...x, item: x.item || (r.item || "").toUpperCase(), color: x.color || (r.color || "").toUpperCase(),
+                notes: [x.notes, r.description, r.tags?.length ? "Tags: " + r.tags.join(", ") : ""].filter(Boolean).join("\n") }));
+              toast("Filled from photo — check and Save");
+            } catch (e: any) { toast(e.message, true); }
+          }}>✨ Fill from photo</button>}
           <div className="grid g2">
             <label className="f">Item<input className="in" value={p.item} onChange={e => set("item", e.target.value.toUpperCase())} /></label>
             <label className="f">Type<select className="in" value={p.type} onChange={e => set("type", e.target.value)}>{[...new Set([p.type, ...DEFAULT_TYPES])].map(t => <option key={t}>{t}</option>)}</select></label>
