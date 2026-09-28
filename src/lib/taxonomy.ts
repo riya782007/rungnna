@@ -100,7 +100,8 @@ export async function removeFrom(field: "categories" | "styles" | "sizes", value
 export async function addColour(name: string, code?: string): Promise<Taxonomy> {
   const t = await getTaxonomy(); const n = name.trim(); if (!n) return t;
   if (!t.colours.some(c => c.name.toLowerCase() === n.toLowerCase())) {
-    t.colours = [...t.colours, { name: n, code: (code || colourCodeFor(n)).toUpperCase(), sort: (t.colours.at(-1)?.sort || 0) + 1 }];
+    const lastSort = t.colours.length ? t.colours[t.colours.length - 1].sort : 0;
+    t.colours = [...t.colours, { name: n, code: (code || colourCodeFor(n)).toUpperCase(), sort: lastSort + 1 }];
   }
   return saveTaxonomy(t);
 }
