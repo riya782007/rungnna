@@ -10,6 +10,8 @@ import { getShop, saveShop, counterCode, DEFAULT_SHOP, type Shop } from "../lib/
 import { health, type Health } from "../lib/ai";
 import { can, ROLE_NOTE } from "../lib/roles";
 import { getPrivate, setCode, lockNow, usePrivate } from "../lib/privacy";
+import { getRule, saveRule, validateKey, priceFromCost, DEFAULT_RULE, type PricingRule, type RoundTo } from "../lib/pricing";
+import { rupees, toPaise } from "../lib/format";
 
 export default function Settings() {
   const { me, setMe } = useApp();
@@ -73,6 +75,7 @@ export default function Settings() {
         <div className="stack">
           {boss && <PrivateCard />}
           {admin && <ShopProfile />}
+          {admin && <PricingCard />}
           {admin && <Keys />}
           {admin && <div className="card"><header><h3>Label layouts learnt</h3></header>
             <div className="pad stack">
@@ -186,6 +189,106 @@ function ShopProfile() {
           <label className="f">New bills start as<select className="in" value={def} onChange={e => { setDef(e.target.value); setSetting("default_bill_type", e.target.value); }}><option value="estimate">Estimate</option><option value="gst">GST invoice</option></select></label>
         </div>
         <div className="xs mut">Each counter numbers its own bills (e.g. RJ/26-27/C1-0001), so two counters can bill offline at the same time without ever clashing. Give every counter a different code.</div>
+      </div></div>
+  );
+}
+
+/* Owner/admin: the fixed rule that turns a COST into the sell rate + the secret
+   cost code on every label — so the same cost always encodes the same way, on
+   every device. The 10-letter code word is the whole secret, so it lives only in
+   the shop's own synced config, never in the app code. */
+function PricingCard() {
+  const [rule, setRule] = useState<PricingRule>(DEFAULT_RULE);
+  const [sample, setSample] = useState("120");   // ₹ cost to preview
+  const [keyErr, setKeyErr] = useState<string | null>(null);
+  useEffect(() => { getRule().then(r => { setRule(r); setKeyErr(validateKey(r.code.key)); }); }, []);
+
+  const m = rule.margin, c = rule.code;
+  const setM = (patch: Partial<PricingRule["margin"]>) => setRule(r => ({ ...r, margin: { ...r.margin, ...patch } }));
+  const setC = (patch: Partial<PricingRule["code"]>) => setRule(r => ({ ...r, code: { ...r.code, ...patch } }));
+
+  const preview = (() => {
+    const paise = toPaise(sample);
+    if (!paise) return null;
+    if (c.method === "letters" && validateKey(c.key)) return null; // don't preview with a broken key
+    try { return priceFromCost(paise, rule, 12, "PCS"); } catch { return null; }
+  })();
+
+  const save = async () => {
+    const err = c.method === "letters" ? validateKey(c.key) : null;
+    if (err) { setKeyErr(err); toast(err, true); return; }
+    await saveRule(rule);
+    toast("Pricing rule saved — every counter now encodes the same way");
+  };
+
+  return (
+    <div className="card"><header><h3>Pricing &amp; cost code</h3><span className="grow" /><span className="pill ok">used on every label</span></header>
+      <div className="pad stack">
+        <div className="xs mut">Enter a cost on the Labels screen and the sell rate + secret code fill in by themselves. Change the rule here and it reaches every counter.</div>
+
+        {/* --- margin: cost -> sell rate --- */}
+        <div className="grid g2">
+          <label className="f">Sell price is cost
+            <select className="in" value={m.mode} onChange={e => setM({ mode: e.target.value as any })}>
+              <option value="multiply">× a factor</option>
+              <option value="divide">÷ a factor</option>
+              <option value="percent">+ a percent markup</option>
+            </select></label>
+          {m.mode === "percent"
+            ? <label className="f">Markup %<input className="in mono" inputMode="decimal" value={m.percent} onChange={e => setM({ percent: Number(e.target.value) || 0 })} /></label>
+            : <label className="f">Factor<input className="in mono" inputMode="decimal" value={m.factor} onChange={e => setM({ factor: Number(e.target.value) || 0 })} /></label>}
+          <label className="f">Round the price to
+            <select className="in" value={m.round_to} onChange={e => setM({ round_to: Number(e.target.value) as RoundTo })}>
+              <option value={0}>Exact (paise)</option><option value={1}>₹1</option><option value={5}>₹5</option>
+              <option value={10}>₹10</option><option value={50}>₹50</option><option value={100}>₹100</option>
+            </select></label>
+          <label className="f">Rounding
+            <select className="in" value={m.round_dir} onChange={e => setM({ round_dir: e.target.value as any })}>
+              <option value="nearest">Nearest</option><option value="up">Always up</option>
+            </select></label>
+        </div>
+
+        {/* --- how the cost is hidden on the label --- */}
+        <div className="grid g2">
+          <label className="f">Hide the cost as
+            <select className="in" value={c.method} onChange={e => { setC({ method: e.target.value as any }); setKeyErr(e.target.value === "letters" ? validateKey(c.key) : null); }}>
+              <option value="letters">Code word (letters)</option>
+              <option value="shift">Maths shift (× / +)</option>
+              <option value="plain">Plain number (no hiding)</option>
+            </select></label>
+          <label className="f">Code prefix (optional)<input className="in mono" value={c.prefix} maxLength={4} onChange={e => setC({ prefix: e.target.value.toUpperCase() })} /></label>
+
+          {c.method === "letters" && (
+            <label className="f" style={{ gridColumn: "1/-1" }}>Secret code word — 10 different letters, one per digit 0–9
+              <input className={"in mono" + (keyErr ? " bad" : "")} value={c.key} maxLength={10}
+                onChange={e => { const k = e.target.value.toUpperCase().replace(/[^A-Z]/g, ""); setC({ key: k }); setKeyErr(validateKey(k)); }} />
+              {keyErr ? <span className="xs bad">{keyErr}</span>
+                : <span className="xs mut">{c.key.split("").map((ch, i) => `${i}=${ch}`).join("  ")}</span>}
+            </label>
+          )}
+          {c.method === "shift" && <>
+            <label className="f">Multiply cost by<input className="in mono" inputMode="decimal" value={c.mult} onChange={e => setC({ mult: Number(e.target.value) || 1 })} /></label>
+            <label className="f">Then add<input className="in mono" inputMode="decimal" value={c.add} onChange={e => setC({ add: Number(e.target.value) || 0 })} /></label>
+          </>}
+          <label className="row sm" style={{ gridColumn: "1/-1" }}><input type="checkbox" checked={c.suffix_pack} onChange={e => setC({ suffix_pack: e.target.checked })} /> Append the packing to the code (e.g. X12PCS)</label>
+        </div>
+
+        {/* --- live preview --- */}
+        <div className="note stack" style={{ gap: 6 }}>
+          <div className="row sm" style={{ flexWrap: "nowrap" }}>
+            <label className="f" style={{ margin: 0 }}>Try a cost ₹<input className="in mono" style={{ width: 110 }} inputMode="decimal" value={sample} onChange={e => setSample(e.target.value)} /></label>
+            <span className="grow" />
+          </div>
+          {preview ? (
+            <div className="row sm" style={{ gap: 16 }}>
+              <span>Sell rate: <b className="mono">{rupees(preview.rate)}</b></span>
+              <span>Label code: <b className="mono">{preview.cost_code}</b></span>
+            </div>
+          ) : <div className="xs mut">{c.method === "letters" && keyErr ? "Fix the code word to see the preview." : "Enter a cost to preview."}</div>}
+        </div>
+
+        <button className="btn p" onClick={save} disabled={c.method === "letters" && !!keyErr}>Save pricing rule</button>
+        <div className="xs mut">Tip: the code word is the whole secret — anyone who knows it can read a cost off a shelf tag. Share it only with people you trust, and change it here if it ever leaks.</div>
       </div></div>
   );
 }
