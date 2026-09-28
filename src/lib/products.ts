@@ -25,6 +25,29 @@ export async function findByScan(raw: string, parsed?: Parsed): Promise<Product 
   return undefined;
 }
 
+/* The product master is keyed on [Model/Article + Vendor] (with style/colour as the
+   tie-breaker). This is the guardrail from the spec: two vendors can sell an
+   identical-looking piece and they must stay distinct products. Returns an exact
+   match only — used before creating a product from a photo, so visual similarity
+   alone can never merge two different articles. */
+export function productKey(p: Pick<Product, "model" | "style" | "color" | "vendor_id">): string {
+  return [
+    (p.model || p.style || "").trim().toUpperCase(),
+    (p.color || "").trim().toUpperCase(),
+    (p.vendor_id || "").trim(),
+  ].join("|");
+}
+
+export async function findByKey(key: Pick<Product, "model" | "style" | "color" | "vendor_id">): Promise<Product | undefined> {
+  const model = (key.model || key.style || "").trim().toUpperCase();
+  if (!model) return undefined;
+  // narrow by an indexed field first, then match the full key in memory
+  const field = key.model ? "model" : "style";
+  const rows = await db.products.where(field).equals(model).toArray();
+  const want = productKey(key);
+  return rows.find(q => !q.deleted && productKey(q) === want);
+}
+
 export function blankProduct(by: string): Product {
   return {
     id: uid(), code: newCode(deviceId()), barcodes: [], item: "", type: "PCS", style: "", color: "", tk: "",

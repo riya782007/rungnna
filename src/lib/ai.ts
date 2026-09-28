@@ -38,4 +38,10 @@ export async function voiceBill(input: { audio?: Blob; text?: string }): Promise
 }
 export async function transcribe(audio: Blob) { return (await api<{ text: string }>("ai", { task: "transcribe", audio: await blobToB64(audio), mime: audio.type })).text; }
 export async function describePhoto(img: Blob) { return api<{ item?: string; color?: string; description?: string; tags?: string[]; stone?: string; finish?: string }>("ai", { task: "photo", image: await blobToB64(img), mime: img.type }); }
+
+/* Structured visual fingerprint (server "embed" task) — a second opinion for the
+   hybrid matcher on top of the on-device embedding in lib/vision.ts. Optional:
+   needs internet, so callers must fall back to the local embedding when offline. */
+export type VisualFingerprint = { item?: string; shape?: string; metal?: string; stones?: string; stone_color?: string; finish?: string; size?: string; distinctive?: string[] };
+export async function visualFingerprint(img: Blob) { return api<VisualFingerprint>("ai", { task: "embed", image: await blobToB64(img), mime: img.type }); }
 export async function ask(question: string, context: unknown) { return (await api<{ text: string }>("ai", { task: "ask", question, context })).text; }

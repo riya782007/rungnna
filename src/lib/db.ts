@@ -24,6 +24,15 @@ export interface Product extends Row {
   ref?: string;            // 4th field of the old label (meaning to be confirmed)
   pack?: number;           // pieces per packet (the X12PCS on the label)
   cost?: number;           // last purchase cost per piece, paise (owner/manager only)
+  /* --- product-master keying & pricing (spec: SKU/Model + Vendor) --- */
+  model?: string;          // vendor's model / article number (may differ from our style)
+  vendor_id?: string;      // Party id (kind:"supplier") this piece was bought from
+  vendor_name?: string;    // denormalised for offline display / labels
+  cost_code?: string;      // encrypted cost code printed on the label (from lib/pricing)
+  price_locked?: 0 | 1;    // 1 = rate/cost_code were set by hand, don't overwrite from the rule
+  /* --- image recognition (hybrid matching) --- */
+  embedding?: number[];    // visual feature vector for photo search (unit-normalised)
+  embedding_dim?: number;  // length of the vector, so a model change can be detected
   created_by: string;
   created_at: string;
 }
@@ -164,6 +173,11 @@ class RungnnaDB extends Dexie {
     });
     this.version(4).stores({ receipts: "id, party_id, at, updated_at" });
     this.version(5).stores({ purchases: "id, no, status, supplier_id, at, updated_at" });
+    // v6: product-master keying on model / vendor for the SKU+Vendor lookup, and
+    // the new pricing/vision fields (embedding is not indexed — scanned in memory).
+    this.version(6).stores({
+      products: "id, code, *barcodes, style, item, item_code, color, model, vendor_id, updated_at, created_at",
+    });
   }
 }
 

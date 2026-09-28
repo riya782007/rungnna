@@ -46,6 +46,20 @@ Return JSON {"customer":{"name":"","phone":""},"lines":[{"style":"","item":"","c
         ], { json: true, system: SYS });
         return json(out);
       }
+      case "embed": {
+        // A structured visual fingerprint used by the hybrid matcher as a second
+        // opinion alongside the on-device embedding. We ask for stable, discrete
+        // visual attributes (not free text) so two photos of the same piece score
+        // the same, and crucially so LOOK-ALIKE-BUT-DIFFERENT pieces still surface
+        // any distinguishing detail for the operator to check against the model no.
+        const out = await gemini([
+          { inline_data: { mime_type: b.mime || "image/webp", data: String(b.image) } },
+          { text: `Return a STRUCTURED visual fingerprint of this jewellery piece as JSON, using only these controlled values so the same piece always scores the same:
+{"item":"one of the item words","shape":"round|oval|square|teardrop|floral|geometric|abstract|other","metal":"gold|rosegold|silver|oxidised|mixed|other","stones":"none|single|cluster|pave|kundan|pearl|meena","stone_color":"clear|white|red|green|blue|pink|multi|none","finish":"glossy|matte|antique|textured","size":"small|medium|large","distinctive":["short notes on anything that would tell this apart from a near-identical piece"]}
+Be consistent and conservative; if unsure use "other"/"none".` },
+        ], { json: true, system: SYS });
+        return json(out);
+      }
       case "ask": {
         const text = await gemini([{ text: `Shop data (JSON, money in rupees):\n${JSON.stringify(b.context || {}).slice(0, 80_000)}\n\nQuestion: ${b.question}\n\nAnswer briefly in the language of the question. Use only the data given; if it isn't there, say what to record so it can be answered next time.` }],
           { system: SYS, temperature: 0.3 });
