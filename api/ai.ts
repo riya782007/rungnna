@@ -1,10 +1,12 @@
 import { gemini, json, requireShop } from "./_lib.js";
 
-/* One endpoint, four jobs:
-   - voice_bill : a spoken or typed order ("do packet F-ring K5208 white, ek set choker…") → bill lines
-   - transcribe : a voice note → text (Hindi/English/Hinglish as spoken)
-   - photo      : a product photo → item, colour, short description, tags
-   - ask        : a question about the shop, answered from the numbers the app sends */
+/* One endpoint, several jobs:
+   - voice_bill  : a spoken or typed order ("do packet F-ring K5208 white, ek set choker…") → bill lines
+   - transcribe  : a voice note → text (Hindi/English/Hinglish as spoken)
+   - photo       : a product photo → item, colour, short description, tags
+   - embed       : a product photo → structured visual fingerprint (hybrid match second opinion)
+   - shot_prompt : raw product photo + locked base prompt → refined Google-Flow image prompt
+   - ask         : a question about the shop, answered from the numbers the app sends */
 
 const SYS = `You work inside the billing and stock app of RUNGNNA JEWELLERY & CO, a fashion/imitation jewellery wholesaler in India.
 Staff speak Hindi, English or Hinglish. Item words: F-RING (finger ring), CHAIN, NECKLACE SET, CHOKER, EARRING, JHUMKI, BALI, TOPS,
@@ -59,6 +61,29 @@ Return JSON {"customer":{"name":"","phone":""},"lines":[{"style":"","item":"","c
 Be consistent and conservative; if unsure use "other"/"none".` },
         ], { json: true, system: SYS });
         return json(out);
+      }
+      case "shot_prompt": {
+        // Refine the locked Google-Flow prompt using what Gemini actually SEES in the
+        // owner's raw photo, so the prompt names the real stones/motifs/colours of THIS
+        // piece. The client passes the locked base prompt (from src/lib/imagePrompt.ts);
+        // the model may only ENRICH it — never weaken the fidelity / no-text / colour rules.
+        const base = String(b.base || "").slice(0, 8_000);
+        const image = b.image ? [{ inline_data: { mime_type: b.mime || "image/webp", data: String(b.image) } }] : [];
+        if (!image.length || !base) return json({ error: "shot_prompt needs base + image" }, 400);
+        const text = await gemini([
+          ...image,
+          { text: `Below is a LOCKED base prompt for generating an advertising photo of a model wearing the jewellery in the attached reference image. Rewrite it into ONE final, ready-to-paste prompt that:
+- keeps EVERY non-negotiable rule intact and unchanged (design/architecture/colour identical to the reference; ABSOLUTELY NO TEXT anywhere; jewellery is the hero; the stated worn-location, subject, lighting, background, aspect and output rules);
+- ENRICHES only the description of the piece with the specific, real visual details you can see in the reference (exact stone colours, bead/cut types, motifs, number of drops, metal finish) so the generator reproduces THIS exact piece;
+- never invents anything not visible in the reference, and never adds any instruction that would place text in the image.
+Return ONLY the final prompt text, no preamble, no markdown.
+
+LOCKED BASE PROMPT:
+${base}` },
+        ], { system: SYS, temperature: 0.2 });
+        // Safety net: if the model dropped the no-text rule, re-append it.
+        const out = /no text/i.test(text) ? text : text + "\n\nABSOLUTELY NO TEXT of any kind anywhere in the image — no words, letters, numbers, logos or watermarks.";
+        return json({ prompt: out });
       }
       case "ask": {
         const text = await gemini([{ text: `Shop data (JSON, money in rupees):\n${JSON.stringify(b.context || {}).slice(0, 80_000)}\n\nQuestion: ${b.question}\n\nAnswer briefly in the language of the question. Use only the data given; if it isn't there, say what to record so it can be answered next time.` }],

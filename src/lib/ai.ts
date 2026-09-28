@@ -44,4 +44,16 @@ export async function describePhoto(img: Blob) { return api<{ item?: string; col
    needs internet, so callers must fall back to the local embedding when offline. */
 export type VisualFingerprint = { item?: string; shape?: string; metal?: string; stones?: string; stone_color?: string; finish?: string; size?: string; distinctive?: string[] };
 export async function visualFingerprint(img: Blob) { return api<VisualFingerprint>("ai", { task: "embed", image: await blobToB64(img), mime: img.type }); }
+
+/* Refine the locked Google-Flow prompt with the real details Gemini sees in the raw
+   photo. Falls back to the locked base prompt itself if AI is unavailable (offline,
+   no key), so the owner always gets a usable prompt to paste into Google Flow. */
+export async function refineShotPrompt(base: string, img: Blob): Promise<string> {
+  try {
+    const r = await api<{ prompt: string }>("ai", { task: "shot_prompt", base, image: await blobToB64(img), mime: img.type });
+    return (r.prompt || "").trim() || base;
+  } catch {
+    return base;
+  }
+}
 export async function ask(question: string, context: unknown) { return (await api<{ text: string }>("ai", { task: "ask", question, context })).text; }
