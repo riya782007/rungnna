@@ -55,6 +55,29 @@ export async function decodeFile(file: Blob) {
 /* warm it up early so the first scan is instant */
 export const warmScanner = () => { getDetector().catch(() => {}); };
 
+/* A detected code with the four corner points of its outline, in the source's
+   own pixel space. Used by the overhead recheck to draw the AR boxes. */
+export type Detected = { rawValue: string; format: string; corners: { x: number; y: number }[] };
+
+/* Read EVERY code visible in one frame at once (not just the first). This is what
+   the tray recheck needs: a whole box of stickers read in a single look. */
+export async function detectAll(src: CanvasImageSource): Promise<Detected[]> {
+  const det = await getDetector();
+  try {
+    const found = await det.detect(src);
+    return (found || [])
+      .filter((f: any) => f.rawValue)
+      .map((f: any) => ({
+        rawValue: String(f.rawValue),
+        format: f.format,
+        // Native gives cornerPoints; the ZXing ponyfill gives the same shape.
+        corners: (f.cornerPoints || []).map((p: any) => ({ x: p.x, y: p.y })),
+      }));
+  } catch {
+    return [];
+  }
+}
+
 export function CameraScanner({ onCode, paused = false, gap = 2500 }: { onCode: (text: string, format: string) => void; paused?: boolean; gap?: number }) {
   const video = useRef<HTMLVideoElement>(null);
   const flash = useRef<HTMLDivElement>(null);
