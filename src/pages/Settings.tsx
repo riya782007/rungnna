@@ -370,7 +370,10 @@ function Keys() {
     <div className="card"><header><h3>AI &amp; WhatsApp keys</h3></header>
       <div className="pad stack" style={{ gap: 8 }}>
         {err && <div className="note warn sm">Can't check right now ({err}).</div>}
-        {row(h?.ai, "GEMINI_API_KEY", "voice orders, photo fill, Ask the shop")}
+        {row(h?.ai, "GEMINI_API_KEY", "reads product photos, voice orders, Ask the shop")}
+        {row(h?.openai, "OPENAI_API_KEY", `writes product pages from the photo facts${h?.openai_model ? " · " + h.openai_model : ""}`)}
+        {row(h?.groq, "GROQ_API_KEY", `takes over when OpenAI is out of credits or busy${h?.groq_model ? " · " + h.groq_model : ""}`)}
+        {row(h?.r2, "R2_ACCOUNT_ID · R2_ACCESS_KEY_ID · R2_SECRET_ACCESS_KEY · R2_BUCKET · R2_PUBLIC_URL", "Cloudflare R2 — where every product photo is stored")}
         {row(h?.whatsapp_api, "WHATSAPP_TOKEN + WHATSAPP_PHONE_NUMBER_ID", "optional automatic sending; tap-to-send works without it")}
         {row(h?.supabase, "SUPABASE_URL + SUPABASE_ANON_KEY", "lets the server check the shop login")}
         <div className="xs mut">Keys are added in Vercel → project rungnna_shop_os → Settings → Environment Variables, then Deployments → ⋯ → Redeploy. They never go into the app itself.</div>

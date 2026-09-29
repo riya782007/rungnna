@@ -17,7 +17,7 @@ export async function api<T = any>(path: string, body?: unknown): Promise<T> {
   if (!r.ok) throw new Error(j.error || "Failed");
   return j as T;
 }
-export type Health = { ai: boolean; model: string; whatsapp_api: boolean; supabase: boolean };
+export type Health = { ai: boolean; model: string; openai?: boolean; openai_model?: string; groq?: boolean; groq_model?: string; r2?: boolean; whatsapp_api: boolean; supabase: boolean };
 export const health = () => api<Health>("health");
 
 export const blobToB64 = (b: Blob) => new Promise<string>((res, rej) => {
