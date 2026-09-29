@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { db, recordMovement, stockOf, getSetting, setSetting, type MoveKind, type PersonType, type Product, type StockCell } from "../lib/db";
 import { findByScan, label } from "../lib/products";
 import { Head, LocationSelect, PhotoButton, Thumb, LOC_PREFIX, useLocations, locName } from "../components/common";
+import { parseRackScan } from "../lib/rackLabel";
 import { WedgeInput, CameraScanner } from "../components/Scanner";
 import { useApp, toast, beep } from "../lib/app";
 
@@ -46,8 +47,9 @@ export default function Move({ args }: { args: string[] }) {
   };
 
   const onCode = async (raw: string) => {
-    if (raw.startsWith(LOC_PREFIX)) {
-      const l = locs.find(x => x.code === raw.slice(LOC_PREFIX.length));
+    const rackHit = parseRackScan(raw, locs);
+    if (rackHit || raw.startsWith(LOC_PREFIX)) {
+      const l = rackHit;
       if (!l) { beep(false); return; }
       beep(); if (!from) { setFrom(l.id); toast("From: " + l.code); } else { setTo(l.id); toast("To: " + l.code); }
       return;
