@@ -23,7 +23,8 @@ export default defineConfig({
         globPatterns: ["**/*.{js,css,html,svg,png,wasm,woff2}"],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         navigateFallback: "/index.html",
-        navigateFallbackDenylist: [/^\/api\//],
+        // public web pages are server-rendered; never let the installed app swallow them
+        navigateFallbackDenylist: [/^\/api\//, /^\/(shop|trade)(\/|\?|$)/, /^\/(p|c)\//, /^\/(sitemap\.xml|robots\.txt)$/],
         runtimeCaching: [
           { urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/, handler: "CacheFirst",
             options: { cacheName: "fonts", expiration: { maxEntries: 20, maxAgeSeconds: 31536000 } } },

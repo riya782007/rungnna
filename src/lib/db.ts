@@ -1,3 +1,4 @@
+import type { ListingContent } from "../../api/_listing";
 import Dexie, { type Table } from "dexie";
 
 /* Money is always integer paise. Every row id is a client-made UUID so any
@@ -34,6 +35,8 @@ export interface Product extends Row {
   pro_photo_id?: string;   // polished catalogue image (local); replaces raw for the catalogue
   pro_photo_url?: string;  // cloud copy of the polished catalogue image
   catalogue?: 0 | 1;       // 1 = published to the shareable catalogue
+  slug?: string;           // public page address: /p/<slug>
+  content?: ListingContent; // AI-written product page (retail + trade + catalogue), see api/_listing.ts
   /* --- image recognition (hybrid matching) --- */
   embedding?: number[];    // visual feature vector for photo search (unit-normalised)
   embedding_dim?: number;  // length of the vector, so a model change can be detected

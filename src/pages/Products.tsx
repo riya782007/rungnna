@@ -11,6 +11,7 @@ import { describePhoto } from "../lib/ai";
 import { VoiceNotes } from "../components/Voice";
 import { usePrivate, maskNote } from "../lib/privacy";
 import { getTaxonomy, allItems, type Taxonomy } from "../lib/taxonomy";
+import { OnlineListing } from "../components/OnlineListing";
 
 export default function Products({ args }: { args: string[] }) {
   if (args[0]) return <ProductDetail id={args[0]} />;
@@ -124,6 +125,7 @@ function ProductDetail({ id }: { id: string }) {
           <VoiceNotes entity="product" entityId={p.id} />
         </div>
         <div className="stack">
+          <OnlineListing p={p} setP={fn => setP(x => (x ? fn(x) : x))} />
           <div className="card"><header><h3>Where it is</h3></header>
             <div className="pad stack" style={{ gap: 6 }}>
               {stock.filter(c => c.qty).map(c => <div key={c.key} className="row between sm"><span>{locName(locs.find(l => l.id === c.loc_id))}</span><b className="mono">{c.qty}</b></div>)}

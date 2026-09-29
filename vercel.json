@@ -1,0 +1,13 @@
+{
+  "rewrites": [
+    { "source": "/shop", "destination": "/api/page?view=shop" },
+    { "source": "/p/:slug", "destination": "/api/page?view=product&slug=:slug" },
+    { "source": "/trade", "destination": "/api/page?view=trade" },
+    { "source": "/c/:slug", "destination": "/api/page?view=catalogue&slug=:slug" },
+    { "source": "/sitemap.xml", "destination": "/api/page?view=sitemap" },
+    { "source": "/robots.txt", "destination": "/api/page?view=robots" }
+  ],
+  "functions": {
+    "api/ai.ts": { "maxDuration": 60 }
+  }
+}

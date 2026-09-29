@@ -46,20 +46,38 @@ export async function signOut() { const c = await sb(); await c?.auth.signOut();
 async function pendingCount() { const n = await db.outbox.count(); emit({ pending: n }); return n; }
 
 /* ---------- push ---------- */
+/* Product / bill / party photos go to Cloudflare R2 through our own /api/media
+   function (which holds the R2 keys). Images are never stored in Supabase.
+   If R2 isn't set up yet, or the upload fails, photos simply stay on this device
+   and are retried next sync — stock and bill sync is never held up by a photo. */
+const blobB64 = (b: Blob) => new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1] || ""); r.onerror = rej; r.readAsDataURL(b); });
+let r2Off = 0; // time R2 last said "not configured" — don't ask again for 10 minutes
+
 async function uploadPhotos(c: SupabaseClient) {
+  if (Date.now() - r2Off < 600_000) return;
   const list = await db.photos.where("uploaded").equals(0).limit(20).toArray();
+  if (!list.length) return;
+  const token = (await c.auth.getSession()).data.session?.access_token || "";
   for (const p of list) {
-    const ext = p.blob.type === "image/webp" ? "webp" : "jpg";
-    const path = `${p.created_at.slice(0, 7)}/${p.id}.${ext}`;
-    const up = await c.storage.from("photos").upload(path, p.blob, { contentType: p.blob.type, upsert: true, cacheControl: "31536000" });
-    if (up.error) throw up.error;
-    const url = c.storage.from("photos").getPublicUrl(path).data.publicUrl;
+    let url = "";
+    try {
+      const r = await fetch("/api/media", {
+        method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + token },
+        body: JSON.stringify({ data: await blobB64(p.blob), mime: p.blob.type || "image/jpeg", key: `photos/${p.created_at.slice(0, 7)}/${p.id}` }),
+      });
+      const j: any = await r.json().catch(() => ({}));
+      if (r.status === 503 && j.code === "no_r2") { r2Off = Date.now(); return; }
+      if (!r.ok || !j.url) { console.warn("photo upload failed", j.error || r.status); return; }
+      url = j.url;
+    } catch (e) { console.warn("photo upload failed", e); return; }
     await db.photos.update(p.id, { uploaded: 1, url });
-    // stamp the url onto whatever row uses this photo
+    // stamp the url onto whatever row uses this photo (raw photo or polished catalogue photo)
     for (const t of PHOTO_TABLES) {
-      const rows = await (db as any)[t].filter((r: any) => r.photo_id === p.id).toArray();
+      const rows = await (db as any)[t].filter((r: any) => r.photo_id === p.id || r.pro_photo_id === p.id).toArray();
       for (const r of rows) {
-        r.photo_url = url; r.updated_at = now();
+        if (r.photo_id === p.id) r.photo_url = url;
+        if (r.pro_photo_id === p.id) r.pro_photo_url = url;
+        r.updated_at = now();
         await (db as any)[t].put(r);
         await db.outbox.add({ table: t, row_id: r.id, at: r.updated_at, tries: 0 });
       }

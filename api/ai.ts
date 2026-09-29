@@ -1,4 +1,7 @@
-import { gemini, json, requireShop } from "./_lib.js";
+import { gemini, json, requireShop, env } from "./_lib.js";
+import { chainJson } from "./_llm.js";
+import { b64 } from "./_r2.js";
+import { VISION_PROMPT, contentPrompt, normalizeListing, normalizeFacts, templateListing, type ProductFacts, type VisualFacts } from "./_listing.js";
 
 /* One endpoint, several jobs:
    - voice_bill  : a spoken or typed order ("do packet F-ring K5208 white, ek set choker…") → bill lines
@@ -6,6 +9,8 @@ import { gemini, json, requireShop } from "./_lib.js";
    - photo       : a product photo → item, colour, short description, tags
    - embed       : a product photo → structured visual fingerprint (hybrid match second opinion)
    - shot_prompt : raw product photo + locked base prompt → refined Google-Flow image prompt
+   - listing     : product photo + fields → full SEO product page (retail + trade + catalogue)
+                   Gemini reads the photo → OpenAI writes the page → Groq if OpenAI fails → template
    - ask         : a question about the shop, answered from the numbers the app sends */
 
 const SYS = `You work inside the billing and stock app of RUNGNNA JEWELLERY & CO, a fashion/imitation jewellery wholesaler in India.
@@ -84,6 +89,38 @@ ${base}` },
         // Safety net: if the model dropped the no-text rule, re-append it.
         const out = /no text/i.test(text) ? text : text + "\n\nABSOLUTELY NO TEXT of any kind anywhere in the image — no words, letters, numbers, logos or watermarks.";
         return json({ prompt: out });
+      }
+      case "listing": {
+        const p: ProductFacts = {
+          code: String(b.product?.code || ""), item: String(b.product?.item || ""), type: b.product?.type, style: b.product?.style,
+          color: b.product?.color, category: b.product?.category, size: b.product?.size, pack: Number(b.product?.pack) || undefined,
+          keywords: String(b.keywords || "").slice(0, 300),
+        };
+        const attempts: { provider: string; ok: boolean; kind?: string; message?: string }[] = [];
+        // 1) Gemini looks at the raw photo and reports only what it can see
+        let facts: VisualFacts = {};
+        let img: { data: string; mime: string } | null = b.image ? { data: String(b.image), mime: String(b.mime || "image/webp") } : null;
+        if (!img && typeof b.image_url === "string" && /^https:\/\//.test(b.image_url)) {
+          try {
+            const r = await fetch(b.image_url, { signal: AbortSignal.timeout(6_000) });
+            if (r.ok) img = { data: b64(new Uint8Array(await r.arrayBuffer())), mime: r.headers.get("content-type") || "image/jpeg" };
+          } catch { /* no photo → text-only page */ }
+        }
+        if (img && env("GEMINI_API_KEY")) {
+          try {
+            facts = normalizeFacts(await gemini([{ inline_data: { mime_type: img.mime, data: img.data } }, { text: VISION_PROMPT }], { json: true, system: SYS, temperature: 0.1 }));
+            attempts.push({ provider: "gemini", ok: true });
+          } catch (e: any) { attempts.push({ provider: "gemini", ok: false, message: String(e?.message || e).slice(0, 200) }); }
+        } else if (img) attempts.push({ provider: "gemini", ok: false, kind: "no_key", message: "GEMINI_API_KEY is not set — page written without photo analysis" });
+        // 2) OpenAI writes the structured page; 3) Groq takes over if OpenAI fails
+        const r = await chainJson({ system: "You are the product copywriter for Rungnna Jewellery & Co. Return only valid JSON.", user: contentPrompt(p, facts) }, raw => normalizeListing(raw, p));
+        attempts.push(...r.attempts);
+        // 4) never dead-end: a plain factual page from the template
+        const content = r.data ?? templateListing(p, facts);
+        content.facts = facts;
+        content.provider = r.data ? r.provider : "template";
+        content.generated_at = new Date().toISOString();
+        return json({ content, provider: content.provider, vision: attempts.some(a => a.provider === "gemini" && a.ok), attempts });
       }
       case "ask": {
         const text = await gemini([{ text: `Shop data (JSON, money in rupees):\n${JSON.stringify(b.context || {}).slice(0, 80_000)}\n\nQuestion: ${b.question}\n\nAnswer briefly in the language of the question. Use only the data given; if it isn't there, say what to record so it can be answered next time.` }],
