@@ -67,25 +67,36 @@ select c.value->>'name' as name, c.value->>'tagline' as tagline, c.value->>'phon
 from config c where c.id = 'shop';
 
 -- ---------- trade rates: only with the right key ----------
--- p_slug null  → portal-wide key  (config 'trade_portal'.value.token)
+-- p_slug null  → portal-wide key (config 'trade_portal'.value.token) → all published designs
 -- p_slug given → that catalogue's own key (config 'catalogue:<slug>'.value.key)
+--                → ONLY the designs in that catalogue, and only while it is an active trade catalogue
 create or replace function trade_prices(p_key text, p_slug text default null)
 returns table (id uuid, rate bigint, pack integer)
-language plpgsql security definer set search_path = public as $$
-declare expected text;
+language plpgsql stable security definer set search_path = public as $$
+declare
+  expected text;
+  ids jsonb;
 begin
   if coalesce(p_key, '') = '' or length(p_key) < 12 then return; end if;
   if p_slug is null then
     select c.value->>'token' into expected from config c
-     where c.id = 'trade_portal' and coalesce(c.deleted, 0) = 0 and coalesce((c.value->>'enabled')::boolean, true);
+     where c.id = 'trade_portal' and coalesce(c.deleted, 0) = 0
+       and coalesce((c.value->>'enabled')::boolean, true);
+    if expected is null or expected <> p_key then return; end if;
+    return query
+      select p.id, p.rate, p.pack from products p
+       where p.catalogue = 1 and coalesce(p.deleted, 0) = 0 and coalesce(p.slug, '') <> '';
   else
-    select c.value->>'key' into expected from config c
-     where c.id = 'catalogue:' || p_slug and coalesce(c.deleted, 0) = 0;
+    select c.value->>'key', coalesce(c.value->'product_ids', '[]'::jsonb) into expected, ids from config c
+     where c.id = 'catalogue:' || p_slug and coalesce(c.deleted, 0) = 0
+       and coalesce((c.value->>'active')::boolean, true)
+       and coalesce(c.value->>'audience', 'retail') = 'trade';
+    if expected is null or expected <> p_key then return; end if;
+    return query
+      select p.id, p.rate, p.pack from products p
+       where p.catalogue = 1 and coalesce(p.deleted, 0) = 0 and coalesce(p.slug, '') <> ''
+         and ids ? p.id::text;
   end if;
-  if expected is null or expected <> p_key then return; end if;
-  return query
-    select p.id, p.rate, p.pack from products p
-     where p.catalogue = 1 and coalesce(p.deleted, 0) = 0 and coalesce(p.slug, '') <> '';
 end $$;
 
 revoke all on function trade_prices(text, text) from public;
