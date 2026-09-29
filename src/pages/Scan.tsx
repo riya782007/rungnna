@@ -5,6 +5,7 @@ import { parseLabel, FIELDS, type Parsed, type Pattern, type Field, guessSep, sp
 import { findByScan, fromParsed, saveProduct, patterns, label, DEFAULT_ITEMS, DEFAULT_TYPES, distinct, itemNameFor } from "../lib/products";
 import { CameraScanner, WedgeInput } from "../components/Scanner";
 import { LocationSelect, PhotoButton, Thumb, Head, LOC_PREFIX, locName, useLocations, DeadToggle } from "../components/common";
+import { parseRackScan } from "../lib/rackLabel";
 import { useApp, toast, beep, go } from "../lib/app";
 import { toPaise, when } from "../lib/format";
 import { uid } from "../lib/db";
@@ -26,8 +27,9 @@ export default function Scan() {
   const log = (text: string, qty: number) => setSession(s => [{ id: uid(), text, qty, at: new Date().toISOString() }, ...s].slice(0, 30));
 
   const onCode = async (raw: string) => {
-    if (raw.startsWith(LOC_PREFIX)) {
-      const l = locs.find(x => x.code === raw.slice(LOC_PREFIX.length));
+    const rackHit = parseRackScan(raw, locs);
+    if (rackHit || raw.startsWith(LOC_PREFIX)) {
+      const l = rackHit;
       if (l) { setLoc(l.id); beep(); toast("Location set: " + l.code); } else { beep(false); toast("Unknown rack label " + raw, true); }
       return;
     }

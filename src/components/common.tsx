@@ -4,7 +4,7 @@ import { db, type Location, type Product } from "../lib/db";
 import { photoSrc, savePhoto } from "../lib/image";
 import { Icon } from "./Icon";
 
-export const LOC_PREFIX = "RJLOC|";
+export { LOC_PREFIX } from "../lib/rackLabel";
 
 export const locName = (l?: Location) =>
   !l ? "—" : l.kind === "bucket" ? l.name : [l.floor && (l.floor === "G" ? "Ground" : "Floor " + l.floor), l.rack && "Rack " + l.rack, l.box && "Box " + l.box].filter(Boolean).join(" · ") + (l.name ? ` (${l.name})` : "");

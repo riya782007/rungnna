@@ -8,6 +8,7 @@ import { can } from "../lib/roles";
 import { rupees, toPaise, when } from "../lib/format";
 import { CameraScanner } from "../components/Scanner";
 import { Head, LocationSelect, PhotoButton, Modal, LOC_PREFIX, useLocations } from "../components/common";
+import { parseRackScan } from "../lib/rackLabel";
 import { Icon } from "../components/Icon";
 
 /* Stock in: stand at a rack, scan packet after packet, save once.
@@ -51,8 +52,9 @@ function StockInSession() {
   }
   async function onCode(raw: string) {
     const r = raw.trim(); if (!r) return;
-    if (r.startsWith(LOC_PREFIX)) {
-      const l = locs.find(x => x.code === r.slice(LOC_PREFIX.length));
+    const rackHit = parseRackScan(r, locs);
+    if (rackHit || r.startsWith(LOC_PREFIX)) {
+      const l = rackHit;
       if (l) { setP(x => x && { ...x, loc_id: l.id }); beep(); toast("Rack: " + l.code); } else { beep(false); toast("Unknown rack label", true); }
       return;
     }

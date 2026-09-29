@@ -464,3 +464,32 @@ img,svg,video,canvas{max-width:100%}
 .urgent .u-ic.bad{background:var(--bad-l);color:var(--bad)}
 .urgent .u-ic.warn{background:var(--warn-l);color:var(--warn)}
 .urgent .u-ic.ok{background:var(--ok-l);color:var(--ok)}
+
+
+/* ======================= Rack Sticker Studio ======================= */
+.rk-studio{display:grid;grid-template-columns:minmax(320px,460px) minmax(0,1fr);gap:14px;align-items:start}
+.rk-pv-col{position:sticky;top:70px}
+@media(max-width:960px){.rk-studio{grid-template-columns:1fr}.rk-pv-col{position:static;order:-1}}
+.rk-checks{max-height:220px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:4px;padding:2px}
+.rk-check{display:flex;align-items:center;gap:6px;padding:5px 8px;border:1px solid var(--line);border-radius:9px;font-size:12.5px;cursor:pointer;background:var(--surface)}
+.rk-check:has(input:checked){border-color:var(--ink);background:var(--fill)}
+.rk-vars{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.rk-payload{display:flex;flex-direction:column;gap:4px;padding:10px 12px;border-radius:10px;background:var(--fill)}
+.rk-payload code{font-size:12px;word-break:break-all}
+.rk-preview{padding:18px;overflow:auto;max-height:72vh;background:repeating-linear-gradient(45deg,var(--cream) 0 10px,#fff 10px 20px)}
+.rk-preview .rk-page{box-shadow:0 1px 6px rgba(0,0,0,.28)}
+.rk-preview .rk-page+.rk-page{margin-top:12px}
+
+/* the sticker itself — shared by preview and print, sized in real mm */
+.rk-page{position:relative;overflow:hidden;background:#fff;box-sizing:border-box}
+.rk-sticker{box-sizing:border-box;display:flex;align-items:center;overflow:hidden;background:#fff;color:#000;line-height:1.1}
+.rk-qr{flex:none}
+.rk-qr svg{display:block;width:100%;height:100%}
+.rk-text{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;justify-content:center;overflow:hidden}
+.rk-text div{max-width:100%;overflow-wrap:anywhere;overflow:hidden}
+
+@media print{
+  .rk-page{box-shadow:none!important;margin:0!important;break-inside:avoid;page-break-inside:avoid;break-after:page;page-break-after:always}
+  .rk-page:last-child{break-after:auto;page-break-after:auto}
+  .rk-page,.rk-sticker{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
