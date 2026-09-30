@@ -493,3 +493,11 @@ img,svg,video,canvas{max-width:100%}
   .rk-page:last-child{break-after:auto;page-break-after:auto}
   .rk-page,.rk-sticker{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }
+
+/* ---------- scanning ---------- */
+.vf.tall{aspect-ratio:3/4;max-height:62vh}
+.vf .lastread{position:absolute;left:12px;right:12px;bottom:12px;background:rgba(31,122,92,.92);color:#fff;font-size:13px;padding:6px 12px;border-radius:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.scansheet{position:fixed;inset:0;z-index:85;background:var(--bg);display:flex;flex-direction:column;gap:10px;padding:calc(10px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom));overflow:auto;animation:up .25s var(--ease)}
+.scansheet .vf.tall{max-height:58vh}
+.remote{max-width:560px;margin:0 auto}
+.scanrow{flex-wrap:wrap}.scanrow .wedge{flex:1 1 100%}

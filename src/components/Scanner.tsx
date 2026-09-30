@@ -2,9 +2,18 @@ import { Icon } from "./Icon";
 import { useEffect, useRef, useState } from "react";
 import { getSetting, setSetting } from "../lib/db";
 
-/* One scanner for everything: phone/tablet camera (QR + 1D barcodes) and the
-   USB/Bluetooth scanner gun, which simply "types" the code and presses Enter.
-   Decoding runs on the device with a self-hosted WebAssembly reader, so it works offline. */
+/* One scanner for everything: phone / tablet / laptop camera (QR + barcodes) and the USB/Bluetooth
+   scanner gun, which simply "types" the code and presses Enter.
+
+   Live camera reading, built for tiny shop stickers in poor light:
+   - the sharpest stream the camera offers (up to 2560 px), continuous focus, and 2× zoom when the lens
+     allows, so the phone can stay far enough away to focus while the sticker still fills enough pixels;
+   - every frame is read by the phone's own detector when it has one (Android Chrome — very fast) AND by a
+     WebAssembly reader in a background worker with the strongest settings (try-harder, rotated, inverted,
+     contrast-stretched + sharpened when the first pass fails);
+   - frames alternate between the whole aiming box and an enlarged middle, so small or far stickers read;
+   - when several stickers are in view (a sheet), the one nearest the centre wins;
+   - a sticker counts once while it stays in view. Everything runs on the device, offline. */
 
 const FORMATS = ["qr_code", "code_128", "code_39", "code_93", "ean_13", "ean_8", "upc_a", "upc_e", "itf", "codabar", "data_matrix"];
 
@@ -24,23 +33,65 @@ async function getDetector(): Promise<any> {
   })();
   return detectorP;
 }
-/* Decode a still photo (or a video frame): whole image first, then the middle and quarters enlarged.
-   Small 15 mm stickers photographed from arm's length still read this way. */
+type Hit = { text: string; format: string; cx: number; cy: number };
+
+/* ---------- background WebAssembly reader ---------- */
+let worker: Worker | null = null, seq = 0;
+const pending = new Map<number, (h: Hit[]) => void>();
+function getWorker() {
+  if (!worker) {
+    worker = new Worker(new URL("../lib/scanWorker.ts", import.meta.url), { type: "module" });
+    worker.onmessage = (e: MessageEvent<{ id: number; out: Hit[] }>) => { pending.get(e.data.id)?.(e.data.out || []); pending.delete(e.data.id); };
+    worker.onerror = () => { pending.forEach(f => f([])); pending.clear(); };
+  }
+  return worker;
+}
+function wasmRead(img: ImageData, strong = false): Promise<Hit[]> {
+  return new Promise(res => {
+    let w: Worker; try { w = getWorker(); } catch { res([]); return; }
+    const id = ++seq; pending.set(id, res);
+    w.postMessage({ id, img, strong }, [img.data.buffer]);
+    setTimeout(() => { if (pending.has(id)) { pending.delete(id); res([]); } }, 4000);
+  });
+}
+/* the phone's built-in detector only (never the slow ponyfill on the main thread) */
+let nativeP: Promise<any> | null = null;
+function nativeDetector(): Promise<any> {
+  if (!nativeP) nativeP = (async () => {
+    const Native = (globalThis as any).BarcodeDetector;
+    if (!Native) return null;
+    try { const s: string[] = await Native.getSupportedFormats(); return s.includes("qr_code") ? new Native({ formats: FORMATS.filter(f => s.includes(f)) }) : null; } catch { return null; }
+  })();
+  return nativeP;
+}
+async function nativeRead(src: CanvasImageSource, w: number, h: number): Promise<Hit[]> {
+  const d = await nativeDetector(); if (!d) return [];
+  try {
+    const f = await d.detect(src);
+    return (f || []).filter((x: any) => x.rawValue).map((x: any) => {
+      const b = x.boundingBox || { x: 0, y: 0, width: 0, height: 0 };
+      return { text: String(x.rawValue), format: x.format, cx: (b.x + b.width / 2) / w, cy: (b.y + b.height / 2) / h };
+    });
+  } catch { return []; }
+}
+const nearest = (hits: Hit[]) => hits.sort((a, b) => Math.hypot(a.cx - 0.5, a.cy - 0.5) - Math.hypot(b.cx - 0.5, b.cy - 0.5))[0];
+function grab(src: CanvasImageSource, sx: number, sy: number, sw: number, sh: number, maxSide: number, up = 1): ImageData {
+  const k = Math.min(up, maxSide / Math.max(sw, sh));
+  const c = document.createElement("canvas"); c.width = Math.max(1, Math.round(sw * k)); c.height = Math.max(1, Math.round(sh * k));
+  const g = c.getContext("2d", { willReadFrequently: true })!; g.imageSmoothingQuality = "high";
+  g.drawImage(src, sx, sy, sw, sh, 0, 0, c.width, c.height);
+  return g.getImageData(0, 0, c.width, c.height);
+}
+
+/* Decode a still photo: phone's detector on the whole picture, then the strong reader on the whole picture,
+   the middle and the four quarters enlarged. Small 15 mm stickers photographed from arm's length read this way. */
 export async function decodeImage(src: CanvasImageSource & { width?: number; height?: number }, W?: number, H?: number): Promise<{ rawValue: string; format: string } | null> {
-  const det = await getDetector();
   const w = W || (src as any).videoWidth || (src as any).width, h = H || (src as any).videoHeight || (src as any).height;
-  const tryOn = async (img: any) => { try { const f = await det.detect(img); return f && f.length ? f[0] : null; } catch { return null; } };
-  const full = await tryOn(src); if (full) return full;
-  const c = document.createElement("canvas"); const g = c.getContext("2d", { willReadFrequently: true })!;
-  const crops: [number, number, number, number, number][] = [
-    [0.25, 0.25, 0.5, 0.5, 2], [0, 0, 0.6, 0.6, 2], [0.4, 0, 0.6, 0.6, 2], [0, 0.4, 0.6, 0.6, 2], [0.4, 0.4, 0.6, 0.6, 2], [0.3, 0.3, 0.4, 0.4, 3],
-  ];
-  for (const [x, y, cw, ch, k] of crops) {
-    const sw = w * cw, sh = h * ch;
-    c.width = Math.min(2400, Math.round(sw * k)); c.height = Math.round(c.width * sh / sw);
-    g.imageSmoothingQuality = "high";
-    g.drawImage(src, w * x, h * y, sw, sh, 0, 0, c.width, c.height);
-    const hit = await tryOn(c); if (hit) return hit;
+  const n = await nativeRead(src, w, h); if (n.length) { const b = nearest(n); return { rawValue: b.text, format: b.format }; }
+  const tiles: [number, number, number, number, number][] = [[0, 0, 1, 1, 1], [0.2, 0.2, 0.6, 0.6, 2], [0, 0, 0.55, 0.55, 2], [0.45, 0, 0.55, 0.55, 2], [0, 0.45, 0.55, 0.55, 2], [0.45, 0.45, 0.55, 0.55, 2]];
+  for (const [x, y, cw, ch, up] of tiles) {
+    const r = await wasmRead(grab(src, w * x, h * y, w * cw, h * ch, 2400, up), true);
+    if (r.length) { const b = nearest(r); return { rawValue: b.text, format: b.format }; }
   }
   return null;
 }
@@ -99,19 +150,18 @@ function binarizeOtsu(g: CanvasRenderingContext2D, w: number, h: number) {
 
 export async function decodeFile(file: Blob) {
   const bmp = await createImageBitmap(file);
-  // phone photos are huge; 2000 px on the long side keeps detail and stays fast
-  const k = Math.min(1, 2000 / Math.max(bmp.width, bmp.height));
+  const k = Math.min(1, 2400 / Math.max(bmp.width, bmp.height));
   const c = document.createElement("canvas"); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
   c.getContext("2d")!.drawImage(bmp, 0, 0, c.width, c.height);
-  // 1) plain crops/enlargement (fast, handles most photos)
+  // 1) phone detector + strong reader over tiles (handles almost every photo)
   const plain = await decodeImage(c, c.width, c.height);
   if (plain) return plain;
-  // 2) contrast/threshold passes for faint or damaged stickers
+  // 2) hard black/white threshold passes for faint or damaged thermal stickers
   return decodeHardImage(c, c.width, c.height);
 }
 
-/* warm it up early so the first scan is instant */
-export const warmScanner = () => { getDetector().catch(() => {}); };
+/* warm both engines up so the first scan is instant */
+export const warmScanner = () => { getDetector().catch(() => {}); nativeDetector().catch(() => {}); try { getWorker(); } catch { /* no workers */ } };
 
 /* A detected code with the four corner points of its outline, in the source's
    own pixel space. Used by the overhead recheck to draw the AR boxes. */
@@ -136,7 +186,7 @@ export async function detectAll(src: CanvasImageSource): Promise<Detected[]> {
   }
 }
 
-export function CameraScanner({ onCode, paused = false, gap = 2500 }: { onCode: (text: string, format: string) => void; paused?: boolean; gap?: number }) {
+export function CameraScanner({ onCode, paused = false, gap = 2500, tall = false }: { onCode: (text: string, format: string) => void; paused?: boolean; gap?: number; tall?: boolean }) {
   const video = useRef<HTMLVideoElement>(null);
   const flash = useRef<HTMLDivElement>(null);
   const [err, setErr] = useState("");
@@ -146,69 +196,74 @@ export function CameraScanner({ onCode, paused = false, gap = 2500 }: { onCode: 
   const [zoomCap, setZoomCap] = useState<{ min: number; max: number } | null>(null);
   const [zoom, setZoom] = useState(1);
   const [photoBusy, setPhotoBusy] = useState(false);
+  const [status, setStatus] = useState("");
+  const [lastText, setLastText] = useState("");
   const photo = useRef<HTMLInputElement>(null);
-  const frame = useRef(0);
   /* camera picker: laptops have a webcam, phones have front + rear. We remember
      the last camera on this device and let the user switch/flip. */
   const [cams, setCams] = useState<MediaDeviceInfo[]>([]);
   const [camId, setCamId] = useState<string>("");
   const camIdRef = useRef<string>(""); camIdRef.current = camId;
-  const setZ = async (z: number) => { const tr: any = stream.current?.getVideoTracks()[0]; try { await tr?.applyConstraints({ advanced: [{ zoom: z }] }); setZoom(z); } catch { /* not supported */ } };
-  const refocus = async () => { const tr: any = stream.current?.getVideoTracks()[0]; try { await tr?.applyConstraints({ advanced: [{ focusMode: "single-shot" }] }); await tr?.applyConstraints({ advanced: [{ focusMode: "continuous" }] }); } catch { /* ignore */ } };
-  /* A sticker counts once while it stays in view. It counts again only after it has left the picture
-     (next packet, same label) — so resting the phone on one packet can never inflate the count. */
-  const seen = useRef({ t: "", at: 0 });
-  const emit = (rawValue: string, format: string, live = false) => {
-    const t = Date.now();
-    if (live) {
-      const still = rawValue === seen.current.t && t - seen.current.at < 900;
-      seen.current = { t: rawValue, at: t };
-      if (still) return;
-    }
-    if (rawValue && !(rawValue === last.current.t && t - last.current.at < gap)) {
-      last.current = { t: rawValue, at: t };
-      flash.current?.classList.remove("go"); void flash.current?.offsetWidth; flash.current?.classList.add("go");
-      cb.current(rawValue, format);
-    }
-  };
+  const track = () => stream.current?.getVideoTracks()[0] as any;
+  const setZ = async (z: number) => { try { await track()?.applyConstraints({ advanced: [{ zoom: z }] }); setZoom(z); } catch { /* not supported */ } };
+  const refocus = async () => { try { await track()?.applyConstraints({ advanced: [{ focusMode: "single-shot" }] }); await track()?.applyConstraints({ advanced: [{ focusMode: "continuous" }] }); } catch { /* ignore */ } };
   const last = useRef({ t: "", at: 0 });
+  const seen = useRef({ t: "", at: 0 });
   const pausedRef = useRef(paused); pausedRef.current = paused;
   const cb = useRef(onCode); cb.current = onCode;
+
+  /* A sticker counts once while it stays in view. It counts again only after it has left the picture
+     (next packet, same label) — so resting the phone on one packet can never inflate the count. */
+  const emit = (text: string, format: string, live = false) => {
+    const t = Date.now();
+    if (live) { const still = text === seen.current.t && t - seen.current.at < 900; seen.current = { t: text, at: t }; if (still) return; }
+    if (!text || (text === last.current.t && t - last.current.at < gap)) return;
+    last.current = { t: text, at: t };
+    setLastText(text);
+    flash.current?.classList.remove("go"); void flash.current?.offsetWidth; flash.current?.classList.add("go");
+    cb.current(text, format);
+  };
 
   const stop = () => { stream.current?.getTracks().forEach(t => t.stop()); stream.current = null; setOn(false); };
 
   const start = async (wantId?: string) => {
     setErr("");
-    // Stop any running stream first (switching cameras).
     stream.current?.getTracks().forEach(t => t.stop());
+    if (!navigator.mediaDevices?.getUserMedia) { setErr("This browser can't open the camera. Use Chrome, Photo scan, or a phone as scanner."); return; }
     const id = wantId ?? camIdRef.current;
-    // Prefer a chosen camera; otherwise the rear ("environment") camera on phones.
-    const video1 = id
-      ? { deviceId: { exact: id }, width: { ideal: 1920 }, height: { ideal: 1080 } }
-      : { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } };
+    const hi = { width: { ideal: 2560 }, height: { ideal: 1440 }, frameRate: { ideal: 30 } };
+    const want = id ? { deviceId: { exact: id }, ...hi } : { facingMode: { ideal: "environment" }, ...hi };
     try {
-      const s = await navigator.mediaDevices.getUserMedia({ video: video1 as MediaTrackConstraints, audio: false });
+      let s: MediaStream;
+      try { s = await navigator.mediaDevices.getUserMedia({ video: want as MediaTrackConstraints, audio: false }); }
+      catch (e: any) {
+        if (id && e?.name === "OverconstrainedError") return start("");            // chosen camera gone → default
+        if (e?.name === "NotAllowedError") throw e;
+        s = await navigator.mediaDevices.getUserMedia({ video: id ? { deviceId: { exact: id } } : { facingMode: { ideal: "environment" } }, audio: false });
+      }
       stream.current = s;
       const tr: any = s.getVideoTracks()[0];
       const caps = tr?.getCapabilities?.() || {};
       try { if (caps.focusMode?.includes?.("continuous")) await tr.applyConstraints({ advanced: [{ focusMode: "continuous" }] }); } catch { /* ignore */ }
-      setZoomCap(caps.zoom ? { min: caps.zoom.min || 1, max: Math.min(caps.zoom.max || 1, 4) } : null);
-      if (video.current) { video.current.srcObject = s; await video.current.play(); }
+      if (caps.zoom && caps.zoom.max > 1) {
+        const zc = { min: caps.zoom.min || 1, max: Math.min(caps.zoom.max, 5) };
+        setZoomCap(zc);
+        // 2× lets the phone stay ~15 cm away (where it can focus) while the sticker still fills the frame
+        const z = Math.min(2, zc.max); try { await tr.applyConstraints({ advanced: [{ zoom: z }] }); setZoom(z); } catch { /* ignore */ }
+      } else setZoomCap(null);
+      if (video.current) { video.current.srcObject = s; await video.current.play().catch(() => {}); }
       setOn(true);
-
-      // Labels are only readable after permission is granted; enumerate now.
       try {
         const list = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "videoinput");
         setCams(list);
-        // remember which camera we actually got
         const activeId = tr?.getSettings?.().deviceId || id || "";
         if (activeId) { setCamId(activeId); setSetting("scan_camera_id", activeId); }
       } catch { /* enumeration may be blocked; the flip control just won't show */ }
     } catch (e: any) {
-      if (id && e?.name === "OverconstrainedError") { return start(""); } // chosen camera gone → default
       setErr(e?.name === "NotAllowedError"
-        ? "Camera permission was refused. Allow it in the browser settings (tap the camera/lock icon in the address bar → Allow), or use the scanner gun box below."
-        : "No camera available here — use the scanner gun box below or Photo scan.");
+        ? "Camera permission was refused. Tap the lock/camera icon in the address bar → Allow camera, then Start camera."
+        : e?.name === "NotReadableError" ? "The camera is busy in another app or tab. Close it and tap Start camera."
+        : "No camera available here — use Photo scan, a scanner gun, or a phone as scanner.");
     }
   };
 
@@ -225,62 +280,58 @@ export function CameraScanner({ onCode, paused = false, gap = 2500 }: { onCode: 
 
   useEffect(() => {
     if (!on) return;
-    let alive = true, busy = false; let zoomCanvas: HTMLCanvasElement | null = null;
-    const loop = async () => {
-      if (!alive) return;
-      const v = video.current;
-      if (!busy && !pausedRef.current && v && v.readyState >= 2) {
-        busy = true;
+    let alive = true, frame = 0, fails = 0;
+    (async () => {
+      while (alive) {
+        const v = video.current;
+        if (pausedRef.current || !v || v.readyState < 2 || !v.videoWidth) { await new Promise(r => setTimeout(r, 120)); continue; }
+        frame++;
+        const W = v.videoWidth, H = v.videoHeight;
+        // aiming box = middle 80% × 70%; every other frame, the middle 45% enlarged 2×
+        const wide = frame % 2 === 1;
+        const [fx, fy] = wide ? [0.8, 0.7] : [0.45, 0.4];
+        const sw = W * fx, sh = H * fy, sx = (W - sw) / 2, sy = (H - sh) / 2;
+        let hits: Hit[] = [];
         try {
-          const det = await getDetector();
-          frame.current++;
-          let found = await det.detect(v);
-          if ((!found || !found.length) && frame.current % 2 === 0) {
-            // every other frame: look again at the middle of the picture, enlarged — small stickers from further away
-            const c = zoomCanvas || (zoomCanvas = document.createElement("canvas"));
-            const w = v.videoWidth, h = v.videoHeight, sw = w * 0.5, sh = h * 0.5;
-            c.width = Math.round(sw * 2); c.height = Math.round(sh * 2);
-            c.getContext("2d")!.drawImage(v, (w - sw) / 2, (h - sh) / 2, sw, sh, 0, 0, c.width, c.height);
-            found = await det.detect(c);
-          }
-          if (found && found.length) emit(found[0].rawValue, found[0].format, true);
+          const img = grab(v, sx, sy, sw, sh, 1600, wide ? 1 : 2);
+          const [n, z] = await Promise.all([wide ? nativeRead(v, W, H) : Promise.resolve([] as Hit[]), wasmRead(img, fails > 6)]);
+          hits = [...n, ...z.map(h => ({ ...h, cx: (sx + h.cx * sw) / W, cy: (sy + h.cy * sh) / H }))];
         } catch { /* frame not ready */ }
-        busy = false;
+        if (!alive) break;
+        if (hits.length) { fails = 0; const b = nearest(hits); emit(b.text, b.format, true); setStatus(""); }
+        else { fails++; if (fails === 40) setStatus("Hold the sticker flat, 10–20 cm away. Tap the picture to focus, use the torch, or Photo scan."); }
+        await new Promise(r => requestAnimationFrame(() => r(null)));
       }
-      setTimeout(() => requestAnimationFrame(loop), 110);
-    };
-    loop();
+    })();
     return () => { alive = false; };
   }, [on]);
 
-  const toggleTorch = async () => {
-    const tr: any = stream.current?.getVideoTracks()[0];
-    try { await tr?.applyConstraints({ advanced: [{ torch: !torch }] }); setTorch(!torch); } catch { /* not supported */ }
-  };
+  const toggleTorch = async () => { try { await track()?.applyConstraints({ advanced: [{ torch: !torch }] }); setTorch(!torch); } catch { setErr("This camera has no torch."); } };
 
   return (
-    <div className="stack">
-      <div className="vf">
-        <video ref={video} playsInline muted onClick={refocus} />
+    <div className="stack" style={{ gap: 8 }}>
+      <div className={"vf" + (tall ? " tall" : "")}>
+        <video ref={video} playsInline muted autoPlay onClick={refocus} />
         <div className="guide" />
         <div className="flash" ref={flash} />
-        <span className="tag">{on ? (paused ? "Paused" : "Point at the label") : "Camera off"}</span>
+        <span className="tag">{on ? (paused ? "Paused" : "Point at the sticker") : "Camera off"}</span>
+        {lastText && <span className="lastread">✓ {lastText.length > 34 ? lastText.slice(0, 34) + "…" : lastText}</span>}
       </div>
-      {err && <div className="note warn">{err}</div>}
-      <div className="row">
-        {on ? <button className="btn sm" onClick={stop}>Stop camera</button> : <button className="btn sm p" onClick={() => start()}>Start camera</button>}
+      {status && <div className="xs mut">{status}</div>}
+      {err && <div className="note warn sm">{err}</div>}
+      <div className="row" style={{ gap: 6 }}>
+        {on ? <button className="btn sm" onClick={stop}>Stop</button> : <button className="btn sm p" onClick={() => start()}>Start camera</button>}
         {on && cams.length > 1 && <button className="btn sm" onClick={flip} title="Switch camera (rear / front / webcam)"><Icon n="camera" size={15} /> Switch</button>}
         {on && <button className="btn sm" onClick={toggleTorch}>{torch ? "Torch off" : "Torch"}</button>}
-        {on && zoomCap && zoomCap.max > 1 && <button className="btn sm" onClick={() => setZ(zoom >= Math.min(3, zoomCap.max) ? zoomCap.min : Math.min(zoom + 1, zoomCap.max))}>Zoom {zoom}×</button>}
+        {on && zoomCap && <button className="btn sm" onClick={() => setZ(zoom >= Math.min(3, zoomCap.max) ? zoomCap.min : Math.min(zoom + 1, zoomCap.max))}>Zoom {zoom}×</button>}
         <input ref={photo} type="file" accept="image/*" capture="environment" hidden onChange={async e => {
           const f = e.target.files?.[0]; e.target.value = ""; if (!f) return;
-          setPhotoBusy(true);
-          try { const r = await decodeFile(f); if (r) emit(r.rawValue + "", r.format); else setErr("Couldn't read a code in that photo — hold the phone a little closer, keep the sticker flat and try again."); }
+          setPhotoBusy(true); setErr("");
+          try { const r = await decodeFile(f); if (r) { last.current = { t: "", at: 0 }; emit(String(r.rawValue), r.format); } else setErr("Couldn't find a code in that photo. Keep the sticker flat and fill more of the picture."); }
           finally { setPhotoBusy(false); }
         }} />
-        <button className="btn sm" onClick={() => { setErr(""); last.current = { t: "", at: 0 }; photo.current?.click(); }} disabled={photoBusy}>{photoBusy ? "Reading…" : "Photo scan"}</button>
+        <button className="btn sm" onClick={() => photo.current?.click()} disabled={photoBusy}><Icon n="camera" size={15} />{photoBusy ? "Reading…" : "Photo scan"}</button>
       </div>
-      <div className="xs mut">Tip: hold the sticker 10–15 cm away and tap the picture to focus. For very small stickers use Photo scan.{cams.length > 1 ? " Tap Switch to change cameras." : ""}</div>
     </div>
   );
 }

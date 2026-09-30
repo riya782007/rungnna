@@ -11,6 +11,9 @@ import { usePrivate, unlock, lockNow, getPrivate, isOpen } from "../lib/privacy"
 import { Icon } from "../components/Icon";
 import { rupees, toPaise } from "../lib/format";
 import { CameraScanner, useScannerGun } from "../components/Scanner";
+import { hostRemote } from "../lib/remote";
+import { qrSvg } from "../lib/qr";
+import { createPortal } from "react-dom";
 import { MicButton } from "../components/Voice";
 import { Modal, PhotoButton, Thumb } from "../components/common";
 import { PrintBill, type PrintFormat } from "../components/Invoice";
@@ -97,30 +100,55 @@ export default function Billing({ args }: { args: string[] }) {
   useScannerGun((code) => onCode(code));
 
   /* a scan or Enter in the box: find the product; unknown shop labels create the product on the spot */
-  async function onCode(raw: string) {
-    const r = raw.trim(); if (!r) return;
+  /* the same new sticker read twice in a split second must not create two products */
+  const creating = useRef(new Map<string, Promise<Product | undefined>>());
+  async function resolve(r: string): Promise<Product | undefined> {
+    const found = await findByScan(r); if (found) return found;
+    if (creating.current.has(r)) return creating.current.get(r);
+    const job = (async () => {
+      const parsed = parseLabel(r, await patterns());
+      if (!(parsed.style && (parsed.how === "shop label" || parsed.how === "rungnna"))) return undefined;
+      const np = fromParsed(parsed, me?.id || "");
+      np.item = np.item || (await itemNameFor(np.item_code)) || "";
+      const p = await saveProduct(np);
+      toast(`New product added from label: ${label(p)}`);
+      return p;
+    })();
+    creating.current.set(r, job);
+    try { return await job; } finally { setTimeout(() => creating.current.delete(r), 3000); }
+  }
+
+  async function onCode(raw: string): Promise<string> {
+    const r = raw.trim(); if (!r) return "";
     if (r.startsWith("#") && r.length > 1) { // typed code in the scan box
       setQ("");
       if (await unlock(r.slice(1))) { set({ bill_type: "estimate" }); beep(); } else { beep(false); toast("Not found", true); }
-      return;
+      return "";
     }
-    let p = await findByScan(r);
-    if (!p) {
-      const parsed = parseLabel(r, await patterns());
-      if (parsed.style && (parsed.how === "shop label" || parsed.how === "rungnna")) {
-        const np = fromParsed(parsed, me?.id || "");
-        np.item = np.item || (await itemNameFor(np.item_code)) || "";
-        p = await saveProduct(np);
-        toast(`New product added from label: ${label(p)}`);
-      }
-    }
+    let p = await resolve(r);
     if (!p) {
       const hits = products.filter(x => (x.style + " " + x.code + " " + x.item).toUpperCase().includes(r.toUpperCase()));
       if (hits.length === 1) p = hits[0];
     }
-    if (!p) { beep(false); toast("Not found — scan the label or record it in Scan & record", true); return; }
+    if (!p) { beep(false); toast("Not found — scan the label or record it in Scan & record", true); return "Not found"; }
     beep(true); addProduct(p); setQ("");
+    return "Added · " + label(p);
   }
+  const onCodeRef = useRef(onCode); onCodeRef.current = onCode;
+
+  /* phone-as-scanner: codes from a paired phone land on this bill */
+  const [pairId, setPairId] = useState("");
+  const [pairOpen, setPairOpen] = useState(false);
+  const [peers, setPeers] = useState(0);
+  useEffect(() => { getSetting("remote_id", "").then(setPairId); }, []);
+  useEffect(() => {
+    if (!pairId) return;
+    let off = () => {}, dead = false;
+    hostRemote(pairId, t => onCodeRef.current(t), setPeers).then(f => { if (dead) f(); else off = f; });
+    return () => { dead = true; off(); };
+  }, [pairId]);
+  const [sheet, setSheet] = useState(false);
+  const small = typeof matchMedia !== "undefined" && matchMedia("(max-width: 860px)").matches;
 
   const suggestions = useMemo(() => {
     const w = q.trim().toUpperCase().split(/\s+/).filter(Boolean);
@@ -234,10 +262,11 @@ export default function Billing({ args }: { args: string[] }) {
                       <span className="grow"><b>{p.style || p.code}</b> <span className="mut">{p.item} · {p.color}</span></span>
                       <span className="mono">{p.rate ? rupees(p.rate) : ""}{p.pack ? " ×" + p.pack : ""}</span></button>))}</div>)}
               </div>
-              <button className={"btn " + (cam ? "dk" : "")} onClick={() => setCam(!cam)} title="Camera scan" aria-label="Camera scan"><Icon n="camera" size={20} /></button>
+              <button className={"btn " + (cam || sheet ? "p" : "g")} onClick={() => (small ? setSheet(true) : setCam(!cam))} title="Scan with the camera"><Icon n="scan" size={20} />Scan</button>
+              {!small && <button className={"btn " + (peers ? "p" : "")} onClick={() => setPairOpen(true)} title="Use a phone as the scanner"><Icon n="sell" size={18} />{peers ? "Phone linked" : "Phone as scanner"}</button>}
               <MicButton onAudio={a => doVoice(a)} busy={aiBusy} label="🎙 Speak order" />
             </div>
-            {cam && <div style={{ maxWidth: 420 }}><CameraScanner onCode={c => onCode(c)} /></div>}
+            {cam && !small && <div style={{ maxWidth: 560 }}><CameraScanner onCode={c => { onCode(c); }} /></div>}
           </div>
 
           <div className="card tw">
@@ -302,6 +331,8 @@ export default function Billing({ args }: { args: string[] }) {
         <button className="btn g" onClick={() => doSave(false, true)}>Save & Send</button><button className="btn p" onClick={() => doSave(false)}>Save</button></div>
 
       {custOpen && <CustomerPicker bill={b} onPick={p => { set(p); setCustOpen(false); scanRef.current?.focus(); }} onClose={() => setCustOpen(false)} />}
+      {sheet && <ScanSheet onCode={onCode} onClose={() => setSheet(false)} lines={t.items.length} pcs={t.total_qty} net={t.net} last={t.items[t.items.length - 1]} />}
+      {pairOpen && <PairPhone id={pairId} peers={peers} onNew={async () => { const id = Math.random().toString(36).slice(2, 10); await setSetting("remote_id", id); setPairId(id); }} onClose={() => setPairOpen(false)} />}
       {askCode && <CodePrompt onDone={ok => { setAskCode(false); if (ok) set({ bill_type: "estimate" }); }} />}
       {held && <HeldBills onPick={x => { setB(x); setHeld(false); }} onClose={() => setHeld(false)} />}
       {printing && <PrintBill b={printing.bill} shop={shop} format={printing.fmt} onDone={() => setPrinting(null)} />}
@@ -391,6 +422,40 @@ function CodePrompt({ onDone }: { onDone: (ok: boolean) => void }) {
             <input className={"in mono" + (bad ? " bad" : "")} type="password" inputMode="numeric" autoFocus autoComplete="off" value={code} onChange={e => { setCode(e.target.value); setBad(false); }} />
             <button className="btn p">Open</button></>}
       </form>
+    </Modal>
+  );
+}
+
+/* Phones: the whole screen becomes the scanner; the bill keeps count underneath. */
+function ScanSheet({ onCode, onClose, lines, pcs, net }: { onCode: (t: string) => Promise<string>; onClose: () => void; lines: number; pcs: number; net: number; last?: BillLine }) {
+  const [msg, setMsg] = useState("");
+  const bad = /not found/i.test(msg);
+  return createPortal(
+    <div className="scansheet">
+      <div className="row between"><b style={{ fontSize: 17 }}>Scan to bill</b><button className="btn sm" onClick={onClose}>Done</button></div>
+      <CameraScanner tall gap={1500} onCode={async c => setMsg(await onCode(c))} />
+      <div className="card pad stack" style={{ gap: 6 }}>
+        {msg && <div className="sm b" style={{ color: bad ? "var(--bad)" : "var(--ok)" }}>{msg}</div>}
+        {!msg && <div className="xs mut">Point at one sticker at a time. The same sticker counts again after it leaves the picture.</div>}
+        <div className="row between"><span className="sm">{lines} lines · {pcs} pcs</span><b style={{ fontSize: 24 }}>{rupees(net)}</b></div>
+        <button className="btn p big" onClick={onClose}>Done — go to bill</button>
+      </div>
+    </div>, document.body);
+}
+
+/* Laptop / counter PC: pair a phone as the camera. */
+function PairPhone({ id, peers, onNew, onClose }: { id: string; peers: number; onNew: () => void; onClose: () => void }) {
+  useEffect(() => { if (!id) onNew(); }, [id]);
+  const url = id ? `${location.origin}/#/remote/${id}` : "";
+  return (
+    <Modal title="Use a phone as the scanner" onClose={onClose}>
+      <div className="stack" style={{ alignItems: "center", textAlign: "center" }}>
+        {url && <div style={{ width: 220, height: 220 }} dangerouslySetInnerHTML={{ __html: qrSvg(url).svg }} />}
+        <div className="sm">On the phone (signed in to the shop app), scan this code with the phone camera — or open <b className="mono">{url.replace(/^https?:\/\//, "")}</b></div>
+        <div className={"pill " + (peers ? "ok" : "warn")}>{peers ? `${peers} phone${peers > 1 ? "s" : ""} connected` : "Waiting for a phone…"}</div>
+        <div className="xs mut">Every sticker the phone reads is added to the bill on this screen instantly. Needs internet on both. The link stays the same, so the phone can keep it open all day.</div>
+        <button className="btn sm" onClick={onNew}>Make a new link</button>
+      </div>
     </Modal>
   );
 }
