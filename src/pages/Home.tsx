@@ -165,19 +165,19 @@ export default function Home() {
         <div className="kpis">
           <div className="kpi dark">
             <span className="accent" style={{ background: "var(--gold)" }} />
-            <div className="kpi-top"><span className="lbl">Sales · {PERIODS.find(p => p[0] === period)![1]}</span><span className="kpi-ic"><Icon n="sell" size={16} /></span></div>
+            <div className="kpi-top"><span className="klbl">Sales · {PERIODS.find(p => p[0] === period)![1]}</span><span className="kpi-ic"><Icon n="sell" size={16} /></span></div>
             <div className="kpi-val"><AnimatedNumber value={d.sales} format={chanRupees} /></div>
             <div className="kpi-sub">{d.n} bills · {d.sold} pieces</div>
           </div>
           <div className="kpi">
             <span className="accent" style={{ background: "var(--ok)" }} />
-            <div className="kpi-top"><span className="lbl">Collected</span><span className="kpi-ic"><Icon n="cloud" size={16} /></span></div>
+            <div className="kpi-top"><span className="klbl">Collected</span><span className="kpi-ic"><Icon n="cloud" size={16} /></span></div>
             <div className="kpi-val" style={{ color: "var(--ok)" }}><AnimatedNumber value={d.collected} format={chanRupees} /></div>
             <div className="kpi-sub">in hand + digital</div>
           </div>
           <div className="kpi">
             <span className="accent" style={{ background: d.profit >= 0 ? "var(--ok)" : "var(--bad)" }} />
-            <div className="kpi-top"><span className="lbl">Profit (est.)</span><span className="kpi-ic"><Icon n="stock" size={16} /></span></div>
+            <div className="kpi-top"><span className="klbl">Profit (est.)</span><span className="kpi-ic"><Icon n="stock" size={16} /></span></div>
             <div className="kpi-val" style={{ color: d.profit >= 0 ? "var(--ink)" : "var(--bad)" }}>
               {d.haveCost ? <AnimatedNumber value={d.profit} format={chanRupees} /> : "—"}
             </div>
@@ -185,7 +185,7 @@ export default function Home() {
           </div>
           <div className="kpi">
             <span className="accent" style={{ background: d.credit ? "var(--bad)" : "var(--line)" }} />
-            <div className="kpi-top"><span className="lbl">On credit</span><span className="kpi-ic"><Icon n="user" size={16} /></span></div>
+            <div className="kpi-top"><span className="klbl">On credit</span><span className="kpi-ic"><Icon n="user" size={16} /></span></div>
             <div className="kpi-val" style={{ color: d.credit ? "var(--bad)" : undefined }}><AnimatedNumber value={d.credit} format={chanRupees} /></div>
             <div className="kpi-sub">{d.debtors} customer{d.debtors === 1 ? "" : "s"} to follow up</div>
           </div>

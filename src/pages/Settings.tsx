@@ -12,6 +12,8 @@ import { can, ROLE_NOTE } from "../lib/roles";
 import { getPrivate, setCode, lockNow, usePrivate } from "../lib/privacy";
 import { getRule, saveRule, validateKey, priceFromCost, DEFAULT_RULE, type PricingRule, type RoundTo } from "../lib/pricing";
 import { rupees, toPaise } from "../lib/format";
+import { useTheme, type Theme } from "../lib/theme";
+import { useSoundPrefs, sfx, type Sfx } from "../lib/sound";
 import { getTaxonomy, addTo, removeFrom, addColour, removeColour, colourCodeFor, type Taxonomy } from "../lib/taxonomy";
 
 export default function Settings() {
@@ -41,6 +43,8 @@ export default function Settings() {
             }}>{me.pin ? "Change my PIN" : "Set my PIN"}</button>}
             {me?.role === "owner" && !me.pin && <div className="note warn sm">Set a PIN — it's needed to approve big discounts and to keep your owner access safe.</div>}
           </div>
+
+          <LookAndSound />
 
           <div className="card"><header><h3>Cloud backup</h3><span className="grow" />
             <span className={"pill " + (!sync?.user ? "warn" : sync?.status === "idle" ? "ok" : sync?.status === "error" ? "bad" : "warn")}>{!sync?.user ? "not connected" : sync?.status === "idle" ? "all saved" : sync?.status}</span></header>
@@ -406,5 +410,34 @@ function PrivateCard() {
           {open && <button className="btn" onClick={() => lockNow()}>Lock now</button>}
         </div>
       </div></div>
+  );
+}
+
+/* per device: how this screen looks and sounds */
+function LookAndSound() {
+  const [theme, setTheme] = useTheme();
+  const [p, setP] = useSoundPrefs();
+  const themes: [Theme, string, string][] = [["auto", "Auto", "linear-gradient(135deg,#F6F4EF 50%,#0E0D10 50%)"], ["light", "Light", "#F6F4EF"], ["dark", "Night", "#0E0D10"]];
+  const demo: [Sfx, string][] = [["add", "Item added"], ["again", "Same item +1"], ["notfound", "Not found"], ["pay", "Payment"], ["saved", "Bill saved"], ["remove", "Removed"], ["hold", "On hold"]];
+  const Sw = ({ on, set, t, sub }: { on: boolean; set: (v: boolean) => void; t: string; sub: string }) => (
+    <button className="switch" role="switch" aria-checked={on} onClick={() => set(!on)}>
+      <span className="grow" style={{ textAlign: "left" }}><b className="sm">{t}</b><div className="xs mut">{sub}</div></span><span className="knob" /></button>);
+  return (
+    <div className="card"><header><h3>Look &amp; sound</h3><span className="grow" /><span className="pill">this device</span></header>
+      <div className="pad stack">
+        <div className="opt3" role="group" aria-label="Theme">
+          {themes.map(([k, n, bg]) => <button key={k} aria-pressed={theme === k} onClick={() => setTheme(k)}><span className="sw" style={{ background: bg }} />{n}</button>)}
+        </div>
+        <Sw on={p.on} set={v => { setP({ on: v }); if (v) setTimeout(() => sfx("add"), 30); }} t="Sounds" sub="A soft chime for every scan, payment and saved bill" />
+        {p.on && <>
+          <div className="seg" role="group" aria-label="Volume" style={{ alignSelf: "flex-start" }}>
+            {(["Soft", "Normal", "Loud"] as const).map((n, i) => <button key={n} aria-pressed={p.vol === i} onClick={() => { setP({ vol: i as 0 | 1 | 2 }); setTimeout(() => sfx("add"), 30); }}>{n}</button>)}
+          </div>
+          <div className="sfxgrid">{demo.map(([k, n]) => <button key={k} className="chip" onClick={() => sfx(k)}>▶ {n}</button>)}</div>
+          <Sw on={p.clicks} set={v => setP({ clicks: v })} t="Key clicks" sub="A tiny tick on every button — off keeps the counter quiet" />
+        </>}
+        <Sw on={p.buzz} set={v => { setP({ buzz: v }); if (v) try { navigator.vibrate?.(18); } catch { /* */ } }} t="Vibration" sub="Phones buzz on each scan — useful when the shop is loud" />
+      </div>
+    </div>
   );
 }

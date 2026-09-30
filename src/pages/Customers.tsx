@@ -4,7 +4,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, type Party, type Payment } from "../lib/db";
 import { newParty, waLink, normPhone, getShop, DEFAULT_SHOP, type Shop } from "../lib/billing";
 import { ledger, receive, balances, statementText, type Entry } from "../lib/ledger";
-import { go, toast, useApp } from "../lib/app";
+import { go, toast, useApp, sfx } from "../lib/app";
 import { rupees, toPaise, when } from "../lib/format";
 import { Head, PhotoButton, Thumb } from "../components/common";
 import { Icon } from "../components/Icon";
@@ -75,7 +75,7 @@ function PartyView({ id }: { id: string }) {
   const collect = async () => {
     const a = toPaise(amt); if (!a) return toast("Enter the amount", true);
     const r = await receive(p0, a, mode, note, me?.id || "");
-    toast(`Received ${rupees(a)} · ${r.no}${r.unallocated ? " · " + rupees(r.unallocated) + " kept as advance" : ""}`);
+    sfx("pay"); toast(`Received ${rupees(a)} · ${r.no}${r.unallocated ? " · " + rupees(r.unallocated) + " kept as advance" : ""}`);
     setAmt(""); setNote("");
   };
   return (

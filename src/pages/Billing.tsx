@@ -5,7 +5,8 @@ import { findByScan, fromParsed, saveProduct, patterns, itemNameFor, label } fro
 import { parseLabel } from "../lib/parse";
 import { newBill, lineFrom, totals, fixLine, finalize, holdBill, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
 import { voiceBill } from "../lib/ai";
-import { useApp, toast, beep, go } from "../lib/app";
+import { useApp, toast, beep, go, sfx } from "../lib/app";
+import { Money, Done, flashRow } from "../components/Feel";
 import { can } from "../lib/roles";
 import { usePrivate, unlock, lockNow, getPrivate, isOpen } from "../lib/privacy";
 import { Icon } from "../components/Icon";
@@ -64,6 +65,7 @@ export default function Billing({ args }: { args: string[] }) {
 
   const t = useMemo(() => (b ? totals(b, shop.state) : null), [b, shop.state]);
   const [askCode, setAskCode] = useState(false);
+  const [doneMsg, setDoneMsg] = useState<{ no: string; net: number; who: string } | null>(null);
   useEffect(() => {
     if (priv || !b || b.bill_type !== "estimate") return;
     // locked while an estimate was open: park it out of sight, continue with a GST invoice
@@ -77,20 +79,26 @@ export default function Billing({ args }: { args: string[] }) {
   };
   const set = (patch: Partial<Bill>) => setB(x => (x ? { ...x, ...patch } : x));
   const setLine = (id: string, patch: Partial<BillLine>) => setB(x => x ? { ...x, items: x.items.map(l => (l.id === id ? fixLine({ ...l, ...patch }) : l)) } : x);
-  const dropLine = (id: string) => setB(x => x ? { ...x, items: x.items.filter(l => l.id !== id) } : x);
+  const dropLine = (id: string) => { sfx("remove"); setB(x => x ? { ...x, items: x.items.filter(l => l.id !== id) } : x); };
 
-  function addProduct(p: Product, pkts = 1, pieces = 0, rate = 0) {
-    setB(x => {
-      if (!x) return x;
-      const same = x.items.find(l => l.product_id === p.id && l.box_no === box);
-      if (same && !pieces && !rate) {
-        return { ...x, items: x.items.map(l => l.id === same.id ? fixLine(l.pack > 1 ? { ...l, pkts: l.pkts + pkts } : { ...l, qty: l.qty + pkts }) : l) };
-      }
+  const bRef = useRef(b); bRef.current = b;
+  function addProduct(p: Product, pkts = 1, pieces = 0, rate = 0, quiet = false) {
+    const cur = bRef.current; if (!cur) return;
+    const same = cur.items.find(l => l.product_id === p.id && l.box_no === box);
+    let next: Bill, touched: string;
+    if (same && !pieces && !rate) {
+      touched = same.id;
+      next = { ...cur, items: cur.items.map(l => l.id === same.id ? fixLine(l.pack > 1 ? { ...l, pkts: l.pkts + pkts } : { ...l, qty: l.qty + pkts }) : l) };
+    } else {
       let line = lineFrom(p, box, pkts);
       if (pieces) line = fixLine({ ...line, pkts: 0, qty: pieces });
       if (rate) line = fixLine({ ...line, rate: toPaise(rate) });
-      return { ...x, items: [...x.items, line] };
-    });
+      touched = line.id;
+      next = { ...cur, items: [...cur.items, line] };
+    }
+    bRef.current = next; setB(next);
+    if (!quiet) sfx(same && !pieces && !rate ? "again" : "add");
+    flashRow(touched);
   }
 
   /* Hardware scanner gun works anywhere on the bill screen — even if the focus
@@ -111,7 +119,7 @@ export default function Billing({ args }: { args: string[] }) {
       const np = fromParsed(parsed, me?.id || "");
       np.item = np.item || (await itemNameFor(np.item_code)) || "";
       const p = await saveProduct(np);
-      toast(`New product added from label: ${label(p)}`);
+      toast(`New item · ${label(p)}`);
       return p;
     })();
     creating.current.set(r, job);
@@ -122,7 +130,7 @@ export default function Billing({ args }: { args: string[] }) {
     const r = raw.trim(); if (!r) return "";
     if (r.startsWith("#") && r.length > 1) { // typed code in the scan box
       setQ("");
-      if (await unlock(r.slice(1))) { set({ bill_type: "estimate" }); beep(); } else { beep(false); toast("Not found", true); }
+      if (await unlock(r.slice(1))) { set({ bill_type: "estimate" }); sfx("unlock"); } else { beep(false); toast("Not found", true); }
       return "";
     }
     let p = await resolve(r);
@@ -131,7 +139,7 @@ export default function Billing({ args }: { args: string[] }) {
       if (hits.length === 1) p = hits[0];
     }
     if (!p) { beep(false); toast("Not found — scan the label or record it in Scan & record", true); return "Not found"; }
-    beep(true); addProduct(p); setQ("");
+    addProduct(p); setQ("");
     return "Added · " + label(p);
   }
   const onCodeRef = useRef(onCode); onCodeRef.current = onCode;
@@ -169,7 +177,7 @@ export default function Billing({ args }: { args: string[] }) {
     }
     if (b.bill_type === "gst" && !shop.gstin) toast("Tip: add the shop GSTIN in Settings → Shop profile", true);
     const done = await finalize(b, shop.state, b.party_name);
-    toast(`Saved ${done.no} · ${rupees(done.net)}`);
+    sfx("saved"); setDoneMsg({ no: done.no, net: done.net, who: b.party_name || "Walk-in" });
     await setSetting("draft_bill", null);
     if (print) setPrinting({ bill: done, fmt });
     if (share) await shareBill(done, shop);
@@ -179,7 +187,7 @@ export default function Billing({ args }: { args: string[] }) {
   async function doHold() {
     if (!b?.items.length) return toast("Nothing to hold", true);
     await holdBill(totals(b, shop.state)); await setSetting("draft_bill", null);
-    toast("Bill on hold — F5 to bring it back"); setB(newBill(me?.id || "", shop, b.bill_type)); setBox(1);
+    sfx("hold"); toast("Bill on hold — F5 to bring it back"); setB(newBill(me?.id || "", shop, b.bill_type)); setBox(1);
   }
   async function doVoice(audio?: Blob, text?: string) {
     setAiBusy(true);
@@ -193,10 +201,11 @@ export default function Billing({ args }: { args: string[] }) {
           (!l.color || !p.color || p.color.toUpperCase().includes(l.color.toUpperCase().split(" ")[0])));
         const p = cand[0];
         if (!p) { toast(`Couldn't match: ${[l.item, l.style, l.color].filter(Boolean).join(" ")}`, true); continue; }
-        addProduct(p, l.packets || (l.pieces ? 0 : 1), l.packets ? 0 : l.pieces || 0, l.rate || 0); added++;
+        addProduct(p, l.packets || (l.pieces ? 0 : 1), l.packets ? 0 : l.pieces || 0, l.rate || 0, true); added++;
       }
       if (r.customer?.name && !b?.party_name) set({ party_name: r.customer.name, party_phone: r.customer.phone || "" });
       if (r.remarks) set({ remarks: [b?.remarks, r.remarks].filter(Boolean).join(" · ") });
+      if (added) sfx("add"); else sfx("notfound");
       toast(`${added} line${added === 1 ? "" : "s"} added${r.heard ? " — heard: " + r.heard : ""}`);
     } catch (e: any) { toast(e.message, true); } finally { setAiBusy(false); }
   }
@@ -231,7 +240,7 @@ export default function Billing({ args }: { args: string[] }) {
         {priv ? <div className="seg" role="group" aria-label="Bill type">
           <button aria-pressed={b.bill_type === "estimate"} onClick={() => set({ bill_type: "estimate" })}>Estimate</button>
           <button aria-pressed={b.bill_type === "gst"} onClick={() => set({ bill_type: "gst" })}>GST Invoice</button>
-          <button onClick={() => lockNow()} title="Lock estimates" aria-label="Lock estimates"><Icon n="lock" size={15} /></button>
+          <button onClick={() => { sfx("lock"); lockNow(); }} title="Lock estimates" aria-label="Lock estimates"><Icon n="lock" size={15} /></button>
         </div> : <div className="pos-title" {...hintProps}><b>Tax invoice</b><span className="xs mut">{b.gst_rate}% GST</span></div>}
         <div className="pos-no"><span className="xs mut">{b.no ? "Bill no" : "Next no"}</span><b className="mono">{b.no || nextNo}</b></div>
         <button className="pos-cust" onClick={() => setCustOpen(true)}>
@@ -274,7 +283,7 @@ export default function Billing({ args }: { args: string[] }) {
               <thead><tr><th>#</th><th>Box</th><th>Item · Style · Colour</th><th className="r">Pkt</th><th className="r">Pcs</th><th className="r">Rate ₹</th><th className="r">Disc</th><th className="r">Amount</th><th /></tr></thead>
               <tbody>
                 {t.items.map((l, i) => (
-                  <tr key={l.id} className="ln">
+                  <tr key={l.id} className="ln" data-row={l.id}>
                     <td className="mut" data-l="#">{i + 1}</td>
                     <td data-l="Box"><input className="cell" style={{ width: 38 }} inputMode="numeric" value={l.box_no} onChange={e => setLine(l.id, { box_no: parseInt(e.target.value) || 1 })} /></td>
                     <td data-l=""><b>{l.item || "—"}</b> <span className="mono">{l.style}</span> <span className="mut">{l.color}</span>{l.product_id && pmap.get(l.product_id)?.tk?.trim() ? <span className="pill warn" style={{ marginLeft: 6 }}>dead stock</span> : null}</td>
@@ -284,7 +293,7 @@ export default function Billing({ args }: { args: string[] }) {
                       onChange={e => setLine(l.id, { qty: parseInt(e.target.value) || 0, pkts: 0 })} /></td>
                     <td className="r" data-l="Rate ₹"><input className="cell r" style={{ width: 70 }} inputMode="decimal" disabled={!can(me, "rates") && !!(l.product_id && pmap.get(l.product_id)?.rate)} value={l.rate ? l.rate / 100 : ""} onChange={e => setLine(l.id, { rate: toPaise(e.target.value) })} /></td>
                     <td className="r" data-l="Disc"><input className="cell r" style={{ width: 54 }} placeholder="—" value={l.disc} onChange={e => setLine(l.id, { disc: e.target.value })} /></td>
-                    <td className="r mono b" data-l="Amount">{(l.amount / 100).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+                    <td className="r mono b" data-l="Amount"><span key={l.amount} className="bump">{(l.amount / 100).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span></td>
                     <td data-l=""><button className="x" aria-label="Remove line" onClick={() => dropLine(l.id)}>✕</button></td>
                   </tr>))}
                 {!t.items.length && <tr><td colSpan={9} className="mut" style={{ padding: 28, textAlign: "center" }}>Scan a label, type a style, or tap Speak order and say it.<br /><span className="xs">e.g. “do packet K5208 white, ek darjan jhumki gold”</span></td></tr>}
@@ -308,7 +317,7 @@ export default function Billing({ args }: { args: string[] }) {
           {b.bill_type === "gst" && <div className="sumrow"><span>GST {b.gst_rate}% <button className="linkbtn" onClick={() => set({ gst_mode: b.gst_mode === "exclusive" ? "inclusive" : "exclusive" })}>{b.gst_mode === "exclusive" ? "added" : "included"}</button></span><b className="mono">{rupees(t.gst)}</b></div>}
           {t.igst ? <div className="xs mut" style={{ textAlign: "right" }}>IGST (other state)</div> : t.gst ? <div className="xs mut" style={{ textAlign: "right" }}>CGST {rupees(t.cgst)} + SGST {rupees(t.sgst)}</div> : null}
           {t.adjust ? <div className="sumrow"><span>Round off</span><span className="mono">{rupees(t.adjust)}</span></div> : null}
-          <div className="net"><span>NET</span><b>{rupees(t.net)}</b></div>
+          <div className="net"><span>NET</span><Money paise={t.net} /></div>
           <div className="sumrow"><span>Advance</span><input className="cell r" style={{ width: 80 }} value={b.advance ? b.advance / 100 : ""} onChange={e => set({ advance: toPaise(e.target.value) })} /></div>
           <Payments pays={b.payments} left={t.net - b.advance} onChange={payments => set({ payments })} />
           <div className={"sumrow " + (balance > 0 ? "due" : "")}><span>{balance > 0 ? "Balance (credit)" : balance < 0 ? "Return to customer" : "Balance"}</span><b className="mono">{rupees(Math.abs(balance))}</b></div>
@@ -327,14 +336,15 @@ export default function Billing({ args }: { args: string[] }) {
       </div>
 
       <div className="fkeys">{KEYS.map(([k, v]) => <span key={k}><kbd>{k}</kbd>{v}</span>)}</div>
-      <div className="pos-mbar"><div><span className="xs">{t.total_qty} pcs · {t.items.length} lines</span><b>{rupees(t.net)}</b></div>
+      <div className="pos-mbar"><div><span className="xs">{t.total_qty} pcs · {t.items.length} lines</span><Money paise={t.net} /></div>
         <button className="btn g" onClick={() => doSave(false, true)}>Save & Send</button><button className="btn p" onClick={() => doSave(false)}>Save</button></div>
 
       {custOpen && <CustomerPicker bill={b} onPick={p => { set(p); setCustOpen(false); scanRef.current?.focus(); }} onClose={() => setCustOpen(false)} />}
       {sheet && <ScanSheet onCode={onCode} onClose={() => setSheet(false)} lines={t.items.length} pcs={t.total_qty} net={t.net} last={t.items[t.items.length - 1]} />}
       {pairOpen && <PairPhone id={pairId} peers={peers} onNew={async () => { const id = Math.random().toString(36).slice(2, 10); await setSetting("remote_id", id); setPairId(id); }} onClose={() => setPairOpen(false)} />}
-      {askCode && <CodePrompt onDone={ok => { setAskCode(false); if (ok) set({ bill_type: "estimate" }); }} />}
+      {askCode && <CodePrompt onDone={ok => { setAskCode(false); if (ok) { sfx("unlock"); set({ bill_type: "estimate" }); } }} />}
       {held && <HeldBills onPick={x => { setB(x); setHeld(false); }} onClose={() => setHeld(false)} />}
+      {doneMsg && <Done title="Saved" amount={doneMsg.net} sub={`${doneMsg.no} · ${doneMsg.who}`} onEnd={() => setDoneMsg(null)} />}
       {printing && <PrintBill b={printing.bill} shop={shop} format={printing.fmt} onDone={() => setPrinting(null)} />}
     </div>
   );
@@ -343,7 +353,7 @@ export default function Billing({ args }: { args: string[] }) {
 function Payments({ pays, left, onChange }: { pays: Payment[]; left: number; onChange: (p: Payment[]) => void }) {
   const paid = pays.reduce((a, p) => a + (p.mode === "credit" ? 0 : p.amount), 0);
   const rest = Math.max(0, left - paid);
-  const add = (mode: Payment["mode"]) => onChange([...pays, { mode, amount: rest }]);
+  const add = (mode: Payment["mode"]) => { sfx("pay"); onChange([...pays, { mode, amount: rest }]); };
   return (
     <div className="stack" style={{ gap: 4 }}>
       {pays.map((p, i) => (
@@ -437,7 +447,7 @@ function ScanSheet({ onCode, onClose, lines, pcs, net }: { onCode: (t: string) =
       <div className="card pad stack" style={{ gap: 6 }}>
         {msg && <div className="sm b" style={{ color: bad ? "var(--bad)" : "var(--ok)" }}>{msg}</div>}
         {!msg && <div className="xs mut">Point at one sticker at a time. The same sticker counts again after it leaves the picture.</div>}
-        <div className="row between"><span className="sm">{lines} lines · {pcs} pcs</span><b style={{ fontSize: 24 }}>{rupees(net)}</b></div>
+        <div className="row between"><span className="sm">{lines} lines · {pcs} pcs</span><Money paise={net} className="scannet" /></div>
         <button className="btn p big" onClick={onClose}>Done — go to bill</button>
       </div>
     </div>, document.body);

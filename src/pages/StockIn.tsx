@@ -3,7 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, type Purchase, type PurchaseLine, type Product } from "../lib/db";
 import { newPurchase, sum, lineOf, resolveScan, finalizePurchase, lineQty } from "../lib/stockin";
 import { newParty } from "../lib/billing";
-import { useApp, toast, beep, go } from "../lib/app";
+import { useApp, toast, beep, go, sfx } from "../lib/app";
 import { can } from "../lib/roles";
 import { rupees, toPaise, when } from "../lib/format";
 import { CameraScanner } from "../components/Scanner";
@@ -75,7 +75,7 @@ function StockInSession() {
     setBusy(true);
     try {
       const done = await finalizePurchase(p);
-      toast(`Saved ${done.no} · ${done.total_qty} pcs into ${locs.find(l => l.id === done.loc_id)?.code || "rack"}`);
+      sfx("saved"); toast(`Saved ${done.no} · ${done.total_qty} pcs into ${locs.find(l => l.id === done.loc_id)?.code || "rack"}`);
       await setSetting("draft_stockin", null);
       setP(newPurchase(me?.id || "", p.loc_id));
       go("stockin/" + done.id);

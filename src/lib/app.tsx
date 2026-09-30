@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { sfx } from "./sound";
 import { db, put, uid, now, getSetting, setSetting, type Staff, type Location } from "./db";
 
 /* ---------- tiny hash router (works offline, no server rewrites needed) ---------- */
@@ -10,7 +11,7 @@ export function useRoute(): [string, string[]] {
 }
 export const go = (path: string) => { location.hash = "#/" + path; };
 
-/* ---------- toasts ---------- */
+/* ---------- toasts: at most two, newest on top, the same message never stacks ---------- */
 let pushToast: (t: string, bad?: boolean) => void = () => {};
 export const toast = (t: string, bad = false) => pushToast(t, bad);
 export function Toasts() {
@@ -18,24 +19,16 @@ export function Toasts() {
   useEffect(() => {
     pushToast = (t, bad = false) => {
       const id = Date.now() + Math.random();
-      setList(l => [...l, { id, t, bad }]);
-      setTimeout(() => setList(l => l.filter(x => x.id !== id)), 3200);
+      setList(l => [{ id, t, bad }, ...l.filter(x => x.t !== t)].slice(0, 2));
+      setTimeout(() => setList(l => l.filter(x => x.id !== id)), bad ? 4200 : 2600);
     };
   }, []);
-  return <div className="toast" role="status">{list.map(x => <div key={x.id} className={x.bad ? "bad" : ""}>{x.t}</div>)}</div>;
+  return <div className="toast" role="status" aria-live="polite">{list.map(x => <div key={x.id} className={x.bad ? "bad" : ""}><i aria-hidden>{x.bad ? "!" : "✓"}</i><span>{x.t}</span></div>)}</div>;
 }
 
 /* ---------- beep + vibrate on scan (the shop floor is noisy; hands are full) ---------- */
-let ac: AudioContext | null = null;
-export function beep(ok = true) {
-  try {
-    ac = ac || new AudioContext();
-    const o = ac.createOscillator(), g = ac.createGain();
-    o.frequency.value = ok ? 1250 : 320; g.gain.value = 0.08;
-    o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + (ok ? 0.09 : 0.25));
-  } catch { /* no audio */ }
-  try { navigator.vibrate?.(ok ? 40 : [60, 40, 60]); } catch { /* no vibrate */ }
-}
+export function beep(ok = true) { sfx(ok ? "add" : "notfound"); }
+export { sfx };
 
 /* ---------- who is using this device ---------- */
 type Ctx = { me: Staff | null; setMe: (s: Staff | null) => void; ready: boolean };
