@@ -24,6 +24,7 @@ const Products = lazy(() => import("./pages/Products"));
 const Activity = lazy(() => import("./pages/Activity"));
 const StockIn = lazy(() => import("./pages/StockIn"));
 const Import = lazy(() => import("./pages/Import"));
+const Remote = lazy(() => import("./pages/Remote"));
 const Settings = lazy(() => import("./pages/Settings"));
 
 /* Five places. Everything else is a tab inside one of them. */
@@ -99,6 +100,7 @@ function Shell() {
     case "product": page = <Products args={args} />; break;
     case "activity": page = <Activity />; break;
     case "stockin": page = <StockIn args={args} />; break;
+    case "remote": page = <Remote id={args[0] || ""} />; break;
     case "import": page = can(me, "settings") ? <Import /> : <NoAccess />; break;
     case "settings": page = <Settings />; break;
     default: page = <Home />;
