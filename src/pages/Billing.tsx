@@ -3,6 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, type Bill, type BillLine, type Party, type Payment, type Product } from "../lib/db";
 import { findByScan, fromParsed, saveProduct, patterns, itemInfoFor, withItemInfo, fillFromItemCode, needsName, label } from "../lib/products";
 import { NameItemCodes, unnamedCodes } from "../components/NameItemCodes";
+import { isRfidTag, normTag, soldBill, TagSet } from "../lib/rfid";
 import { parseLabel } from "../lib/parse";
 import { newBill, lineFrom, totals, fixLine, finalize, holdBill, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
 import { voiceBill } from "../lib/ai";
@@ -78,7 +79,19 @@ export default function Billing({ args }: { args: string[] }) {
   };
   const set = (patch: Partial<Bill>) => setB(x => (x ? { ...x, ...patch } : x));
   const setLine = (id: string, patch: Partial<BillLine>) => setB(x => x ? { ...x, items: x.items.map(l => (l.id === id ? fixLine({ ...l, ...patch }) : l)) } : x);
-  const dropLine = (id: string) => setB(x => x ? { ...x, items: x.items.filter(l => l.id !== id) } : x);
+  const dropLine = (id: string) => setB(x => {
+    if (!x) return x;
+    // tags read for a removed line must not be marked sold with this bill
+    const gone = x.items.find(l => l.id === id), codes = new Set(gone?.product_id ? pmap.get(gone.product_id)?.barcodes || [] : []);
+    const keep = x.items.some(l => l.id !== id && l.product_id === gone?.product_id);
+    const rfid_tags = keep ? x.rfid_tags : (x.rfid_tags || []).filter(t => !codes.has(t));
+    if (!keep) (x.rfid_tags || []).forEach(t => codes.has(t) && tagsRef.current.delete(t));
+    return { ...x, items: x.items.filter(l => l.id !== id), rfid_tags };
+  });
+
+  /* RFID: one tag counts once per bill, however many times the reader sees it */
+  const tagsRef = useRef(new TagSet());
+  useEffect(() => { tagsRef.current = new TagSet(b?.rfid_tags || []); }, [b?.id]);
 
   function addProduct(p: Product, pkts = 1, pieces = 0, rate = 0) {
     setB(x => {
@@ -126,6 +139,18 @@ export default function Billing({ args }: { args: string[] }) {
       setQ("");
       if (await unlock(r.slice(1))) { set({ bill_type: "estimate" }); beep(); } else { beep(false); toast("Not found", true); }
       return "";
+    }
+    if (isRfidTag(r)) {
+      const tag = normTag(r); setQ("");
+      if (!tagsRef.current.add(tag)) return "Tag already on this bill";
+      const tp = await findByScan(tag);
+      if (!tp) { tagsRef.current.delete(tag); beep(false); toast("RFID tag not linked to a product — link it in Products", true); return "Not found"; }
+      const sold = soldBill(tp, tag);
+      if (sold) toast(`This tag was already sold on ${sold} — check the piece`, true);
+      const fp = await fillFromItemCode(tp);
+      beep(true); addProduct(fp);
+      setB(x => x && { ...x, rfid_tags: [...(x.rfid_tags || []), tag] });
+      return "Added · " + label(fp);
     }
     let p = await resolve(r);
     if (!p) {
@@ -304,6 +329,7 @@ export default function Billing({ args }: { args: string[] }) {
 
         <aside className="pos-sum card">
           <div className="sumrow"><span>Pieces · Boxes</span><b className="mono">{t.total_qty} · {t.box_count}</b></div>
+          {b.rfid_tags?.length ? <div className="sumrow"><span>RFID tags</span><b className="mono">{b.rfid_tags.length}</b></div> : null}
           <div className="sumrow"><span>Gross</span><b className="mono">{rupees(t.gross)}</b></div>
           <div className="sumrow"><span>Discount</span>
             <span className="row" style={{ gap: 4, flexWrap: "nowrap" }}>

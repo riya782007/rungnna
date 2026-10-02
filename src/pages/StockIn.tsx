@@ -3,11 +3,13 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, type Purchase, type PurchaseLine, type Product } from "../lib/db";
 import { newPurchase, sum, lineOf, resolveScan, finalizePurchase, lineQty } from "../lib/stockin";
 import { newParty } from "../lib/billing";
-import { fillFromItemCode } from "../lib/products";
+import { fillFromItemCode, findByScan } from "../lib/products";
 import { useApp, toast, beep, go } from "../lib/app";
 import { can } from "../lib/roles";
 import { rupees, toPaise, when } from "../lib/format";
-import { CameraScanner } from "../components/Scanner";
+import { CameraScanner, useScannerGun } from "../components/Scanner";
+import { LinkRfid } from "../components/LinkRfid";
+import { isRfidTag, normTag, TagSet } from "../lib/rfid";
 import { Head, LocationSelect, PhotoButton, Modal, LOC_PREFIX, useLocations } from "../components/common";
 import { parseRackScan } from "../lib/rackLabel";
 import { Icon } from "../components/Icon";
@@ -31,7 +33,12 @@ function StockInSession() {
   const [flash, setFlash] = useState("");
   const [supOpen, setSupOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [rfid, setRfid] = useState(false);
   const box = useRef<HTMLInputElement>(null);
+  /* RFID: one tag counts once per stock-in */
+  const tagsRef = useRef(new TagSet());
+  useEffect(() => { tagsRef.current = new TagSet(p?.rfid_tags || []); }, [p?.id]);
+  useScannerGun(c => onCode(c), { enabled: !rfid && !supOpen });
   const products = useLiveQuery(() => db.products.filter(x => !x.deleted).toArray(), [], []);
   const recent = useLiveQuery(() => db.purchases.where("status").equals("final").reverse().sortBy("at"), [], []);
 
@@ -58,6 +65,15 @@ function StockInSession() {
     if (rackHit || r.startsWith(LOC_PREFIX)) {
       const l = rackHit;
       if (l) { setP(x => x && { ...x, loc_id: l.id }); beep(); toast("Rack: " + l.code); } else { beep(false); toast("Unknown rack label", true); }
+      return;
+    }
+    if (isRfidTag(r)) {
+      const tag = normTag(r); setQ("");
+      if (!tagsRef.current.add(tag)) return;               // the reader saw it again: still one piece
+      const tp = await findByScan(tag);
+      if (!tp) { tagsRef.current.delete(tag); beep(false); toast("RFID tag not linked to a product — tap Link RFID tag", true); return; }
+      beep(true); add(await fillFromItemCode(tp));
+      setP(x => x && { ...x, rfid_tags: [...(x.rfid_tags || []), tag] });
       return;
     }
     const { product, created } = await resolveScan(r, me?.id || "");
@@ -100,6 +116,7 @@ function StockInSession() {
                   onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); onCode(q); } }} />
               </div>
               <button className={"btn " + (cam ? "p" : "")} onClick={() => { setCam(!cam); setSetting("stockin_cam", !cam); }}><Icon n="camera" size={18} />{cam ? "Camera on" : "Camera"}</button>
+              <button className="btn" onClick={() => setRfid(true)}>Link RFID tag</button>
             </div>
             {cam && <CameraScanner onCode={c => onCode(c)} gap={1200} />}
             {!p.loc_id && <div className="note warn sm">Pick the rack first — every packet you scan goes there.</div>}
@@ -123,7 +140,11 @@ function StockInSession() {
                   : <input className="cell r" style={{ width: 60 }} inputMode="numeric" value={l.qty} onChange={e => setLine(l.id, { qty: parseInt(e.target.value) || 0 })} />}
                 <b className="mono" style={{ width: 56, textAlign: "right" }}>{lineQty(l)}</b>
                 {seeCost && <input className="cell r" style={{ width: 70 }} inputMode="decimal" placeholder="cost" value={l.cost ? l.cost / 100 : ""} onChange={e => setLine(l.id, { cost: toPaise(e.target.value) })} />}
-                <button className="x" aria-label="Remove" onClick={() => setP({ ...p, items: p.items.filter(x => x.id !== l.id) })}><Icon n="x" size={16} /></button>
+                <button className="x" aria-label="Remove" onClick={() => {
+                  const codes = new Set(products.find(x => x.id === l.product_id)?.barcodes || []);
+                  (p.rfid_tags || []).forEach(tg => codes.has(tg) && tagsRef.current.delete(tg));
+                  setP({ ...p, items: p.items.filter(x => x.id !== l.id), rfid_tags: (p.rfid_tags || []).filter(tg => !codes.has(tg)) });
+                }}><Icon n="x" size={16} /></button>
               </div>))}
             {!t.items.length && <div className="empty"><b>Scan the first packet</b>Each scan adds one packet. Scan the same label again for the next packet.</div>}
           </div>
@@ -133,6 +154,7 @@ function StockInSession() {
           <div className="card pad stack">
             <div className="row between"><span className="mut sm">Into</span><b>{rack ? rack.code : "—"}</b></div>
             <div className="row between"><span className="mut sm">Lines</span><b className="mono">{t.items.length}</b></div>
+            {p.rfid_tags?.length ? <div className="row between"><span className="mut sm">RFID tags</span><b className="mono">{p.rfid_tags.length}</b></div> : null}
             <div className="net"><span>PIECES</span><b>{t.total_qty.toLocaleString("en-IN")}</b></div>
             {seeCost && t.total_cost > 0 && <div className="row between"><span className="mut sm">Cost</span><b className="mono">{rupees(t.total_cost)}</b></div>}
             <button className="btn p big" disabled={busy} onClick={save}>Save stock in</button>
@@ -154,6 +176,7 @@ function StockInSession() {
       </div>
       <div className="pos-mbar"><div><span className="xs">{t.items.length} lines · {rack ? rack.code : "no rack"}</span><b>{t.total_qty.toLocaleString("en-IN")} pcs</b></div>
         <button className="btn p" disabled={busy} onClick={save}>Save stock in</button></div>
+      {rfid && <LinkRfid onClose={() => { setRfid(false); box.current?.focus(); }} />}
       {supOpen && <SupplierPicker onPick={(id, name) => { setP({ ...p, supplier_id: id, supplier_name: name }); setSupOpen(false); box.current?.focus(); }} onClose={() => setSupOpen(false)} />}
     </div>
   );

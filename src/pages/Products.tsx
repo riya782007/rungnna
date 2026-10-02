@@ -12,6 +12,8 @@ import { VoiceNotes } from "../components/Voice";
 import { usePrivate, maskNote } from "../lib/privacy";
 import { getTaxonomy, allItems, type Taxonomy } from "../lib/taxonomy";
 import { OnlineListing } from "../components/OnlineListing";
+import { LinkRfid } from "../components/LinkRfid";
+import { tagsOf, soldBill } from "../lib/rfid";
 
 export default function Products({ args }: { args: string[] }) {
   if (args[0]) return <ProductDetail id={args[0]} />;
@@ -23,6 +25,7 @@ function ProductList() {
   const [item, setItem] = useState("");
   const [dead, setDead] = useState(false);
   const [limit, setLimit] = useState(60);
+  const [rfid, setRfid] = useState(false);
   const all = useLiveQuery(() => db.products.orderBy("updated_at").reverse().toArray(), [], []);
   const cells = useLiveQuery(() => db.stock.toArray(), [], []);
   const qty = useMemo(() => { const m = new Map<string, number>(); cells.forEach(c => m.set(c.product_id, (m.get(c.product_id) || 0) + c.qty)); return m; }, [cells]);
@@ -34,7 +37,10 @@ function ProductList() {
   }, [all, q, item, dead]);
   return (
     <div>
-      <Head title="Products" sub={`${all.filter(p => !p.deleted).length} products`} />
+      <Head title="Products" sub={`${all.filter(p => !p.deleted).length} products`}>
+        <button className="btn" onClick={() => setRfid(true)}>Link RFID tag</button>
+      </Head>
+      {rfid && <LinkRfid onClose={() => setRfid(false)} />}
       <div className="card pad stack" style={{ marginBottom: 12 }}>
         <input className="in" placeholder="Search style, colour, item, code…" value={q} onChange={e => setQ(e.target.value)} />
         <WedgeInput autoFocus={false} placeholder="…or scan a label to open it" onCode={async raw => { const p = await findByScan(raw); p ? go("product/" + p.id) : toast("Not found", true); }} />
@@ -64,6 +70,7 @@ function ProductDetail({ id }: { id: string }) {
   const staff = useLiveQuery(() => db.staff.toArray(), [], []);
   const [p, setP] = useState<Product | null>(null);
   const [tax, setTax] = useState<Taxonomy | null>(null);
+  const [rfid, setRfid] = useState(false);
   const allProducts = useLiveQuery(() => db.products.toArray(), [], []);
   useEffect(() => { if (p0) setP({ ...p0 }); }, [p0?.updated_at]);
   useEffect(() => { getTaxonomy().then(setTax); }, []);
@@ -78,7 +85,9 @@ function ProductDetail({ id }: { id: string }) {
       <Head eyebrow={p.code} title={label(p)} sub={`${total} pieces in the building`}>
         <button className="btn" onClick={() => go("move/" + p.id)}>Move</button>
         <button className="btn g" onClick={() => go("labels/" + p.id)}>Print QR</button>
+        <button className="btn" onClick={() => setRfid(true)}>Link RFID tag</button>
       </Head>
+      {rfid && p0 && <LinkRfid product={p0} onClose={() => setRfid(false)} />}
       <div className="split">
         <div className="card pad stack">
           <ImageAssist product={p} onPhoto={v => set("photo_id", v)} />
@@ -118,6 +127,7 @@ function ProductDetail({ id }: { id: string }) {
           </div>
           <label className="f">Notes<textarea className="in" rows={2} value={p.notes} onChange={e => set("notes", e.target.value)} /></label>
           <div className="xs mut">Scans that open this product: <span className="mono">{p.barcodes.join(" · ")}</span></div>
+          {tagsOf(p).length > 0 && <div className="xs mut">RFID tags: {tagsOf(p).length} linked{tagsOf(p).filter(t => soldBill(p, t)).length ? ` · ${tagsOf(p).filter(t => soldBill(p, t)).length} sold` : ""}</div>}
           <div className="row">
             <button className="btn p" onClick={async () => { await saveProduct({ ...p }); toast("Saved"); }}>Save changes</button>
             <button className="btn bad" onClick={async () => { if (confirm("Hide this product? Its history stays.")) { await put("products", { ...p, deleted: 1 }); go("products"); } }}>Hide product</button>

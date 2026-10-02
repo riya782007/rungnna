@@ -1,6 +1,7 @@
 import { db, put, uid, now, deviceId, getSetting, setSetting, type Bill, type BillLine, type BillType, type Movement, type Party, type Product, type Config } from "./db";
 import { rupees } from "./format";
 import { isOpen } from "./privacy";
+import { setTagsSold } from "./rfid";
 
 /* ---------------- shop profile (synced to every device) ---------------- */
 export interface Shop {
@@ -96,8 +97,9 @@ export async function finalize(b: Bill, shopState: string, customerName = ""): P
   const num = t.no ? { no: t.no, series: t.series } : await nextNo(t.bill_type);
   const bill: Bill = { ...t, ...num, status: "final", at: t.status === "hold" ? now() : t.at };
   const bucket = new Set((await db.locations.filter(l => l.kind === "bucket").toArray()).map(l => l.id));
-  await db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock], async () => {
+  await db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock, db.products], async () => {
     await put("bills", bill);
+    await setTagsSold(bill.rfid_tags, bill.no);              // these tagged pieces have left the shop
     if (bill.converted_from) return;                         // stock already left with the estimate
     for (const l of bill.items) {
       if (!l.product_id || l.qty <= 0) continue;
@@ -121,7 +123,8 @@ export async function finalize(b: Bill, shopState: string, customerName = ""): P
 
 /* Cancel: the bill stays on record (marked void with a reason); pieces go back to the racks they came from. */
 export async function voidBill(b: Bill, reason: string, by: string) {
-  await db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock], async () => {
+  await db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock, db.products], async () => {
+    await setTagsSold(b.rfid_tags, null);                   // goods back on the racks: tags are live again
     await put("bills", { ...b, status: "void", void_reason: `${reason} — by ${by} on ${new Date().toLocaleString("en-IN")}` });
     const src = b.converted_from || b.id;
     if (b.converted_from) { // voiding a converted GST bill: the estimate's stock is still out, return it too
@@ -240,8 +243,9 @@ export async function deleteEstimates(bills: Bill[], returnStock: boolean, by: s
   let n = 0;
   for (const b of bills) {
     if (b.bill_type !== "estimate" || b.deleted) continue;
-    await db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock], async () => {
+    await db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock, db.products], async () => {
       if (returnStock && b.status === "final") {
+        await setTagsSold(b.rfid_tags, null);
         const outs = await db.movements.where("ref_bill").equals(b.id).filter(m => m.kind === "sale" && !m.deleted).toArray();
         for (const m of outs) {
           await put("movements", { ...m, id: uid(), kind: "return", from_loc: null, to_loc: m.from_loc, note: "Estimate removed", at: now(), updated_at: now(), by_staff: by });
@@ -249,7 +253,7 @@ export async function deleteEstimates(bills: Bill[], returnStock: boolean, by: s
         }
       }
       // keep only the id and number as a tombstone so other devices know to drop it
-      await put("bills", { ...b, deleted: 1, items: [], payments: [], party_id: undefined, party_name: "", party_phone: "", party_gstin: "", party_state: "",
+      await put("bills", { ...b, deleted: 1, items: [], payments: [], rfid_tags: [], party_id: undefined, party_name: "", party_phone: "", party_gstin: "", party_state: "",
         remarks: "", gross: 0, discount: 0, packing: 0, gst: 0, cgst: 0, sgst: 0, igst: 0, net: 0, advance: 0, paid: 0, total_qty: 0, void_reason: "Deleted by " + by });
     });
     n++;

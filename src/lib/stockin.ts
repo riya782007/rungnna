@@ -2,6 +2,7 @@ import { db, put, uid, now, deviceId, getSetting, setSetting, type Movement, typ
 import { findByScan, fromParsed, saveProduct, patterns, itemInfoFor, withItemInfo, fillFromItemCode } from "./products";
 import { parseLabel } from "./parse";
 import { fy, counterCode } from "./billing";
+import { setTagsSold } from "./rfid";
 
 export function newPurchase(by: string, loc = ""): Purchase {
   return { id: uid(), no: "", status: "draft", supplier_name: "", supplier_bill: "", loc_id: loc, items: [], total_qty: 0, total_cost: 0,
@@ -42,6 +43,7 @@ export async function finalizePurchase(p0: Purchase): Promise<Purchase> {
   const done: Purchase = { ...p, no: `PI/${fy()}/${cc}-${String(n).padStart(4, "0")}`, status: "final", at: now() };
   await db.transaction("rw", [db.purchases, db.movements, db.outbox, db.stock, db.products], async () => {
     await put("purchases", done);
+    await setTagsSold(done.rfid_tags, null);                 // a sold tag coming back in is live stock again
     for (const l of done.items) {
       if (!l.qty) continue;
       const m: Movement = { id: uid(), product_id: l.product_id, kind: "intake", qty: l.qty, from_loc: null, to_loc: done.loc_id,

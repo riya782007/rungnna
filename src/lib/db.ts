@@ -24,6 +24,7 @@ export interface Product extends Row {
   item_code?: string;      // numeric item code from the old software (202 = F-RING)
   ref?: string;            // 4th field of the old label (meaning to be confirmed)
   pack?: number;           // pieces per packet (the X12PCS on the label)
+  sold_tags?: Record<string, string>; // RFID tag (also in barcodes) → bill no. it left on
   cost?: number;           // last purchase cost per piece, paise (owner/manager only)
   /* --- product-master keying & pricing (spec: SKU/Model + Vendor) --- */
   model?: string;          // vendor's model / article number (may differ from our style)
@@ -107,6 +108,7 @@ export interface Bill extends Row {
   remarks: string; payments: Payment[]; items: BillLine[];
   photo_id?: string; photo_url?: string; voice_id?: string;
   converted_from?: string; converted_to?: string; void_reason?: string;
+  rfid_tags?: string[];    // RFID tags read onto this bill — each counts once, marked sold on save
   device: string; by_staff: string; at: string;
 }
 
@@ -115,6 +117,7 @@ export interface PurchaseLine { id: string; product_id: string; code: string; it
 export interface Purchase extends Row {
   no: string; status: "draft" | "final"; supplier_id?: string; supplier_name: string; supplier_bill: string; loc_id: string;
   items: PurchaseLine[]; total_qty: number; total_cost: number; note: string; photo_id?: string; photo_url?: string;
+  rfid_tags?: string[];    // RFID tags read in this stock-in — each counts once
   device: string; by_staff: string; at: string;
 }
 

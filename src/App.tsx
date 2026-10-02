@@ -16,6 +16,7 @@ const Customers = lazy(() => import("./pages/Customers"));
 const Ask = lazy(() => import("./pages/Ask"));
 const Scan = lazy(() => import("./pages/Scan"));
 const Recheck = lazy(() => import("./pages/Recheck"));
+const RfidCount = lazy(() => import("./pages/RfidCount"));
 const Labels = lazy(() => import("./pages/Labels"));
 const Catalogue = lazy(() => import("./pages/Catalogue"));
 const Racks = lazy(() => import("./pages/Racks"));
@@ -32,11 +33,11 @@ type Sec = { key: string; label: string; icon: string; tabs?: [string, string][]
 const SECTIONS: Sec[] = [
   { key: "home", label: "Home", icon: "home" },
   { key: "sell", label: "Sell", icon: "sell", tabs: [["bill", "New bill"], ["bills", "Bills"], ["customers", "Customers"]] },
-  { key: "stock", label: "Stock", icon: "stock", tabs: [["products", "Products"], ["stockin", "Stock in"], ["scan", "Scan & record"], ["recheck", "Recheck"], ["labels", "Labels"], ["catalogue", "Catalogue"], ["racks", "Racks"], ["move", "Move"], ["activity", "Activity"], ["import", "Import"]] },
+  { key: "stock", label: "Stock", icon: "stock", tabs: [["products", "Products"], ["stockin", "Stock in"], ["scan", "Scan & record"], ["recheck", "Recheck"], ["rfid", "RFID count"], ["labels", "Labels"], ["catalogue", "Catalogue"], ["racks", "Racks"], ["move", "Move"], ["activity", "Activity"], ["import", "Import"]] },
   { key: "ask", label: "Ask", icon: "ask" },
   { key: "settings", label: "Settings", icon: "settings" },
 ];
-const sectionOf = (r: string) => (["bill", "bills", "customers"].includes(r) ? "sell" : ["products", "product", "stockin", "scan", "recheck", "labels", "catalogue", "racks", "move", "activity", "import"].includes(r) ? "stock" : r === "ask" || r === "settings" ? r : "home");
+const sectionOf = (r: string) => (["bill", "bills", "customers"].includes(r) ? "sell" : ["products", "product", "stockin", "scan", "recheck", "rfid", "labels", "catalogue", "racks", "move", "activity", "import"].includes(r) ? "stock" : r === "ask" || r === "settings" ? r : "home");
 const lastTab: Record<string, string> = { sell: "bill", stock: "products" };
 
 function useSync() {
@@ -92,6 +93,7 @@ function Shell() {
     case "ask": page = can(me, "ai") ? <Ask /> : <NoAccess />; break;
     case "scan": page = <Scan />; break;
     case "recheck": page = <Recheck args={args} />; break;
+    case "rfid": page = <RfidCount />; break;
     case "labels": page = <Labels args={args} />; break;
     case "catalogue": page = <Catalogue />; break;
     case "racks": page = <Racks args={args} />; break;
