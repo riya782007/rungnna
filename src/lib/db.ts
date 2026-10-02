@@ -1,10 +1,11 @@
 import type { ListingContent } from "../../api/_listing";
 import Dexie, { type Table } from "dexie";
+import { currentStore } from "./scope";
 
 /* Money is always integer paise. Every row id is a client-made UUID so any
    device can create records offline without ever colliding with another. */
 
-export type Row = { id: string; updated_at: string; deleted?: 0 | 1 };
+export type Row = { id: string; updated_at: string; deleted?: 0 | 1; store_id?: string };
 
 export interface Product extends Row {
   code: string;            // our own short code, printed under the QR
@@ -97,6 +98,7 @@ export interface Receipt extends Row {
 }
 
 export interface BillLine {
+  hsn?: string;
   id: string; product_id?: string; code: string; item: string; type: string; style: string; color: string;
   box_no: number; pack: number; pkts: number; qty: number; rate: number; disc: string; amount: number;
   stock_done?: 1;          // these pieces already left the racks on another document (merged / challan / split)
@@ -108,6 +110,8 @@ export type BillType = "gst" | "estimate" | "challan" | "return";
 export type BillStatus = "hold" | "final" | "void" | "converted" | "merged";
 
 export interface Bill extends Row {
+  transport?: Transport;
+  compliance?: Compliance;
   no: string; series: string; bill_type: BillType; status: BillStatus;
   party_id?: string; party_name: string; party_phone: string; party_gstin: string; party_state: string;
   price_level?: "wholesale" | "retail" | "dealer";
@@ -145,6 +149,7 @@ export type VoucherType = "payment" | "receipt" | "expense" | "journal";
 export type MoneyMode = "cash" | "upi" | "card" | "bank" | "cheque" | "credit";
 export type ExpenseCategory = "rent" | "salary" | "electricity" | "transport" | "tea" | "other";
 export interface Voucher extends Row {
+  ref?: string;
   no: string; series: string; type: VoucherType; at: string; mode: MoneyMode; amount: number;
   party_id?: string; party_name?: string; party_kind?: Party["kind"]; category?: ExpenseCategory; note: string;
   debit_account?: string; credit_account?: string; device: string; by_staff: string;
@@ -163,6 +168,7 @@ export interface Config extends Row { value: any }
 export interface VoiceBlob { id: string; blob: Blob; uploaded: 0 | 1; url?: string; created_at: string }
 
 export interface Staff extends Row {
+  auth_user_id?: string;
   name: string;
   role: "owner" | "manager" | "salesman" | "helper" | "packer" | "cashier";
   phone: string;
@@ -173,7 +179,15 @@ export interface Staff extends Row {
 export interface Setting { key: string; value: any; updated_at: string }
 export interface Photo { id: string; blob: Blob; w: number; h: number; bytes: number; url?: string; uploaded: 0 | 1; created_at: string }
 export interface Outbox { seq?: number; table: string; row_id: string; at: string; tries: number; last_error?: string }
-export interface StockCell { key: string; product_id: string; loc_id: string; qty: number }
+export interface StockCell { key: string; product_id: string; loc_id: string; qty: number; store_id?: string }
+
+export interface Transport { vehicle_no: string; transporter_id: string; transporter_name: string; distance: number; mode: "1" | "2" | "3" | "4"; doc_no?: string; doc_date?: string; from_city: string; from_pin: string; to_address: string; to_city: string; to_pin: string; to_state_code: string }
+export interface ComplianceRecord { id: string; generated_at: string; ack_no?: string; signed_qr?: string; cancelled_at?: string; sandbox: boolean }
+export interface Compliance { irn?: ComplianceRecord; ewb?: ComplianceRecord }
+export interface Store extends Row { name: string; code: string; address: string; active: 0 | 1 }
+export interface StoreTransfer extends Row { no: string; from_store: string; to_store: string; status: "in_transit" | "received"; items: { product_id: string; qty: number; from_loc: string; to_loc?: string; tags?: string[] }[]; by_staff: string; received_by?: string; at: string; received_at?: string; device: string }
+export interface BankLine extends Row { account: string; fingerprint: string; date: string; narration: string; debit: number; credit: number; ref: string; match_key?: string; matched_at?: string; batch: string }
+export interface ImportBatch extends Row { filename: string; at: string; by_staff: string; undone?: boolean; changes: { table: "products" | "parties" | "locations" | "movements"; id: string; before?: any; after: any }[] }
 
 class RungnnaDB extends Dexie {
   products!: Table<Product, string>;
@@ -194,6 +208,10 @@ class RungnnaDB extends Dexie {
   purchase_returns!: Table<PurchaseReturn, string>;
   vouchers!: Table<Voucher, string>;
   fiscal_year_closes!: Table<FiscalYearClose, string>;
+  stores!: Table<Store, string>;
+  store_transfers!: Table<StoreTransfer, string>;
+  bank_lines!: Table<BankLine, string>;
+  import_batches!: Table<ImportBatch, string>;
 
   constructor() {
     super("rungnna");
@@ -233,6 +251,14 @@ class RungnnaDB extends Dexie {
       purchase_returns: "id, no, supplier_id, purchase_id, at, updated_at",
       fiscal_year_closes: "id, fy, closed_upto, at, updated_at",
     });
+    this.version(9).stores({
+      stores: "id, &code, updated_at",
+      store_transfers: "id, no, from_store, to_store, status, at, updated_at",
+      bank_lines: "id, account, &fingerprint, match_key, date, updated_at",
+      import_batches: "id, at, updated_at",
+      locations: "id, &code, store_id, floor, updated_at",
+      bills: "id, no, store_id, status, bill_type, party_id, at, updated_at, return_of, merged_into",
+    });
   }
 }
 
@@ -255,9 +281,11 @@ export function deviceId(): string {
 }
 
 /* ---- write helpers: every write lands locally first, then queues for the cloud ---- */
-type Syncable = "products" | "locations" | "movements" | "staff" | "parties" | "bills" | "voice_notes" | "config" | "receipts" | "purchases" | "purchase_returns" | "vouchers" | "fiscal_year_closes";
+export type Syncable = "products" | "locations" | "movements" | "staff" | "parties" | "bills" | "voice_notes" | "config" | "receipts" | "purchases" | "purchase_returns" | "vouchers" | "fiscal_year_closes" | "stores" | "store_transfers" | "bank_lines" | "import_batches";
+const STORE_TABLES = new Set(["locations", "movements", "staff", "bills", "receipts", "purchases", "purchase_returns", "vouchers", "bank_lines", "import_batches"]);
 
 export async function put<T extends Row>(table: Syncable, row: T) {
+  if (STORE_TABLES.has(table)) row.store_id ||= currentStore();
   row.updated_at = now();
   await db.transaction("rw", (db as any)[table], db.outbox, async () => {
     await (db as any)[table].put(row);
