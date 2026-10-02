@@ -1,3 +1,4 @@
+import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, type Bill } from "../lib/db";
@@ -36,11 +37,11 @@ export default function Home() {
   const start = useMemo(() => periodStart(period).toISOString(), [period]);
 
   const products = useLiveQuery(() => db.products.filter(p => !p.deleted).toArray(), [], []);
-  const cells = useLiveQuery(() => db.stock.toArray(), [], []);
-  const recent = useLiveQuery(() => db.movements.orderBy("at").reverse().limit(6).toArray(), [], []);
-  const bills = useLiveQuery(() => db.bills.where("at").aboveOrEqual(start).filter(b => !b.deleted && (priv || !isEstimate(b))).toArray(), [start, priv], []);
-  const allFinal = useLiveQuery(() => db.bills.filter(b => !b.deleted && b.status === "final" && (priv || !isEstimate(b))).toArray(), [priv], []);
-  const held = useLiveQuery(() => db.bills.where("status").equals("hold").filter(b => !b.deleted && !b.no && (priv || !isEstimate(b))).count(), [priv], 0);
+  const cells = useLiveQuery(() => storeStock(), [], []);
+  const recent = useLiveQuery(() => db.movements.orderBy("at").filter(inStore).reverse().limit(6).toArray(), [], []);
+  const bills = useLiveQuery(() => db.bills.where("at").aboveOrEqual(start).filter(b => inStore(b) && !b.deleted && (priv || !isEstimate(b))).toArray(), [start, priv], []);
+  const allFinal = useLiveQuery(() => db.bills.filter(b => inStore(b) && !b.deleted && b.status === "final" && (priv || !isEstimate(b))).toArray(), [priv], []);
+  const held = useLiveQuery(() => db.bills.where("status").equals("hold").filter(b => inStore(b) && !b.deleted && !b.no && (priv || !isEstimate(b))).count(), [priv], 0);
 
   const d = useMemo(() => {
     const bucket = new Set(locs.filter(l => l.kind === "bucket").map(l => l.id));
@@ -110,7 +111,7 @@ export default function Home() {
   // 14-day sales trend (independent of the period switch)
   const trendBills = useLiveQuery(() => {
     const from = new Date(); from.setHours(0, 0, 0, 0); from.setDate(from.getDate() - 13);
-    return db.bills.where("at").aboveOrEqual(from.toISOString()).filter(b => !b.deleted && b.status === "final" && (priv || !isEstimate(b))).toArray();
+    return db.bills.where("at").aboveOrEqual(from.toISOString()).filter(b => inStore(b) && !b.deleted && b.status === "final" && (priv || !isEstimate(b))).toArray();
   }, [priv], [] as Bill[]);
   const trend = useMemo(() => {
     const days: { label: string; value: number }[] = [];

@@ -1,6 +1,6 @@
 import type { ListingContent } from "../../api/_listing";
 import Dexie, { type Table } from "dexie";
-import { currentStore } from "./scope";
+import { currentStore, inStore } from "./scope";
 
 /* Money is always integer paise. Every row id is a client-made UUID so any
    device can create records offline without ever colliding with another. */
@@ -319,7 +319,9 @@ export async function applyMovement(m: Movement, sign = 1) {
 
 export async function recordMovement(m: Omit<Movement, "id" | "updated_at" | "device" | "at"> & { at?: string }) {
   const row: Movement = { ...m, id: uid(), updated_at: now(), device: deviceId(), at: m.at || now() };
-  await db.transaction("rw", db.movements, db.outbox, db.stock, async () => {
+  await db.transaction("rw", [db.movements, db.outbox, db.stock, db.locations], async () => {
+    if (!Number.isInteger(row.qty) || row.qty <= 0) throw new Error("Quantity must be positive whole pieces");
+    for (const id of [row.from_loc, row.to_loc].filter(Boolean)) { const l = await db.locations.get(id!); if (!l || !inStore(l)) throw new Error("Rack belongs to another store"); }
     await put("movements", row);
     await applyMovement(row);
   });
@@ -345,6 +347,7 @@ export async function rebuildStock() {
 }
 
 export async function stockOf(product_id: string) {
+  const locs = new Set((await db.locations.filter(l => inStore(l) && !l.deleted).toArray()).map(l => l.id));
   const cells = await db.stock.where("product_id").equals(product_id).toArray();
-  return cells.filter(c => c.qty !== 0);
+  return cells.filter(c => c.qty !== 0 && locs.has(c.loc_id));
 }

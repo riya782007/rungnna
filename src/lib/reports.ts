@@ -2,8 +2,9 @@ import { db, type Bill, type BillLine, type Product, type Voucher } from "./db";
 import { due, isReturn, isSale } from "./billing";
 import { localDay } from "./ledger";
 import { isEstimate, isOpen } from "./privacy";
+import { currentStore, inStore } from "./scope";
 
-export type Range = { from: string; to: string };
+export type Range = { from: string; to: string; store?: string };
 export type ReportRow = Record<string, string | number>;
 
 const inRange = (iso: string, r: Range) => {
@@ -15,14 +16,17 @@ const sales = (b: Bill) => counted(b) && isSale(b);
 const returns = (b: Bill) => counted(b) && isReturn(b);
 
 export async function reportData(r: Range) {
+  const store = r.store ?? currentStore();
+  const scoped = (row: { store_id?: string | null }) => store === "all" || inStore(row, store);
+  const rackIds = new Set((await db.locations.filter(scoped).toArray()).map(l => l.id));
   const [bills, parties, products, stock, moves, vouchers, returnsRows] = await Promise.all([
-    db.bills.filter(b => inRange(b.at, r)).toArray(),
+    db.bills.filter(b => scoped(b) && inRange(b.at, r)).toArray(),
     db.parties.toArray(),
     db.products.toArray(),
-    db.stock.toArray(),
-    db.movements.toArray(),
-    db.vouchers.filter(v => inRange(v.at, r)).toArray(),
-    db.purchase_returns.filter(x => inRange(x.at, r)).toArray(),
+    db.stock.filter(c => rackIds.has(c.loc_id)).toArray(),
+    db.movements.filter(scoped).toArray(),
+    db.vouchers.filter(v => scoped(v) && inRange(v.at, r)).toArray(),
+    db.purchase_returns.filter(x => scoped(x) && inRange(x.at, r)).toArray(),
   ]);
   const pmap = new Map(parties.map(p => [p.id, p]));
   const prod = new Map(products.map(p => [p.id, p]));
@@ -38,15 +42,16 @@ export async function reportData(r: Range) {
     }
     return [...m.values()].sort((a, z) => Number(z.sales) - Number(a.sales));
   };
-  const byDay = by(b => localDay(b.at), b => b.net);
-  const byMonth = by(b => localDay(b.at).slice(0, 7), b => b.net);
+  const groupedBills = (key: (b: Bill) => string) => { const m = new Map<string, ReportRow>(); for (const b of saleBills) { const k = key(b) || "Unspecified", row = m.get(k) || { name: k, qty: 0, sales: 0 }; row.qty = Number(row.qty) + b.total_qty; row.sales = Number(row.sales) + b.net; m.set(k, row); } return [...m.values()]; };
+  const byDay = groupedBills(b => localDay(b.at));
+  const byMonth = groupedBills(b => localDay(b.at).slice(0, 7));
   const byItem = by((_b, l, p) => [l?.item || p?.item, l?.style || p?.style].filter(Boolean).join(" · "), (_b, l) => l?.amount || 0);
-  const byParty = by(b => b.party_name || "Walk-in", b => b.net);
-  const byArea = by(b => {
+  const byParty = groupedBills(b => b.party_name || "Walk-in");
+  const byArea = groupedBills(b => {
     const p = b.party_id ? pmap.get(b.party_id) : undefined;
     return [p?.city, p?.state || b.party_state].filter(Boolean).join(", ");
-  }, b => b.net);
-  const bySalesman = by(b => b.salesman || "No salesman", b => b.net);
+  });
+  const bySalesman = groupedBills(b => b.salesman || "No salesman");
   const costByProduct = new Map(products.map(p => [p.id, p.cost || 0]));
   const cogs = lines.reduce((a, x) => a + (costByProduct.get(x.l.product_id || "") || 0) * x.l.qty, 0) -
     returnLines.reduce((a, x) => a + (costByProduct.get(x.l.product_id || "") || 0) * x.l.qty, 0);

@@ -1,5 +1,8 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { db, put, uid, now, getSetting, setSetting, type Staff, type Location } from "./db";
+import { initStores } from "./stores";
+import { setScope, currentStore, MAIN_STORE } from "./scope";
+import { useLiveQuery } from "dexie-react-hooks";
 
 /* ---------- tiny hash router (works offline, no server rewrites needed) ---------- */
 export function useRoute(): [string, string[]] {
@@ -38,8 +41,8 @@ export function beep(ok = true) {
 }
 
 /* ---------- who is using this device ---------- */
-type Ctx = { me: Staff | null; setMe: (s: Staff | null) => void; ready: boolean };
-const AppCtx = createContext<Ctx>({ me: null, setMe: () => {}, ready: false });
+type Ctx = { me: Staff | null; setMe: (s: Staff | null) => void; ready: boolean; store: string; switchStore: (id: string) => Promise<void> };
+const AppCtx = createContext<Ctx>({ me: null, setMe: () => {}, ready: false, store: currentStore(), switchStore: async () => {} });
 export const useApp = () => useContext(AppCtx);
 
 export const BUCKETS: Omit<Location, "id" | "updated_at">[] = [
@@ -70,16 +73,22 @@ async function firstRun() {
 export function AppProvider({ children }: { children: ReactNode }) {
   const [me, setMeS] = useState<Staff | null>(null);
   const [ready, setReady] = useState(false);
+  const [store, setStore] = useState(currentStore());
+  const staffRow = useLiveQuery(() => me ? db.staff.get(me.id) : undefined, [me?.id]);
+  useEffect(() => { if (!staffRow || !me || staffRow.updated_at === me.updated_at) return; if (!staffRow.active || staffRow.deleted) { setMeS(null); setSetting("me", ""); return; } setMeS(staffRow); const id = staffRow.role === "owner" ? store : staffRow.store_id || MAIN_STORE; setScope(id, staffRow.role); setStore(id); }, [staffRow?.updated_at]);
   useEffect(() => {
     (async () => {
       await firstRun();
       const id = await getSetting<string>("me", "");
-      if (id) setMeS((await db.staff.get(id)) || null);
+      const staff = id ? await db.staff.get(id) : null;
+      const storeId = await initStores(staff); setScope(storeId, staff?.role || "owner"); setStore(storeId);
+      if (staff) setMeS(staff);
       setReady(true);
     })();
   }, []);
-  const setMe = (s: Staff | null) => { setMeS(s); setSetting("me", s?.id || ""); };
-  return <AppCtx.Provider value={{ me, setMe, ready }}>{children}</AppCtx.Provider>;
+  const setMe = (s: Staff | null) => { const id = s?.role === "owner" ? store : s?.store_id || MAIN_STORE; setScope(id, s?.role || "owner"); setStore(id); setMeS(s); setSetting("me", s?.id || ""); };
+  const switchStore = async (id: string) => { if (me?.role !== "owner") throw new Error("Owner only"); await setSetting("active_store", id); setScope(id, "owner"); setStore(id); };
+  return <AppCtx.Provider value={{ me, setMe, ready, store, switchStore }}>{children}</AppCtx.Provider>;
 }
 
 export const newStaff = (name: string, role: Staff["role"], pin = "", phone = ""): Staff =>

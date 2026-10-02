@@ -1,3 +1,4 @@
+import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, type Product } from "../lib/db";
@@ -27,7 +28,7 @@ function ProductList() {
   const [limit, setLimit] = useState(60);
   const [rfid, setRfid] = useState(false);
   const all = useLiveQuery(() => db.products.orderBy("updated_at").reverse().toArray(), [], []);
-  const cells = useLiveQuery(() => db.stock.toArray(), [], []);
+  const cells = useLiveQuery(() => storeStock(), [], []);
   const qty = useMemo(() => { const m = new Map<string, number>(); cells.forEach(c => m.set(c.product_id, (m.get(c.product_id) || 0) + c.qty)); return m; }, [cells]);
   const items = useMemo(() => [...new Set(all.filter(p => !p.deleted).map(p => p.item).filter(Boolean))].sort(), [all]);
   const list = useMemo(() => {
@@ -65,8 +66,8 @@ function ProductDetail({ id }: { id: string }) {
   const priv = usePrivate();
   const locs = useLocations();
   const p0 = useLiveQuery(() => db.products.get(id), [id]);
-  const stock = useLiveQuery(() => db.stock.where("product_id").equals(id).toArray(), [id], []);
-  const moves = useLiveQuery(() => db.movements.where("product_id").equals(id).reverse().sortBy("at"), [id], []);
+  const stock = useLiveQuery(() => storeStock().then(cells => cells.filter(c => c.product_id === id)), [id], []);
+  const moves = useLiveQuery(() => db.movements.where("product_id").equals(id).filter(inStore).reverse().sortBy("at"), [id], []);
   const staff = useLiveQuery(() => db.staff.toArray(), [], []);
   const [p, setP] = useState<Product | null>(null);
   const [tax, setTax] = useState<Taxonomy | null>(null);

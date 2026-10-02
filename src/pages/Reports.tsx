@@ -6,6 +6,8 @@ import { can } from "../lib/roles";
 import { rupees } from "../lib/format";
 import { Head } from "../components/common";
 import { Icon } from "../components/Icon";
+import { db } from "../lib/db";
+import { useLiveQuery } from "dexie-react-hooks";
 
 const tabs = [
   ["byDay", "Sales by day"],
@@ -21,7 +23,9 @@ const tabs = [
 ] as const;
 
 export default function Reports() {
-  const { me } = useApp();
+  const { me, store } = useApp();
+  const stores = useLiveQuery(() => db.stores.filter(s => !s.deleted).toArray(), [], []);
+  const [branch, setBranch] = useState(store);
   const today = localDay(new Date().toISOString());
   const d = new Date();
   const start = localDay(new Date(d.getFullYear(), d.getMonth(), 1).toISOString());
@@ -30,7 +34,7 @@ export default function Reports() {
   const [tab, setTab] = useState<(typeof tabs)[number][0]>("byDay");
   const [data, setData] = useState<any>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { setBusy(true); reportData({ from, to }).then(setData).catch(e => toast(e.message || "Report failed", true)).finally(() => setBusy(false)); }, [from, to]);
+  useEffect(() => { setBusy(true); reportData({ from, to, store: branch }).then(setData).catch(e => toast(e.message || "Report failed", true)).finally(() => setBusy(false)); }, [from, to, branch]);
   if (!can(me, "reports")) return <div className="card empty"><b>Owner only</b>Reports include cost, supplier and profit data.</div>;
   const rows: ReportRow[] = data?.[tab] || [];
   const total = useMemo(() => rows.reduce((a, r) => a + (Number(r.sales) || Number(r.amount) || Number(r.cost_value) || 0), 0), [rows]);
@@ -43,6 +47,7 @@ export default function Reports() {
       }}>Share</button>
     </Head>
     <div className="card pad stack" style={{ marginBottom: 12 }}>
+      <label className="f">Store<select className="in" value={branch} onChange={e => setBranch(e.target.value)}><option value="all">All stores</option>{stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
       <div className="grid g2">
         <label className="f">From<input className="in" type="date" value={from} max={to} onChange={e => e.target.value && setFrom(e.target.value)} /></label>
         <label className="f">To<input className="in" type="date" value={to} min={from} max={today} onChange={e => e.target.value && setTo(e.target.value)} /></label>
@@ -66,4 +71,3 @@ function ReportTable({ rows }: { rows: ReportRow[] }) {
     <tbody>{rows.map((r, i) => <tr key={i}>{cols.map(c => <td key={c} className={typeof r[c] === "number" ? "r mono" : ""}>{val(r[c])}</td>)}</tr>)}
       {!rows.length && <tr><td colSpan={Math.max(1, cols.length)} className="empty">No rows for this range.</td></tr>}</tbody></table></div>;
 }
-

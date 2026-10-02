@@ -1,3 +1,4 @@
+import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { db, getSetting, type Bill, type BillLine, type Product } from "../lib/db";
 import { findByScan, label } from "../lib/products";
@@ -52,11 +53,11 @@ export default function Recheck({ args }: { args: string[] }) {
   useEffect(() => {
     (async () => {
       setShop(await getShop());
-      if (args[0]) { const b = await db.bills.get(args[0]); if (b) return setBill(b); }
+      if (args[0]) { const b = await db.bills.get(args[0]); if (b && inStore(b)) return setBill(b); }
       const draft = await getSetting<Bill | null>("draft_bill", null);
       if (draft && draft.items.length) return setBill(draft);
       // fall back to the most recent bill so the screen is never empty
-      const last = await db.bills.orderBy("at").reverse().filter(b => !b.deleted && b.items.length > 0).first();
+      const last = await db.bills.orderBy("at").reverse().filter(b => inStore(b) && !b.deleted && b.items.length > 0).first();
       setBill(last || null);
     })();
   }, [args[0]]);

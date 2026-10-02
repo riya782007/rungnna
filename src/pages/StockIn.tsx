@@ -1,3 +1,4 @@
+import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, type Purchase, type PurchaseLine, type Product } from "../lib/db";
@@ -41,7 +42,7 @@ function StockInSession() {
   useEffect(() => { tagsRef.current = new TagSet(p?.rfid_tags || []); }, [p?.id]);
   useScannerGun(c => onCode(c), { enabled: !rfid && !supOpen });
   const products = useLiveQuery(() => db.products.filter(x => !x.deleted).toArray(), [], []);
-  const recent = useLiveQuery(() => db.purchases.where("status").equals("final").reverse().sortBy("at"), [], []);
+  const recent = useLiveQuery(() => db.purchases.where("status").equals("final").filter(inStore).reverse().sortBy("at"), [], []);
 
   useEffect(() => { (async () => {
     const d = await getSetting<Purchase | null>("draft_stockin", null);
@@ -210,7 +211,7 @@ function StockInView({ id }: { id: string }) {
   const { me } = useApp();
   const p = useLiveQuery(() => db.purchases.get(id), [id]);
   const locs = useLocations();
-  if (!p) return <div className="skel" style={{ height: 200 }} />;
+  if (!p || !inStore(p)) return <div className="skel" style={{ height: 200 }} />;
   const created = p.items.filter(l => l.isNew);
   return (
     <div>

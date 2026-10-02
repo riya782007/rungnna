@@ -1,3 +1,4 @@
+import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -24,7 +25,7 @@ export default function Racks({ args }: { args: string[] }) {
 
 function RackList({ args }: { args: string[] }) {
   const locs = useLocations();
-  const cells = useLiveQuery(() => db.stock.toArray(), [], []);
+  const cells = useLiveQuery(() => storeStock(), [], []);
   const [floor, setFloor] = useState("1");
   const [from, setFrom] = useState("1");
   const [to, setTo] = useState("12");
@@ -41,7 +42,7 @@ function RackList({ args }: { args: string[] }) {
     for (let r = a; r <= b; r++) {
       const list = nb ? Array.from({ length: nb }, (_, i) => String(i + 1)) : [""];
       for (const bx of list) {
-        const code = codeFor(floor, String(r), bx);
+        const code = (currentStore() === MAIN_STORE ? "" : currentStore().slice(-6) + "/") + codeFor(floor, String(r), bx);
         if (await db.locations.where("code").equals(code).first()) continue;
         await put("locations", { id: uid(), code, floor, rack: String(r), box: bx, name, kind: floor === "GD" ? "godown" : "rack", updated_at: now() } as Location);
         made++;

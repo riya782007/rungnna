@@ -30,7 +30,7 @@ export default function Move({ args }: { args: string[] }) {
   const [note, setNote] = useState("");
   const [cam, setCam] = useState(false);
   const [busy, setBusy] = useState(false);
-  const bucket = (code: string) => locs.find(l => l.code === code)?.id || "";
+  const bucket = (code: string) => locs.find(l => l.kind === "bucket" && (l.code === code || l.code.endsWith("/" + code)))?.id || "";
 
   useEffect(() => { getSetting("move_from", "").then(setFrom); }, []);
   useEffect(() => { if (args[0]) db.products.get(args[0]).then(p => p && addProduct(p)); }, [args[0]]);

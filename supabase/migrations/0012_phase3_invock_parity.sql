@@ -62,6 +62,11 @@ do $$ declare t text; begin
     execute format('create trigger %I before insert or update on public.%I for each row execute function public.touch_updated_at()', t || '_touch', t);
   end loop;
 end $$;
+drop policy if exists stores_read on public.stores;
+drop policy if exists stores_owner on public.stores;
+drop policy if exists transfer_scope on public.store_transfers;
+drop policy if exists bank_owner on public.bank_lines;
+drop policy if exists import_owner on public.import_batches;
 create policy stores_read on public.stores for select to authenticated using (true);
 create policy stores_owner on public.stores for all to authenticated using (public.phase3_owner()) with check (public.phase3_owner());
 create policy transfer_scope on public.store_transfers for all to authenticated
@@ -71,7 +76,16 @@ create policy bank_owner on public.bank_lines for all to authenticated using (pu
 create policy import_owner on public.import_batches for all to authenticated using (public.phase3_owner()) with check (public.phase3_owner());
 do $$ declare t text; begin
   foreach t in array array['staff','locations','movements','bills','receipts','purchases','purchase_returns','vouchers'] loop
+    execute format('drop policy if exists phase3_store_guard on public.%I', t);
     execute format('create policy phase3_store_guard on public.%I as restrictive for all to authenticated using (public.phase3_owner() or public.phase3_store() = store_id or auth.jwt()->%L->>%L is null) with check (public.phase3_owner() or public.phase3_store() = store_id or auth.jwt()->%L->>%L is null)', t, 'app_metadata', 'role', 'app_metadata', 'role');
   end loop;
 end $$;
+drop policy if exists phase3_sensitive_config on public.config;
+create policy phase3_sensitive_config on public.config as restrictive for all to authenticated
+  using (id not in ('owner_security','pricing') or public.phase3_owner() or auth.jwt()->'app_metadata'->>'role' is null)
+  with check (id not in ('owner_security','voucher_lock','pricing') or public.phase3_owner() or auth.jwt()->'app_metadata'->>'role' is null);
+-- Staff must read the lock date to enforce it offline, but may not remove it.
+drop policy if exists phase3_config_delete on public.config;
+create policy phase3_config_delete on public.config as restrictive for delete to authenticated
+  using (id not in ('owner_security','voucher_lock','pricing') or public.phase3_owner() or auth.jwt()->'app_metadata'->>'role' is null);
 commit;

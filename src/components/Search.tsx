@@ -4,6 +4,7 @@ import { db } from "../lib/db";
 import { go } from "../lib/app";
 import { rupees } from "../lib/format";
 import { usePrivate, visibleBill } from "../lib/privacy";
+import { inStore } from "../lib/scope";
 
 /* Ctrl+K anywhere: jump to any product, customer, bill or screen. */
 const SCREENS: [string, string][] = [["bill", "New bill"], ["bills", "Bills register"], ["customers", "Customers"], ["scan", "Scan & record"], ["products", "Products"],
@@ -15,7 +16,7 @@ export function SearchPalette({ onClose }: { onClose: () => void }) {
   const ref = useRef<HTMLInputElement>(null);
   const products = useLiveQuery(() => db.products.filter(p => !p.deleted).toArray(), [], []);
   const parties = useLiveQuery(() => db.parties.filter(p => !p.deleted).toArray(), [], []);
-  const bills = useLiveQuery(() => db.bills.orderBy("at").reverse().limit(500).toArray(), [], []);
+  const bills = useLiveQuery(() => db.bills.orderBy("at").filter(inStore).reverse().limit(500).toArray(), [], []);
   const open = usePrivate();
   const res = useMemo(() => {
     const w = q.trim().toLowerCase().split(/\s+/).filter(Boolean);

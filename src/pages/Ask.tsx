@@ -6,13 +6,14 @@ import { visibleBill } from "../lib/privacy";
 import { Head } from "../components/common";
 import { MicButton } from "../components/Voice";
 import { toast } from "../lib/app";
+import { inStore, storeStock } from "../lib/stores";
 
 /* "Ask the shop" — questions in Hindi or English, answered from this device's own records. */
 async function shopContext() {
   const d30 = new Date(Date.now() - 30 * 864e5).toISOString();
   const [bills, products, stock, parties, locs] = await Promise.all([
-    db.bills.where("at").aboveOrEqual(d30).filter(b => visibleBill(b)).toArray(),
-    db.products.filter(p => !p.deleted).toArray(), db.stock.toArray(), db.parties.filter(p => !p.deleted).toArray(), db.locations.toArray()]);
+    db.bills.where("at").aboveOrEqual(d30).filter(b => inStore(b) && visibleBill(b)).toArray(),
+    db.products.filter(p => !p.deleted).toArray(), storeStock(), db.parties.filter(p => !p.deleted).toArray(), db.locations.filter(inStore).toArray()]);
   const fin = bills.filter(b => b.status === "final" && isSale(b));
   const byDay: Record<string, { sales: number; bills: number; gst: number; estimate: number }> = {};
   const byItem: Record<string, { pcs: number; value: number }> = {};

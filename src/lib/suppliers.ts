@@ -1,3 +1,4 @@
+import { inStore, assertLocation, assertStoreRow } from "./stores";
 import { db, put, uid, now, deviceId, type Movement, type Party, type Purchase, type PurchaseReturn, type PurchaseReturnLine, type Voucher } from "./db";
 import { getShop, type Shop } from "./billing";
 import { rupees } from "./format";
@@ -9,14 +10,14 @@ import { assertUnlocked } from "./finance";
 
 export type SupplierEntry = { at: string; kind: "opening" | "bill" | "payment" | "debit_note" | "journal"; ref: string; id?: string; debit: number; credit: number; balance: number; note?: string };
 
-const payablePurchase = (p: Purchase) => p.status === "final" && !p.deleted && !!(p.supplier_id || p.supplier_name) && p.total_cost > 0;
-const supplierPayment = (v: Voucher, id: string) => !v.deleted && v.type === "payment" && v.party_kind === "supplier" && v.party_id === id;
+const payablePurchase = (p: Purchase) => inStore(p) && p.status === "final" && !p.deleted && !!(p.supplier_id || p.supplier_name) && p.total_cost > 0;
+const supplierPayment = (v: Voucher, id: string) => inStore(v) && !v.deleted && v.type === "payment" && v.party_kind === "supplier" && v.party_id === id;
 
 export async function supplierLedger(party: Party): Promise<{ entries: SupplierEntry[]; balance: number }> {
   const [purchases, returns, vouchers] = await Promise.all([
     db.purchases.filter(p => payablePurchase(p) && (p.supplier_id === party.id || (!p.supplier_id && p.supplier_name === party.name))).toArray(),
-    db.purchase_returns.filter(r => !r.deleted && (r.supplier_id === party.id || (!r.supplier_id && r.supplier_name === party.name))).toArray(),
-    db.vouchers.filter(v => supplierPayment(v, party.id) || (!v.deleted && v.type === "journal" && v.party_id === party.id)).toArray(),
+    db.purchase_returns.filter(r => inStore(r) && !r.deleted && (r.supplier_id === party.id || (!r.supplier_id && r.supplier_name === party.name))).toArray(),
+    db.vouchers.filter(v => supplierPayment(v, party.id) || (inStore(v) && !v.deleted && v.type === "journal" && v.party_id === party.id)).toArray(),
   ]);
   const raw: Omit<SupplierEntry, "balance">[] = [];
   if (party.opening_balance) raw.push({ at: "0000", kind: "opening", ref: "Opening balance", debit: Math.max(0, party.opening_balance), credit: Math.max(0, -party.opening_balance) });
@@ -62,6 +63,8 @@ export async function savePurchaseReturn(input: {
   note?: string;
   by: string;
 }): Promise<PurchaseReturn> {
+  await assertStoreRow(input.purchase);
+  for (const l of input.items) await assertLocation(l.loc_id);
   await assertUnlocked(now());
   const num = await nextSeries("DN");
   const total_qty = input.items.reduce((a, l) => a + l.qty, 0);

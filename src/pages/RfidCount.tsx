@@ -8,6 +8,7 @@ import { useScannerGun, WedgeInput } from "../components/Scanner";
 import { Head, LocationSelect, LOC_PREFIX, useLocations } from "../components/common";
 import { LinkRfid } from "../components/LinkRfid";
 import { beep, toast } from "../lib/app";
+import { currentStore, storeStock } from "../lib/stores";
 
 /* RFID count: choose a rack, wave the UHF reader (USB keyboard mode) over it.
    Expected = what the stock book says is in that rack; found = distinct tags read.
@@ -20,13 +21,13 @@ export default function RfidCount() {
   const seen = useRef(new TagSet());
   /* a long count survives leaving the page or a closed tab (this device only) */
   const [ready, setReady] = useState(false);
-  useEffect(() => { getSetting<{ loc: string; reads: string[] } | null>("rfid_count", null).then(d => {
+  useEffect(() => { getSetting<{ loc: string; reads: string[] } | null>("rfid_count_" + currentStore(), null).then(d => {
     if (d) { setLoc(d.loc || ""); setReads(d.reads || []); seen.current = new TagSet(d.reads || []); }
     setReady(true);
   }); }, []);
-  useEffect(() => { if (ready) setSetting("rfid_count", { loc, reads }); }, [ready, loc, reads]);
+  useEffect(() => { if (ready) setSetting("rfid_count_" + currentStore(), { loc, reads }); }, [ready, loc, reads]);
   const products = useLiveQuery(() => db.products.toArray(), [], []);
-  const cells = useLiveQuery<StockCell[], StockCell[]>(() => (loc ? db.stock.where("loc_id").equals(loc).toArray() : []), [loc], []);
+  const cells = useLiveQuery<StockCell[], StockCell[]>(() => (loc ? storeStock().then(rows => rows.filter(c => c.loc_id === loc)) : []), [loc], []);
   const pmap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
 
   const expected = useMemo(() => new Map(cells.filter(c => c.qty > 0).map(c => [c.product_id, c.qty])), [cells]);

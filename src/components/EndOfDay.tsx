@@ -8,6 +8,7 @@ import { getShop, DEFAULT_SHOP, type Shop } from "../lib/billing";
 import { usePrivate } from "../lib/privacy";
 import { rupees, toPaise } from "../lib/format";
 import { Modal } from "./common";
+import { inStore, currentStore } from "../lib/scope";
 
 const MODES: (keyof Modes)[] = ["cash", "upi", "card", "bank"];
 
@@ -19,15 +20,16 @@ export function EndOfDay({ onClose }: { onClose: () => void }) {
   const [shop, setShop] = useState<Shop>(DEFAULT_SHOP);
   const [printing, setPrinting] = useState(false);
   useEffect(() => { getShop().then(setShop); }, []);
-  useEffect(() => { getSetting<number>("eod_open_" + day, 0).then(v => setOpening(v ? String(v / 100) : "")); }, [day]);
+  const openingKey = "eod_open_" + currentStore() + "_" + day;
+  useEffect(() => { getSetting<number>(openingKey, 0).then(v => setOpening(v ? String(v / 100) : "")); }, [openingKey]);
   const start = new Date(day + "T00:00").toISOString(), end = new Date(new Date(day + "T00:00").getTime() + 864e5).toISOString();
   // bills made that day, plus any bill touched since (a payment taken that day on an older bill)
   const bills = useLiveQuery(async () => {
     const [a, b] = await Promise.all([db.bills.where("at").between(start, end).toArray(), db.bills.where("updated_at").aboveOrEqual(start).toArray()]);
-    const m = new Map<string, Bill>(); [...a, ...b].forEach(x => m.set(x.id, x)); return [...m.values()];
+    const m = new Map<string, Bill>(); [...a, ...b].filter(x => inStore(x)).forEach(x => m.set(x.id, x)); return [...m.values()];
   }, [start, end], []);
-  const receipts = useLiveQuery(() => db.receipts.where("at").between(start, end).toArray(), [start, end], []);
-  const vouchers = useLiveQuery(() => db.vouchers.where("at").between(start, end).toArray(), [start, end], []);
+  const receipts = useLiveQuery(() => db.receipts.where("at").between(start, end).filter(inStore).toArray(), [start, end], []);
+  const vouchers = useLiveQuery(() => db.vouchers.where("at").between(start, end).filter(inStore).toArray(), [start, end], []);
   const r = useMemo(() => eodReport(bills, receipts, day, toPaise(opening), open, vouchers), [bills, receipts, vouchers, day, opening, open]);
   useEffect(() => { if (!printing) return; const t = setTimeout(() => { window.print(); setPrinting(false); }, 200); return () => clearTimeout(t); }, [printing]);
   const isToday = day === localDay(new Date().toISOString());
@@ -69,7 +71,7 @@ export function EndOfDay({ onClose }: { onClose: () => void }) {
         <div className="grid g2">
           <label className="f">Day<input className="in" type="date" value={day} max={localDay(new Date().toISOString())} onChange={e => e.target.value && setDay(e.target.value)} /></label>
           <label className="f">Opening cash ₹<input className="in mono" inputMode="decimal" placeholder="0" value={opening}
-            onChange={e => { setOpening(e.target.value); setSetting("eod_open_" + day, toPaise(e.target.value)); }} /></label>
+            onChange={e => { setOpening(e.target.value); setSetting(openingKey, toPaise(e.target.value)); }} /></label>
         </div>
         {body(false)}
         <div className="xs mut">Money is counted on the day it was received. Receipts against old dues are under Receipts.{isToday ? " Today's figures update as you bill." : ""}</div>

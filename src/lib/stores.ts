@@ -3,7 +3,7 @@ import { currentStore, MAIN_STORE, inStore, ownerOnly } from "./scope";
 export { currentStore, MAIN_STORE, inStore } from "./scope";
 
 export async function initStores(me?: Staff | null) {
-  if (!(await db.stores.get(MAIN_STORE))) await put("stores", { id: MAIN_STORE, code: "MAIN", name: "Main store", address: "", active: 1, updated_at: now() });
+  if (!(await db.stores.get(MAIN_STORE))) await db.stores.put({ id: MAIN_STORE, code: "MAIN", name: "Main store", address: "", active: 1, updated_at: "1970-01-01T00:00:00Z" });
   return me?.role === "owner" ? await getSetting("active_store", MAIN_STORE) : me?.store_id || MAIN_STORE;
 }
 export async function createStore(name: string, code: string) {
@@ -11,7 +11,11 @@ export async function createStore(name: string, code: string) {
   code = code.trim().toUpperCase();
   if (!name.trim() || !/^[A-Z0-9]{1,4}$/.test(code)) throw new Error("Enter a name and a 1–4 character branch code");
   if (await db.stores.where("code").equals(code).count()) throw new Error("Branch code already exists");
-  return put("stores", { id: uid(), name: name.trim(), code, address: "", active: 1, updated_at: now() });
+  return db.transaction("rw", [db.stores, db.locations, db.outbox], async () => {
+    const s = await put("stores", { id: uid(), name: name.trim(), code, address: "", active: 1, updated_at: now() });
+    for (const bucket of ["DAMAGED", "MISSING", "REPAIR"]) await put("locations", { id: uid(), code: code + "/" + bucket, name: bucket, floor: "", rack: "", box: "", kind: "bucket", store_id: s.id, updated_at: now() });
+    return s;
+  });
 }
 export async function storeLocations(store = currentStore()) { return db.locations.filter(l => !l.deleted && inStore(l, store)).toArray(); }
 export async function storeStock(store = currentStore()) {

@@ -1,3 +1,4 @@
+import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, type ExpenseCategory, type MoneyMode, type VoucherType } from "../lib/db";
@@ -16,7 +17,7 @@ export default function Vouchers() {
   const [category, setCategory] = useState<ExpenseCategory>("other");
   const [note, setNote] = useState("");
   const parties = useLiveQuery(() => db.parties.filter(p => !p.deleted).toArray(), [], []);
-  const vouchers = useLiveQuery(() => db.vouchers.orderBy("at").reverse().limit(80).toArray(), [], []);
+  const vouchers = useLiveQuery(() => db.vouchers.orderBy("at").filter(inStore).reverse().limit(80).toArray(), [], []);
   const picked = parties.find(p => p.id === party);
   const save = async () => {
     const a = toPaise(amount);
@@ -44,4 +45,3 @@ export default function Vouchers() {
     </div>
   </div>;
 }
-

@@ -1,3 +1,4 @@
+import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../lib/db";
@@ -15,10 +16,10 @@ export default function Activity() {
   const [who, setWho] = useState("");
   const rows = useLiveQuery(async () => {
     const a = new Date(day + "T00:00:00"), b = new Date(a.getTime() + 86400000);
-    return db.movements.where("at").between(a.toISOString(), b.toISOString()).reverse().sortBy("at");
+    return db.movements.where("at").between(a.toISOString(), b.toISOString()).filter(inStore).reverse().sortBy("at");
   }, [day], []);
   const prods = useLiveQuery(() => db.products.toArray(), [], []);
-  const staff = useLiveQuery(() => db.staff.toArray(), [], []);
+  const staff = useLiveQuery(() => db.staff.filter(inStore).toArray(), [], []);
   const P = useMemo(() => new Map(prods.map(p => [p.id, p])), [prods]);
   const code = (id: string | null) => (id ? locs.find(l => l.id === id)?.code || "?" : "");
   const list = rows.filter(m => (!kind || m.kind === kind) && (!who || (m.person_name + " " + (staff.find(s => s.id === m.by_staff)?.name || "")).toLowerCase().includes(who.toLowerCase())));

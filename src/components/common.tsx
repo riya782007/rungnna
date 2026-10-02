@@ -3,6 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, type Location, type Product } from "../lib/db";
 import { photoSrc, savePhoto } from "../lib/image";
 import { Icon } from "./Icon";
+import { inStore } from "../lib/scope";
 
 export { LOC_PREFIX } from "../lib/rackLabel";
 
@@ -10,7 +11,7 @@ export const locName = (l?: Location) =>
   !l ? "—" : l.kind === "bucket" ? l.name : [l.floor && (l.floor === "G" ? "Ground" : "Floor " + l.floor), l.rack && "Rack " + l.rack, l.box && "Box " + l.box].filter(Boolean).join(" · ") + (l.name ? ` (${l.name})` : "");
 
 export function useLocations() {
-  return useLiveQuery(async () => (await db.locations.toArray()).filter(l => !l.deleted).sort((a, b) =>
+  return useLiveQuery(async () => (await db.locations.toArray()).filter(l => !l.deleted && inStore(l)).sort((a, b) =>
     (a.kind === "bucket" ? 1 : 0) - (b.kind === "bucket" ? 1 : 0) || a.code.localeCompare(b.code, undefined, { numeric: true })), [], []);
 }
 

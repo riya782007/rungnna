@@ -1,3 +1,4 @@
+import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, type Party, type PurchaseReturnLine, type MoneyMode } from "../lib/db";
@@ -46,7 +47,7 @@ function SupplierList() {
 function SupplierView({ id }: { id: string }) {
   const { me } = useApp();
   const p0 = useLiveQuery(() => db.parties.get(id), [id]);
-  const purchases = useLiveQuery(() => db.purchases.filter(p => !p.deleted && (p.supplier_id === id || p.supplier_name === p0?.name)).reverse().sortBy("at"), [id, p0?.name], []);
+  const purchases = useLiveQuery(() => db.purchases.filter(p => inStore(p) && !p.deleted && (p.supplier_id === id || p.supplier_name === p0?.name)).reverse().sortBy("at"), [id, p0?.name], []);
   const [led, setLed] = useState<{ entries: SupplierEntry[]; balance: number } | null>(null);
   const [pay, setPay] = useState(false);
   const [ret, setRet] = useState(false);
@@ -93,7 +94,7 @@ function PaySupplier({ p, by, onClose }: { p: Party; by: string; onClose: () => 
 
 function ReturnSupplier({ p, by, onClose }: { p: Party; by: string; onClose: () => void }) {
   const locs = useLocations();
-  const purchases = useLiveQuery(() => db.purchases.filter(x => x.status === "final" && !x.deleted && (x.supplier_id === p.id || x.supplier_name === p.name)).reverse().sortBy("at"), [p.id, p.name], []);
+  const purchases = useLiveQuery(() => db.purchases.filter(x => inStore(x) && x.status === "final" && !x.deleted && (x.supplier_id === p.id || x.supplier_name === p.name)).reverse().sortBy("at"), [p.id, p.name], []);
   const [pick, setPick] = useState("");
   const [lines, setLines] = useState<PurchaseReturnLine[]>([]);
   const purchase = purchases.find(x => x.id === pick);
@@ -108,4 +109,3 @@ function ReturnSupplier({ p, by, onClose }: { p: Party; by: string; onClose: () 
     <button className="btn p big" disabled={!lines.some(l => l.qty > 0)} onClick={async () => { const dn = await savePurchaseReturn({ supplier: p, purchase, items: lines.filter(l => l.qty > 0), by }); toast("Saved " + dn.no); onClose(); }}>Save DN</button>
   </div></Modal>;
 }
-

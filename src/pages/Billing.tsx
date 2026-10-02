@@ -1,3 +1,4 @@
+import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, type Bill, type BillLine, type Party, type Payment, type Product } from "../lib/db";
@@ -45,14 +46,14 @@ export default function Billing({ args }: { args: string[] }) {
   const priv = usePrivate();
   const products = useLiveQuery(() => db.products.filter(p => !p.deleted).toArray(), [], []);
   const pmap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
-  const staff = useLiveQuery(() => db.staff.filter(s => !!s.active && !s.deleted).toArray(), [], []);
+  const staff = useLiveQuery(() => db.staff.filter(s => inStore(s) && !!s.active && !s.deleted).toArray(), [], []);
 
   /* load shop profile + a resumed bill (#/bill/<id>) or the unsaved draft on this device */
   useEffect(() => {
     (async () => {
       const s = await getShop(); setShop(s);
       setFmt(await getSetting<PrintFormat>("print_fmt", "a5"));
-      if (args[0]) { const x = await db.bills.get(args[0]); if (x) { setB(x); return; } }
+      if (args[0]) { const x = await db.bills.get(args[0]); if (x && inStore(x)) { setB(x); return; } }
       const d = await getSetting<Bill | null>("draft_bill", null);
       setB(d && d.status === "hold" && !d.no && (d.bill_type !== "estimate" || isOpen()) ? d : newBill(me?.id || "", s, "gst"));
     })();
@@ -357,7 +358,7 @@ export default function Billing({ args }: { args: string[] }) {
           <div className={"sumrow " + (balance > 0 ? "due" : "")}><span>{balance > 0 ? "Balance (credit)" : balance < 0 ? "Return to customer" : "Balance"}</span><b className="mono">{rupees(Math.abs(balance))}</b></div></>}
           <div className="row" style={{ gap: 6 }}>
             <select className="in" style={{ flex: 1, minHeight: 36, padding: "4px 8px" }} value={fmt} onChange={e => { setFmt(e.target.value as PrintFormat); setSetting("print_fmt", e.target.value); }}>
-              <option value="a5">A5 invoice</option><option value="a4">A4 invoice</option><option value="80mm">80 mm thermal</option><option value="packing">Packing slip (no rates)</option></select>
+              <option value="a5">A5 invoice</option><option value="a4">A4 invoice</option><option value="80mm">80 mm thermal</option><option value="58mm">58 mm thermal</option><option value="packing">Packing slip (no rates)</option></select>
           </div>
           <div className="grid g2" style={{ gap: 6 }}>
             <button className="btn" onClick={doHold}>Hold · F4</button>
@@ -434,7 +435,7 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
 
 function HeldBills({ onPick, onClose }: { onPick: (b: Bill) => void; onClose: () => void }) {
   const open = usePrivate();
-  const list = useLiveQuery(() => db.bills.where("status").equals("hold").filter(b => !b.deleted && !b.no && (open || !isEstimate(b))).reverse().sortBy("at"), [open], []);
+  const list = useLiveQuery(() => db.bills.where("status").equals("hold").filter(b => inStore(b) && !b.deleted && !b.no && (open || !isEstimate(b))).reverse().sortBy("at"), [open], []);
   return (
     <Modal title="Bills on hold" onClose={onClose}>
       <div className="stack" style={{ gap: 6 }}>

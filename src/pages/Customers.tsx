@@ -1,3 +1,4 @@
+import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -58,7 +59,7 @@ function PartyView({ id }: { id: string }) {
   const { me } = useApp();
   const p0 = useLiveQuery(() => db.parties.get(id), [id]);
   const priv = usePrivate();
-  const bills = useLiveQuery(() => db.bills.where("party_id").equals(id).filter(b => !b.deleted && (priv || !isEstimate(b))).reverse().sortBy("at"), [id, priv], []);
+  const bills = useLiveQuery(() => db.bills.where("party_id").equals(id).filter(b => inStore(b) && !b.deleted && (priv || !isEstimate(b))).reverse().sortBy("at"), [id, priv], []);
   const rc = useLiveQuery(() => db.receipts.where("party_id").equals(id).count(), [id], 0);
   const [p, setP] = useState<Party | null>(null);
   const [led, setLed] = useState<{ entries: Entry[]; balance: number } | null>(null);

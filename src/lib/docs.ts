@@ -1,6 +1,8 @@
 import { db, put, uid, now, deviceId, type Bill, type BillLine, type BillType, type Movement, type Payment } from "./db";
 import { totals, fixLine, finalize, newBill, bumpStock, isSale, isChallan, type Shop } from "./billing";
 import { setTagsSold } from "./rfid";
+import { inStore } from "./scope";
+import { assertStoreRow } from "./stores";
 
 /* Documents made from other documents — all offline, all-or-nothing:
    merge (several estimates / orders / challans → one invoice), split (some lines → a new bill),
@@ -23,6 +25,7 @@ const partyKey = (b: Pick<Bill, "party_id" | "party_name" | "party_phone">) =>
 
 /** null when these can be merged, otherwise why not (shown to the user) */
 export function canMerge(bills: Bill[]): string | null {
+  if (bills.some(b => !inStore(b))) return "All documents must belong to this store";
   if (bills.length < 2 && !(bills.length === 1 && isChallan(bills[0]))) return "Pick at least two bills to merge";
   const bad = bills.find(b => !mergeable(b));
   if (bad) return `${bad.no || "A held bill"} can't be merged (${bad.status === "final" && bad.bill_type === "gst" ? "saved tax invoice" : bad.status})`;
@@ -86,7 +89,7 @@ export async function mergeBills(sources: Bill[], type: BillType, shop: Shop, by
 
 /* ---------------- split ---------------- */
 
-export const splittable = (b: Bill) => !b.deleted && (isSale(b) || isChallan(b)) && (b.status === "hold" || b.status === "final") && !b.converted_to && !b.merged_into;
+export const splittable = (b: Bill) => inStore(b) && !b.compliance?.irn && !b.compliance?.ewb && !b.deleted && (isSale(b) || isChallan(b)) && (b.status === "hold" || b.status === "final") && !b.converted_to && !b.merged_into;
 
 /* Move some lines to a new bill. A held bill just becomes two held bills. A saved bill keeps its number,
    the new one gets the next number of the same series, and the sale movements of the moved pieces are
@@ -170,6 +173,7 @@ export function buildReturn(bill: Bill, picks: { line_id: string; qty: number }[
 /* Save the credit note: number it (CN/ or ECN/), put each piece back on the rack it left from
    (fullest-first in the order it went out), free its RFID tags, and record any cash refunded. */
 export async function saveReturn(cn0: Bill, bill: Bill, shop: Shop, refund?: { mode: Payment["mode"]; amount: number }): Promise<Bill> {
+  await assertStoreRow(bill);
   if (!cn0.items.length) throw new Error("Pick at least one piece to return");
   const prev = await db.bills.where("return_of").equals(bill.id).toArray();
   const left = returnable(bill, prev);
