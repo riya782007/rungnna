@@ -1,0 +1,15 @@
+import { describe, it, expect } from "vitest";
+import { newBill, lineFrom, totals, DEFAULT_SHOP } from "../src/lib/billing";
+import { gstPayload, gstUpload, validateGst, ewbRequired, canCancel } from "../src/lib/gst";
+import type { Product } from "../src/lib/db";
+const shop = { ...DEFAULT_SHOP, gstin: "07ABCDE1234F1Z5", address: "Delhi shop", state: "Delhi" };
+const p = { id: "p", code: "A", item: "CHAIN", type: "PCS", style: "K1", color: "G", rate: 10001, hsn: "7117" } as Product;
+function invoice() { return totals({ ...newBill("o", shop, "gst"), status: "final", no: "RJ/26C10001", party_name: "Buyer", party_gstin: "07FGHIJ5678K1Z2", party_state: "Delhi", discount: 1333, packing: 123, items: [{ ...lineFrom(p), qty: 6 }, { ...lineFrom(p), qty: 2 }], transport: { vehicle_no: "DL01AB1234", transporter_id: "", transporter_name: "", distance: 50, mode: "1", from_city: "Delhi", from_pin: "110001", to_address: "Buyer street", to_city: "Delhi", to_pin: "110002", to_state_code: "07" } }, shop.state); }
+describe("government JSON", () => {
+  it("allocates discounts and packing without drifting from invoice totals", () => { const b = invoice(), j: any = gstPayload(b, shop, "irn"); expect(j.Version).toBe("1.1"); expect(j.ItemList.reduce((a: number, l: any) => a + Math.round(l.AssAmt * 100), 0)).toBe(b.net - b.adjust - b.gst); expect(j.ItemList.reduce((a: number, l: any) => a + Math.round(l.CgstAmt * 100), 0)).toBe(b.cgst); expect(j.ValDtls.TotInvVal).toBe(b.net / 100); });
+  it("handles inclusive interstate GST", () => { const b = totals({ ...invoice(), gst_mode: "inclusive", party_state: "Maharashtra", party_gstin: "27FGHIJ5678K1Z2", transport: { ...invoice().transport!, to_state_code: "27" } }, "Delhi"), j: any = gstPayload(b, shop, "irn"); expect(j.ValDtls.IgstVal).toBe(b.igst / 100); expect(j.ValDtls.CgstVal).toBe(0); });
+  it("uses a bulk-upload wrapper and challan code with zero tax", () => { const b = totals({ ...invoice(), bill_type: "challan" }); const j: any = gstUpload(b, shop, "ewb"); expect(j.version).toBe("1.0.0621"); expect(j.billLists[0].docType).toBe("CHL"); expect(j.billLists[0].itemList[0].cgstRate).toBe(0); });
+  it("rejects private documents, incomplete addresses and long invoice numbers", () => { expect(validateGst({ ...invoice(), bill_type: "estimate" }, shop, "irn")).not.toEqual([]); expect(validateGst({ ...invoice(), no: "RJ/26-27/COUNTER-000001", transport: undefined }, shop, "ewb").length).toBeGreaterThan(1); });
+  it("requires EWB above, but not at, 50000", () => { expect(ewbRequired({ ...invoice(), net: 5000000 })).toBe(false); expect(ewbRequired({ ...invoice(), net: 5000001 })).toBe(true); });
+  it("enforces 24 hours and never accepts future/cancelled registrations", () => { const r = { id: "irn", generated_at: "2026-10-02T00:00:00Z", sandbox: true }; expect(canCancel(r, Date.parse("2026-10-02T23:59:59Z"))).toBe(true); expect(canCancel(r, Date.parse("2026-10-03T00:00:00Z"))).toBe(false); expect(canCancel(r, Date.parse("2026-10-01T00:00:00Z"))).toBe(false); expect(canCancel({ ...r, cancelled_at: "now" })).toBe(false); });
+});

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db, put, type Bill, type BillType, type Payment } from "../lib/db";
+import { db, put, getSetting, type Bill, type BillType, type Payment } from "../lib/db";
+import { GstBill } from "../components/GstBill";
+import { inStore } from "../lib/scope";
 import { due, getShop, voidBill, convertToGst, shareBill, billText, waLink, deleteEstimates, totals, isSale, docName, docShort, DEFAULT_SHOP, type Shop } from "../lib/billing";
 import { canMerge, mergeable, mergeBills, mergeLines, splitBill, splittable, returnable, returnableBill, buildReturn, saveReturn } from "../lib/docs";
 import { usePrivate, visibleBill, lockNow, isEstimate } from "../lib/privacy";
@@ -34,7 +36,7 @@ function BillList() {
   const since = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - range); return d.toISOString(); }, [range]);
   const bills = useLiveQuery(() => db.bills.where("at").aboveOrEqual(since).reverse().sortBy("at"), [since], []);
   useEffect(() => { if (!open) { setSel(new Set()); if (type === "estimate") setType(""); } }, [open]);
-  const list = bills.filter(b => visibleBill(b, open) && (!type || b.bill_type === type) && (!status || b.status === status) &&
+  const list = bills.filter(b => inStore(b) && visibleBill(b, open) && (!type || b.bill_type === type) && (!status || b.status === status) &&
     (!q || (b.no + " " + b.party_name + " " + b.party_phone).toLowerCase().includes(q.toLowerCase())));
   const fin = list.filter(b => b.status === "final" && isSale(b));
   const sum = (f: (b: Bill) => number) => fin.reduce((a, b) => a + f(b), 0);
@@ -176,7 +178,7 @@ function BillView({ id }: { id: string }) {
   useEffect(() => { getShop().then(setShop); }, []);
   const openP = usePrivate();
   if (!b) return <div className="card pad">Loading…</div>;
-  if (!visibleBill(b, openP)) return <div className="card empty"><b>Not available</b>This bill can't be opened here.</div>;
+  if (!inStore(b) || !visibleBill(b, openP)) return <div className="card empty"><b>Not available</b>This bill can't be opened here.</div>;
   const d = isSale(b) ? due(b) : 0;
   const boss = can(me, "void");
   const cns = related.filter(x => x.status === "final" && (openP || !isEstimate(x)));
@@ -189,13 +191,14 @@ function BillView({ id }: { id: string }) {
     <div>
       <Head eyebrow={docName(b)} title={b.no || "Draft"} sub={`${b.party_name || "Walk-in"} · ${when(b.at)} · ${b.status === "void" ? "CANCELLED" : statusText(b)}`}>
         <button className="btn" onClick={() => setPrinting("a5")}>Print A5</button>
-        <button className="btn" onClick={() => setPrinting("80mm")}>Thermal</button>
+        <button className="btn" onClick={async () => setPrinting(await getSetting<PrintFormat>("thermal_width", "80mm"))}>Thermal</button>
         <button className="btn" onClick={() => setPrinting("packing")}>Packing slip</button>
         <button className="btn g" onClick={() => shareBill(b, shop)}>WhatsApp</button>
       </Head>
       <div className="split">
         <div className="card pad" style={{ overflow: "auto" }}><div className="inv-preview"><InvoiceSheet b={b} shop={shop} format="a5" /></div></div>
         <div className="stack">
+          <GstBill b={b} shop={shop} />
           {b.status === "final" && d > 0 && <div className="card"><header><h3>Receive payment</h3><span className="pill bad">Due {rupees(d)}</span></header>
             <div className="pad stack"><input className="in mono" inputMode="decimal" placeholder={String(d / 100)} value={payAmt} onChange={e => setPayAmt(e.target.value)} />
               <div className="chips">{(["cash", "upi", "card", "bank"] as const).map(m => <button key={m} className="chip" onClick={() => addPayment(m)}>{m.toUpperCase()}</button>)}</div>

@@ -3,6 +3,7 @@ import { rupees } from "./format";
 import { isOpen, isEstimate } from "./privacy";
 import { setTagsSold } from "./rfid";
 import { assertUnlocked } from "./finance";
+import { currentStore, inStore, assertStoreRow, storeLocations } from "./stores";
 
 /* ---------------- shop profile (synced to every device) ---------------- */
 export interface Shop {
@@ -28,7 +29,8 @@ export function fy(d = new Date()) {
 export async function counterCode(): Promise<string> {
   let c = await getSetting<string>("counter_code", "");
   if (!c) { c = "C" + deviceId().slice(-2); await setSetting("counter_code", c); }
-  return c;
+  const store = await db.stores.get(currentStore());
+  return store && store.code !== "MAIN" ? store.code + c : c;
 }
 /* RJ = tax invoice, EST = estimate, CH = delivery challan, CN = credit note (ECN when it returns an estimate, so it stays private) */
 export const seriesOf = (t: BillType, src?: BillType) =>
@@ -47,7 +49,9 @@ async function nextNo(t: BillType, src?: BillType) {
   const key = `seq_${series}_${f}_${cc}`;
   const n = (await getSetting<number>(key, 0)) + 1;
   await setSetting(key, n);
-  return { no: `${series}/${f}/${cc}-${String(n).padStart(4, "0")}`, series: `${series}/${f}/${cc}` };
+  const no = `${series}/${f.slice(0, 2)}${cc}${String(n).padStart(4, "0")}`;
+  if (["gst", "challan"].includes(t) && no.length > 16) throw new Error("Shorten the counter code in Settings (government limit: 16 characters)");
+  return { no, series: `${series}/${f}/${cc}` };
 }
 
 /* ---------------- maths (all paise) ---------------- */
@@ -92,6 +96,7 @@ export function newBill(by: string, shop: Shop, t: BillType = "estimate"): Bill 
   return {
     id: uid(), no: "", series: "", bill_type: t, status: "hold", party_name: "", party_phone: "", party_gstin: "", party_state: "",
     price_level: "wholesale",
+    store_id: currentStore(),
     salesman: "", box_count: 0, total_qty: 0, gross: 0, discount: 0, discount_pct: 0, packing: 0, adjust: 0,
     gst_mode: shop.gst_mode, gst_rate: shop.gst_rate, gst: 0, cgst: 0, sgst: 0, igst: 0, net: 0, advance: 0, paid: 0,
     remarks: "", payments: [], items: [], device: deviceId(), by_staff: by, at: now(), updated_at: now(),
@@ -103,13 +108,15 @@ export function priceFor(p: Product, level: Party["tier"] | Bill["price_level"] 
 }
 export function lineFrom(p: Product, box = 1, pkts = 1, level: Party["tier"] | Bill["price_level"] = "wholesale"): BillLine {
   const pack = p.pack && p.pack > 1 ? p.pack : 1;
-  return fixLine({ id: uid(), product_id: p.id, code: p.code, item: p.item || (p.item_code ? "ITEM " + p.item_code : ""), type: p.type, style: p.style, color: p.color,
+  return fixLine({ id: uid(), hsn: p.hsn, product_id: p.id, code: p.code, item: p.item || (p.item_code ? "ITEM " + p.item_code : ""), type: p.type, style: p.style, color: p.color,
     box_no: box, pack, pkts: pack > 1 ? pkts : 0, qty: pack > 1 ? pkts * pack : pkts, rate: priceFor(p, level), disc: "", amount: 0 });
 }
 
 /* ---------------- saving ---------------- */
 export async function holdBill(b: Bill) {
+  await assertStoreRow(b);
   const before = await db.bills.get(b.id);
+  if (before?.status === "final") throw new Error("Final documents cannot be moved back to held bills");
   if (before?.at) await assertUnlocked(before.at);
   await put("bills", { ...b, status: "hold" });
 }
@@ -118,12 +125,15 @@ export async function holdBill(b: Bill) {
    Lines marked stock_done already left on another document (merged sources, challans, a split) and are skipped.
    `after` runs inside the same transaction, so linked changes (e.g. marking merged sources) save all-or-nothing. */
 export async function finalize(b: Bill, shopState: string, customerName = "", after?: (saved: Bill) => Promise<void>): Promise<Bill> {
+  await assertStoreRow(b);
+  if (b.compliance?.irn || b.compliance?.ewb) throw new Error("Registered documents cannot be edited; use a credit note");
   const t = totals(b, shopState);
   const before0 = await db.bills.get(b.id);
   if (before0?.at) await assertUnlocked(before0.at);
   const num = t.no ? { no: t.no, series: t.series } : await nextNo(t.bill_type, t.src_type);
   const bill: Bill = { ...t, ...num, status: "final", at: t.status === "hold" ? now() : t.at };
   const bucket = new Set((await db.locations.filter(l => l.kind === "bucket").toArray()).map(l => l.id));
+  const racks = new Set((await storeLocations()).map(l => l.id));
   await db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock, db.products], async () => {
     const before = await db.bills.get(bill.id);
     await put("bills", bill);
@@ -137,7 +147,7 @@ export async function finalize(b: Bill, shopState: string, customerName = "", af
       if (!l.product_id || l.qty <= 0 || l.stock_done) continue;
       let left = l.qty;
       const cells = (await db.stock.where("product_id").equals(l.product_id).toArray())
-        .filter(c => c.qty > 0 && !bucket.has(c.loc_id)).sort((a, z) => z.qty - a.qty);
+        .filter(c => c.qty > 0 && racks.has(c.loc_id) && !bucket.has(c.loc_id)).sort((a, z) => z.qty - a.qty);
       const parts: { loc: string | null; q: number }[] = [];
       for (const c of cells) { if (!left) break; const q = Math.min(left, c.qty); parts.push({ loc: c.loc_id, q }); left -= q; }
       if (left) parts.push({ loc: null, q: left });          // sold more than was recorded: still logged
@@ -161,6 +171,8 @@ export async function bumpStock(product_id: string, loc: string, delta: number) 
    A credit note being cancelled takes its returned pieces off the racks again.
    A merged invoice being cancelled gives its source bills / challans back (they hold their own stock). */
 export async function voidBill(b: Bill, reason: string, by: string) {
+  await assertStoreRow(b);
+  if ([b.compliance?.irn, b.compliance?.ewb].some(r => r && !r.cancelled_at)) throw new Error("Cancel government registration before voiding this bill");
   await assertUnlocked(b.at);
   await db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock, db.products], async () => {
     const stamp = `${reason} — by ${by} on ${new Date().toLocaleString("en-IN")}`;
