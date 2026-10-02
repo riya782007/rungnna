@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { db, getSetting, setSetting, rebuildStock, now } from "./db";
 import { rfidDefaults } from "./rfid";
+import { ownerOnly } from "./scope";
 
 /* Local-first sync.
    - Every save goes to IndexedDB + an outbox row, so the shop never waits on the internet.
@@ -185,11 +186,13 @@ export function startSync() {
 
 /* ---------- backup: the shop's data can always leave the building on a pen drive ---------- */
 export async function exportAll() {
+  ownerOnly();
   const out: any = { app: "rungnna", version: 1, at: now() };
   for (const t of [...TABLES, "settings"] as const) out[t] = await (db as any)[t].toArray();
   return new Blob([JSON.stringify(out)], { type: "application/json" });
 }
 export async function importAll(file: File) {
+  ownerOnly();
   const j = JSON.parse(await file.text());
   if (j.app !== "rungnna") throw new Error("Not a Rungnna backup file");
   for (const t of TABLES) if (Array.isArray(j[t])) {

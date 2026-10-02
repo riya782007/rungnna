@@ -300,6 +300,22 @@ tr.click{cursor:pointer}tr.click:hover td{background:var(--bg)}
 .inv.thermal .inv-head,.inv.thermal .inv-meta,.inv.thermal .inv-foot,.inv.thermal .inv-terms{flex-direction:column}
 .inv.thermal .inv-title{text-align:left}.inv.thermal .inv-sum{width:100%}
 .inv.thermal .inv-t th:nth-child(2),.inv.thermal .inv-t td:nth-child(2){display:none}
+.inv.narrow{width:54mm;max-width:100%;font-size:9px}
+.inv.narrow .inv-shop{font-size:13px;overflow-wrap:anywhere}
+.inv.narrow .inv-t{table-layout:fixed;font-size:8px}
+.inv.narrow .inv-t th,.inv.narrow .inv-t td{padding:2px;overflow-wrap:anywhere}
+.inv.narrow .inv-t th:first-child,.inv.narrow .inv-t td:first-child,.inv.narrow .inv-t th:nth-child(4),.inv.narrow .inv-t td:nth-child(4){display:none}
+.inv.narrow .inv-t th:nth-child(3){width:40%}
+.inv.narrow .inv-title{white-space:normal;font-size:11px}
+.inv.narrow .inv-terms span{white-space:normal}
+.inv-compliance{font-size:9px;overflow-wrap:anywhere;break-inside:avoid;margin:8px 0}
+.signed-qr{display:block;width:40mm;max-width:100%;margin:6px 0}
+.signed-qr svg{display:block;width:100%;height:auto}
+.gst-panel,.transfer-row{border-top:1px solid var(--line-2);padding:16px 0}
+.store-switch{padding:12px}
+.mobile-store{max-width:90px;width:auto}
+.security-gate{max-width:420px;margin:48px auto;padding:20px}
+@media(min-width:901px){.mobile-store{display:none}}
 
 
 #printroot{display:none}

@@ -9,6 +9,9 @@ import { can } from "./lib/roles";
 import { t, initLang, onLang } from "./lib/i18n";
 import Home from "./pages/Home";
 import { WhoAreYou } from "./pages/Settings";
+import { useLiveQuery } from "dexie-react-hooks";
+import { db } from "./lib/db";
+import { OwnerGate } from "./components/OwnerSecurity";
 
 /* Pages load on first visit (fast start); the service worker keeps every piece for offline use. */
 const Billing = lazy(() => import("./pages/Billing"));
@@ -28,6 +31,8 @@ const StockIn = lazy(() => import("./pages/StockIn"));
 const Suppliers = lazy(() => import("./pages/Suppliers"));
 const Vouchers = lazy(() => import("./pages/Vouchers"));
 const Reports = lazy(() => import("./pages/Reports"));
+const Bank = lazy(() => import("./pages/Bank"));
+const Stores = lazy(() => import("./pages/Stores"));
 const Import = lazy(() => import("./pages/Import"));
 const Remote = lazy(() => import("./pages/Remote"));
 const Settings = lazy(() => import("./pages/Settings"));
@@ -62,7 +67,8 @@ function Status() {
 function Loading() { return <div className="stack"><div className="skel" style={{ height: 40, width: 220 }} /><div className="skel" style={{ height: 180 }} /><div className="skel" style={{ height: 120 }} /></div>; }
 
 function Shell() {
-  const { me, setMe, ready } = useApp();
+  const { me, setMe, ready, store, switchStore } = useApp();
+  const stores = useLiveQuery(() => db.stores.filter(s => !s.deleted && !!s.active).toArray(), [], []);
   const [route, args] = useRoute();
   const [pal, setPal] = useState(false);
   const [, setLangTick] = useState("");
@@ -113,7 +119,9 @@ function Shell() {
     case "activity": page = <Activity />; break;
     case "stockin": page = <StockIn args={args} />; break;
     case "remote": page = <Remote id={args[0] || ""} />; break;
-    case "import": page = can(me, "settings") ? <Import /> : <NoAccess />; break;
+    case "import": page = me.role === "owner" ? <Import /> : <NoAccess />; break;
+    case "bank": page = me.role === "owner" ? <Bank /> : <NoAccess />; break;
+    case "stores": page = <Stores />; break;
     case "settings": page = <Settings />; break;
     default: page = <Home />;
   }
@@ -125,6 +133,9 @@ function Shell() {
         {can(me, "bill") && <a href="#/bill" className="newbill"><Icon n="plus" size={18} /><span className="t">{t("New bill")}</span><kbd style={{ background: "rgba(255,255,255,.15)", color: "#fff" }}>F2</kbd></a>}
         <button className="railsearch" onClick={() => setPal(true)}><Icon n="search" size={17} /><span className="grow">Search</span><kbd>Ctrl K</kbd></button>
         {visible.map(s => <a key={s.key} href={hrefOf(s)} className={"nav" + (sec === s.key ? " on" : "")}><Icon n={s.icon} /><span className="grow">{t(s.label)}</span></a>)}
+        {me.role === "owner" && <label className="f store-switch">Store<select className="in" value={store} onChange={e => switchStore(e.target.value)}>{stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>}
+        <a className="nav" href="#/stores"><Icon n="stock" /><span>Transfers{me.role === "owner" ? " & stores" : ""}</span></a>
+        {me.role === "owner" && <a className="nav" href="#/bank"><Icon n="sales" /><span>Bank reconciliation</span></a>}
         <div className="railfoot">
           <Status />
           <button className="me" onClick={() => setMe(null)} title="Switch person">
@@ -137,6 +148,7 @@ function Shell() {
         <div className="top">
           <span className="brandm"><span className="mark">R</span>{cur.label === "Home" ? "Rungnna" : t(cur.label)}</span>
           <span className="grow" />
+          {me.role === "owner" && <select aria-label="Store" className="in mobile-store" value={store} onChange={e => switchStore(e.target.value)}>{stores.map(s => <option key={s.id} value={s.id}>{s.code}</option>)}</select>}
           <button className="iconbtn" aria-label="Search" onClick={() => setPal(true)}><Icon n="search" size={18} /></button>
           <button className="avatar" onClick={() => go("settings")} aria-label="Me">{me.name.slice(0, 1).toUpperCase()}</button>
         </div>
@@ -146,7 +158,7 @@ function Shell() {
             <span className="grow" /><Status />
           </div>)}
         <main className={"page" + (route === "bill" ? " wide" : "")}>
-          <Guard key={route + (args[0] || "")}><Suspense fallback={<Loading />}><div className="pagein">{page}</div></Suspense></Guard>
+          <Guard key={store + route + (args[0] || "")}><Suspense fallback={<Loading />}><div className="pagein">{page}</div></Suspense></Guard>
         </main>
       </div>
       <nav className="tabbar">
@@ -190,5 +202,5 @@ function NoAccess() {
 }
 
 export default function App() {
-  return <AppProvider><Shell /><Toasts /></AppProvider>;
+  return <AppProvider><OwnerGate><Shell /></OwnerGate><Toasts /></AppProvider>;
 }

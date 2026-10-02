@@ -15,6 +15,8 @@ import { rupees, toPaise } from "../lib/format";
 import { getTaxonomy, addTo, removeFrom, addColour, removeColour, colourCodeFor, type Taxonomy } from "../lib/taxonomy";
 import { initLang, setLang, type Lang } from "../lib/i18n";
 import { closeFinancialYear, lockedUpto, setVoucherLock } from "../lib/finance";
+import { SecuritySettings } from "../components/OwnerSecurity";
+import { gstRequest } from "../lib/compliance";
 
 export default function Settings() {
   const { me, setMe } = useApp();
@@ -77,6 +79,9 @@ export default function Settings() {
         </div>
         <div className="stack">
           {boss && <PrivateCard />}
+          <PrintingSettings />
+          {boss && <><SecuritySettings /><GstSettings /><a className="btn" href="#/bank">Bank reconciliation</a><a className="btn" href="#/stores">Store setup &amp; transfers</a></>}
+          {!boss && <a className="btn" href="#/stores">Stock transfers</a>}
           {can(me, "lock") && <OperationsCard by={me?.id || ""} />}
           {admin && <ShopProfile />}
           {admin && <PricingCard />}
@@ -89,7 +94,7 @@ export default function Settings() {
                 <div key={p.id} className="row sm"><span className="grow"><b>{p.name}</b> · {p.count} pieces → {p.map.map(m => m || "–").join(", ")}</span>
                   <button className="btn sm bad" onClick={async () => { const n = pats.filter(x => x.id !== p.id); setPats(n); await setSetting("patterns", n); }}>Forget</button></div>))}
             </div></div>}
-          <div className="card"><header><h3>Backup file</h3></header>
+          {boss && <div className="card"><header><h3>Backup file</h3></header>
             <div className="pad stack">
               <div className="sm mut">Everything on this device in one file. Keep a copy on a pen drive every week.</div>
               <div className="row">
@@ -97,7 +102,7 @@ export default function Settings() {
                 <input ref={file} type="file" accept="application/json" hidden onChange={async e => { const f = e.target.files?.[0]; if (!f) return; try { await importAll(f); toast("Backup restored"); } catch (x: any) { toast(x.message, true); } }} />
                 {admin && <button className="btn" onClick={() => file.current?.click()}>Restore from file</button>}
               </div>
-            </div></div>
+            </div></div>}
         </div>
       </div>
     </div>
@@ -105,6 +110,17 @@ export default function Settings() {
 }
 
 const ROLES: Staff["role"][] = ["owner", "manager", "cashier", "salesman", "helper", "packer"];
+
+function PrintingSettings() {
+  const [width, setWidth] = useState("80mm");
+  useEffect(() => { getSetting("thermal_width", "80mm").then(setWidth); }, []);
+  return <section className="stack"><h3>Printing</h3><label className="f">Thermal paper width<select className="in" value={width} onChange={async e => { const value = e.target.value; setWidth(value); await db.transaction("rw", db.settings, async () => { await setSetting("thermal_width", value); await setSetting("print_fmt", value); }); toast("Printer preference saved"); }}><option value="58mm">58 mm</option><option value="80mm">80 mm</option></select></label></section>;
+}
+function GstSettings() {
+  const [status, setStatus] = useState("Download JSON only");
+  useEffect(() => { gstRequest().then(j => setStatus(j.configured ? j.sandbox ? "Sandbox provider connected" : "Production provider connected" : "Download JSON only")).catch(() => {}); }, []);
+  return <section className="stack"><h3>E-invoice &amp; e-way bill</h3><span className="pill">{status}</span></section>;
+}
 
 function OperationsCard({ by }: { by: string }) {
   const [language, setLanguage] = useState<Lang>("en");
