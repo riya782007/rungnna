@@ -3,13 +3,16 @@ import { createPortal } from "react-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, type Party, type Payment } from "../lib/db";
 import { newParty, waLink, normPhone, getShop, DEFAULT_SHOP, type Shop } from "../lib/billing";
-import { ledger, receive, balances, statementText, type Entry } from "../lib/ledger";
+import { ledger, receive, balances, statementRange, rangeText, statementPdf, localDay, type Entry } from "../lib/ledger";
+import { sharePdf, downloadPdf } from "../lib/pdf";
+import { Modal } from "../components/common";
+import { isSale } from "../lib/billing";
 import { go, toast, useApp } from "../lib/app";
 import { rupees, toPaise, when } from "../lib/format";
 import { Head, PhotoButton, Thumb } from "../components/common";
 import { Icon } from "../components/Icon";
 import { VoiceNotes } from "../components/Voice";
-import { usePrivate } from "../lib/privacy";
+import { usePrivate, isEstimate } from "../lib/privacy";
 
 /* Customers: who buys, what they owe, one tap to collect or remind. */
 export default function Customers({ args }: { args: string[] }) {
@@ -55,7 +58,7 @@ function PartyView({ id }: { id: string }) {
   const { me } = useApp();
   const p0 = useLiveQuery(() => db.parties.get(id), [id]);
   const priv = usePrivate();
-  const bills = useLiveQuery(() => db.bills.where("party_id").equals(id).filter(b => !b.deleted && (priv || b.bill_type !== "estimate")).reverse().sortBy("at"), [id, priv], []);
+  const bills = useLiveQuery(() => db.bills.where("party_id").equals(id).filter(b => !b.deleted && (priv || !isEstimate(b))).reverse().sortBy("at"), [id, priv], []);
   const rc = useLiveQuery(() => db.receipts.where("party_id").equals(id).count(), [id], 0);
   const [p, setP] = useState<Party | null>(null);
   const [led, setLed] = useState<{ entries: Entry[]; balance: number } | null>(null);
@@ -65,6 +68,7 @@ function PartyView({ id }: { id: string }) {
   const [note, setNote] = useState("");
   const [tab, setTab] = useState<"account" | "bills" | "details">("account");
   const [printing, setPrinting] = useState(false);
+  const [share, setShare] = useState(false);
   useEffect(() => { if (p0) setP({ ...p0 }); }, [p0?.updated_at]);
   useEffect(() => { if (p0) ledger(p0).then(setLed); }, [p0?.updated_at, bills, rc, priv]);
   useEffect(() => { getShop().then(setShop); }, []);
@@ -87,8 +91,8 @@ function PartyView({ id }: { id: string }) {
       </Head>
 
       <div className="hero three">
-        <div><span className="k">{bal >= 0 ? "Balance due" : "Advance with us"}</span><b>{rupees(Math.abs(bal))}</b><span className="xs">{bills.filter(b => b.status === "final").length} bills</span></div>
-        <div><span className="k">Bought (all time)</span><b>{rupees(bills.filter(b => b.status === "final").reduce((a, b) => a + b.net, 0))}</b></div>
+        <div><span className="k">{bal >= 0 ? "Balance due" : "Advance with us"}</span><b>{rupees(Math.abs(bal))}</b><span className="xs">{bills.filter(b => b.status === "final" && isSale(b)).length} bills</span></div>
+        <div><span className="k">Bought (all time)</span><b>{rupees(bills.filter(b => b.status === "final" && isSale(b)).reduce((a, b) => a + b.net, 0) - bills.filter(b => b.status === "final" && b.bill_type === "return").reduce((a, b) => a + b.net, 0))}</b></div>
         <div><span className="k">Last bill</span><b style={{ fontSize: 18 }}>{bills[0] ? when(bills[0].at) : "—"}</b></div>
       </div>
 
@@ -105,7 +109,7 @@ function PartyView({ id }: { id: string }) {
           <button className="btn p big" onClick={collect}>Receive {amt ? rupees(toPaise(amt)) : ""}</button>
           <div className="xs mut">Clears the opening balance first, then the oldest bills. Any extra is kept as advance.</div>
           <div className="row">
-            {p.phone && <a className="btn sm" target="_blank" rel="noreferrer" href={waLink(p.phone, statementText(p0, led?.entries || [], bal, shop))}><Icon n="wa" size={16} />Send statement</a>}
+            <button className="btn sm g" onClick={() => setShare(true)}><Icon n="wa" size={16} />Share statement</button>
             <button className="btn sm" onClick={() => setPrinting(true)}><Icon n="print" size={16} />Print statement</button>
           </div>
         </div>
@@ -147,6 +151,7 @@ function PartyView({ id }: { id: string }) {
         <div className="card pad"><VoiceNotes entity="party" entityId={p.id} /></div>
       </div>}
 
+      {share && <ShareStatement party={p0} entries={led?.entries || []} shop={shop} onClose={() => setShare(false)} />}
       {printing && createPortal(
         <div className="inv">
           <style>{"@page{size:A5;margin:8mm}"}</style>
@@ -157,5 +162,48 @@ function PartyView({ id }: { id: string }) {
           <div className="inv-foot"><div /><table className="inv-sum"><tbody><tr className="inv-net"><td>{bal >= 0 ? "Balance due" : "Advance"}</td><td style={{ textAlign: "right" }}>{rupees(Math.abs(bal))}</td></tr></tbody></table></div>
         </div>, document.getElementById("printroot")!)}
     </div>
+  );
+}
+
+/* Statement for any date range: PDF (share sheet → WhatsApp on phones, download on computers) and a WhatsApp text. */
+function ShareStatement({ party, entries, shop, onClose }: { party: Party; entries: Entry[]; shop: Shop; onClose: () => void }) {
+  const today = localDay(new Date().toISOString());
+  const d = new Date();
+  const monthStart = localDay(new Date(d.getFullYear(), d.getMonth(), 1).toISOString());
+  const lastStart = localDay(new Date(d.getFullYear(), d.getMonth() - 1, 1).toISOString()), lastEnd = localDay(new Date(d.getFullYear(), d.getMonth(), 0).toISOString());
+  const fyStart = localDay(new Date(d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1, 3, 1).toISOString());
+  const first = entries.find(e => e.kind !== "opening");
+  const allStart = first ? localDay(first.at) : monthStart;
+  const [from, setFrom] = useState(fyStart);
+  const [to, setTo] = useState(today);
+  const presets: [string, string, string][] = [["This month", monthStart, today], ["Last month", lastStart, lastEnd], ["This year (FY)", fyStart, today], ["Everything", allStart < fyStart ? allStart : fyStart, today]];
+  const st = useMemo(() => statementRange(entries, from, to), [entries, from, to]);
+  const name = `Statement-${party.name.replace(/[^A-Za-z0-9]+/g, "-")}-${from}-to-${to}.pdf`;
+  const text = rangeText(party, st, from, to, shop);
+  const bad = from > to;
+  return (
+    <Modal title={"Statement · " + party.name} onClose={onClose}>
+      <div className="stack">
+        <div className="chips">{presets.map(([l, f, t]) => <button key={l} className="chip" aria-pressed={from === f && to === t} onClick={() => { setFrom(f); setTo(t); }}>{l}</button>)}</div>
+        <div className="grid g2">
+          <label className="f">From<input className="in" type="date" value={from} max={to} onChange={e => e.target.value && setFrom(e.target.value)} /></label>
+          <label className="f">To<input className="in" type="date" value={to} min={from} max={today} onChange={e => e.target.value && setTo(e.target.value)} /></label>
+        </div>
+        {bad ? <div className="note warn sm">“From” is after “To”.</div> : <>
+          <div className="row between sm"><span>Opening</span><b className="mono">{rupees(st.opening)}</b></div>
+          <div className="row between sm"><span>{st.rows.length} entries · billed</span><span className="mono">{rupees(st.debit)}</span></div>
+          <div className="row between sm"><span>Paid / credited</span><span className="mono" style={{ color: "var(--ok)" }}>{rupees(st.credit)}</span></div>
+          <div className="net"><span>{st.closing >= 0 ? "BALANCE DUE" : "ADVANCE"}</span><b>{rupees(Math.abs(st.closing))}</b></div></>}
+        <button className="btn p big" disabled={bad} onClick={async () => {
+          const r = await sharePdf(statementPdf(party, st, from, to, shop), name, text);
+          if (r === "downloaded") toast("PDF saved — attach it in WhatsApp");
+        }}><Icon n="wa" size={18} />Share PDF</button>
+        <div className="row">
+          {party.phone && <a className={"btn grow" + (bad ? " dis" : "")} target="_blank" rel="noreferrer" href={waLink(party.phone, text)}>WhatsApp text</a>}
+          <button className="btn grow" disabled={bad} onClick={() => downloadPdf(statementPdf(party, st, from, to, shop), name)}>Download PDF</button>
+        </div>
+        <div className="xs mut">On a phone, Share PDF opens WhatsApp with the file attached. Names in Hindi script print as “?” in the PDF; the WhatsApp text keeps them.</div>
+      </div>
+    </Modal>
   );
 }

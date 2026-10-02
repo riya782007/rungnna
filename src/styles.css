@@ -501,3 +501,10 @@ img,svg,video,canvas{max-width:100%}
 .scansheet .vf.tall{max-height:58vh}
 .remote{max-width:560px;margin:0 auto}
 .scanrow{flex-wrap:wrap}.scanrow .wedge{flex:1 1 100%}
+/* end-of-day report (on screen) */
+.eod-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.eod-t{border-collapse:collapse;font-size:13px}
+.eod-t th{font-size:11px;color:var(--muted);font-weight:600;text-align:right;padding:6px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
+.eod-t td{padding:7px 6px;border-bottom:1px solid var(--line);vertical-align:top;white-space:nowrap}
+.eod-t td:first-child{white-space:normal;min-width:120px}
+.eod-t .inv-net td{border-top:2px solid var(--ink);font-size:15px}

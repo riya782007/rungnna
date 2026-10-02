@@ -9,7 +9,7 @@ import { newBill, lineFrom, totals, fixLine, finalize, holdBill, due, getShop, n
 import { voiceBill } from "../lib/ai";
 import { useApp, toast, beep, go } from "../lib/app";
 import { can } from "../lib/roles";
-import { usePrivate, unlock, lockNow, getPrivate, isOpen } from "../lib/privacy";
+import { usePrivate, unlock, lockNow, getPrivate, isOpen, isEstimate } from "../lib/privacy";
 import { Icon } from "../components/Icon";
 import { rupees, toPaise } from "../lib/format";
 import { CameraScanner, useScannerGun } from "../components/Scanner";
@@ -264,8 +264,14 @@ export default function Billing({ args }: { args: string[] }) {
         {priv ? <div className="seg" role="group" aria-label="Bill type">
           <button aria-pressed={b.bill_type === "estimate"} onClick={() => set({ bill_type: "estimate" })}>Estimate</button>
           <button aria-pressed={b.bill_type === "gst"} onClick={() => set({ bill_type: "gst" })}>GST Invoice</button>
+          <button aria-pressed={b.bill_type === "challan"} onClick={() => set({ bill_type: "challan" })}>Challan</button>
           <button onClick={() => lockNow()} title="Lock estimates" aria-label="Lock estimates"><Icon n="lock" size={15} /></button>
-        </div> : <div className="pos-title" {...hintProps}><b>Tax invoice</b><span className="xs mut">{b.gst_rate}% GST</span></div>}
+        </div> : <div className="row" style={{ gap: 8, flexWrap: "nowrap" }}>
+          <div className="pos-title" {...hintProps}><b>{b.bill_type === "challan" ? "Delivery challan" : "Tax invoice"}</b><span className="xs mut">{b.bill_type === "challan" ? "goods out · no money" : b.gst_rate + "% GST"}</span></div>
+          <div className="seg" role="group" aria-label="Document">
+            <button aria-pressed={b.bill_type !== "challan"} onClick={() => set({ bill_type: "gst" })}>Invoice</button>
+            <button aria-pressed={b.bill_type === "challan"} onClick={() => set({ bill_type: "challan" })} title="Send goods now, invoice later">Challan</button>
+          </div></div>}
         <div className="pos-no"><span className="xs mut">{b.no ? "Bill no" : "Next no"}</span><b className="mono">{b.no || nextNo}</b></div>
         <button className="pos-cust" onClick={() => setCustOpen(true)}>
           <span className="xs mut">Customer · F3</span>
@@ -344,10 +350,11 @@ export default function Billing({ args }: { args: string[] }) {
           {b.bill_type === "gst" && <div className="sumrow"><span>GST {b.gst_rate}% <button className="linkbtn" onClick={() => set({ gst_mode: b.gst_mode === "exclusive" ? "inclusive" : "exclusive" })}>{b.gst_mode === "exclusive" ? "added" : "included"}</button></span><b className="mono">{rupees(t.gst)}</b></div>}
           {t.igst ? <div className="xs mut" style={{ textAlign: "right" }}>IGST (other state)</div> : t.gst ? <div className="xs mut" style={{ textAlign: "right" }}>CGST {rupees(t.cgst)} + SGST {rupees(t.sgst)}</div> : null}
           {t.adjust ? <div className="sumrow"><span>Round off</span><span className="mono">{rupees(t.adjust)}</span></div> : null}
-          <div className="net"><span>NET</span><b>{rupees(t.net)}</b></div>
+          <div className="net"><span>{b.bill_type === "challan" ? "VALUE" : "NET"}</span><b>{rupees(t.net)}</b></div>
+          {b.bill_type === "challan" ? <div className="note sm">A challan sends the goods out with no money taken. Convert it to an invoice from Bills when the customer is billed.</div> : <>
           <div className="sumrow"><span>Advance</span><input className="cell r" style={{ width: 80 }} value={b.advance ? b.advance / 100 : ""} onChange={e => set({ advance: toPaise(e.target.value) })} /></div>
           <Payments pays={b.payments} left={t.net - b.advance} onChange={payments => set({ payments })} />
-          <div className={"sumrow " + (balance > 0 ? "due" : "")}><span>{balance > 0 ? "Balance (credit)" : balance < 0 ? "Return to customer" : "Balance"}</span><b className="mono">{rupees(Math.abs(balance))}</b></div>
+          <div className={"sumrow " + (balance > 0 ? "due" : "")}><span>{balance > 0 ? "Balance (credit)" : balance < 0 ? "Return to customer" : "Balance"}</span><b className="mono">{rupees(Math.abs(balance))}</b></div></>}
           <div className="row" style={{ gap: 6 }}>
             <select className="in" style={{ flex: 1, minHeight: 36, padding: "4px 8px" }} value={fmt} onChange={e => { setFmt(e.target.value as PrintFormat); setSetting("print_fmt", e.target.value); }}>
               <option value="a5">A5 invoice</option><option value="a4">A4 invoice</option><option value="80mm">80 mm thermal</option><option value="packing">Packing slip (no rates)</option></select>
@@ -379,7 +386,7 @@ export default function Billing({ args }: { args: string[] }) {
 function Payments({ pays, left, onChange }: { pays: Payment[]; left: number; onChange: (p: Payment[]) => void }) {
   const paid = pays.reduce((a, p) => a + (p.mode === "credit" ? 0 : p.amount), 0);
   const rest = Math.max(0, left - paid);
-  const add = (mode: Payment["mode"]) => onChange([...pays, { mode, amount: rest }]);
+  const add = (mode: Payment["mode"]) => onChange([...pays, { mode, amount: rest, at: new Date().toISOString() }]);
   return (
     <div className="stack" style={{ gap: 4 }}>
       {pays.map((p, i) => (
@@ -427,7 +434,7 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
 
 function HeldBills({ onPick, onClose }: { onPick: (b: Bill) => void; onClose: () => void }) {
   const open = usePrivate();
-  const list = useLiveQuery(() => db.bills.where("status").equals("hold").filter(b => !b.deleted && !b.no && (open || b.bill_type !== "estimate")).reverse().sortBy("at"), [open], []);
+  const list = useLiveQuery(() => db.bills.where("status").equals("hold").filter(b => !b.deleted && !b.no && (open || !isEstimate(b))).reverse().sortBy("at"), [open], []);
   return (
     <Modal title="Bills on hold" onClose={onClose}>
       <div className="stack" style={{ gap: 6 }}>

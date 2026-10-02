@@ -48,6 +48,7 @@ export function usePrivate() {
 }
 
 /* one rule used by every screen */
-export const isEstimate = (b: Pick<Bill, "bill_type">) => b.bill_type === "estimate";
+/* private = an estimate, or a credit note that returns goods from an estimate */
+export const isEstimate = (b: Pick<Bill, "bill_type"> & { src_type?: Bill["src_type"] }) => b.bill_type === "estimate" || (b.bill_type === "return" && b.src_type === "estimate");
 export const visibleBill = (b: Bill, open = isOpen()) => !b.deleted && (open || !isEstimate(b));
-export const maskNote = (note: string, open = isOpen()) => (!open && /^EST\//.test(note || "") ? "" : note);
+export const maskNote = (note: string, open = isOpen()) => (!open && /^(EST|ECN)\//.test(note || "") ? "" : note);

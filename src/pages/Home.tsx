@@ -8,8 +8,9 @@ import { useApp } from "../lib/app";
 import { can } from "../lib/roles";
 import { rupees, when } from "../lib/format";
 import { label, isDead } from "../lib/products";
-import { due } from "../lib/billing";
-import { usePrivate } from "../lib/privacy";
+import { due, isSale } from "../lib/billing";
+import { usePrivate, isEstimate } from "../lib/privacy";
+import { EndOfDay } from "../components/EndOfDay";
 
 type Period = "today" | "week" | "month";
 const PERIODS: [Period, string][] = [["today", "Today"], ["week", "This week"], ["month", "This month"]];
@@ -31,14 +32,15 @@ export default function Home() {
   const locs = useLocations();
   const priv = usePrivate();
   const [period, setPeriod] = useState<Period>("today");
+  const [eod, setEod] = useState(false);
   const start = useMemo(() => periodStart(period).toISOString(), [period]);
 
   const products = useLiveQuery(() => db.products.filter(p => !p.deleted).toArray(), [], []);
   const cells = useLiveQuery(() => db.stock.toArray(), [], []);
   const recent = useLiveQuery(() => db.movements.orderBy("at").reverse().limit(6).toArray(), [], []);
-  const bills = useLiveQuery(() => db.bills.where("at").aboveOrEqual(start).filter(b => !b.deleted && (priv || b.bill_type !== "estimate")).toArray(), [start, priv], []);
-  const allFinal = useLiveQuery(() => db.bills.filter(b => !b.deleted && b.status === "final" && (priv || b.bill_type !== "estimate")).toArray(), [priv], []);
-  const held = useLiveQuery(() => db.bills.where("status").equals("hold").filter(b => !b.deleted && !b.no && (priv || b.bill_type !== "estimate")).count(), [priv], 0);
+  const bills = useLiveQuery(() => db.bills.where("at").aboveOrEqual(start).filter(b => !b.deleted && (priv || !isEstimate(b))).toArray(), [start, priv], []);
+  const allFinal = useLiveQuery(() => db.bills.filter(b => !b.deleted && b.status === "final" && (priv || !isEstimate(b))).toArray(), [priv], []);
+  const held = useLiveQuery(() => db.bills.where("status").equals("hold").filter(b => !b.deleted && !b.no && (priv || !isEstimate(b))).count(), [priv], 0);
 
   const d = useMemo(() => {
     const bucket = new Set(locs.filter(l => l.kind === "bucket").map(l => l.id));
@@ -58,7 +60,7 @@ export default function Home() {
     });
 
     // ---- period sales ----
-    const fin = bills.filter(b => b.status === "final");
+    const fin = bills.filter(b => b.status === "final" && isSale(b));   // challans move goods, credit notes are in the end-of-day report
     const sales = fin.reduce((a, b) => a + b.net, 0);
     const collected = fin.reduce((a, b) => a + b.payments.filter(p => p.mode !== "credit").reduce((x, p) => x + p.amount, 0) + b.advance, 0);
     const credit = fin.reduce((a, b) => a + Math.max(0, due(b)), 0);
@@ -92,7 +94,7 @@ export default function Home() {
 
     // debtors
     const owed = new Map<string, number>();
-    for (const b of allFinal) { const bal = Math.max(0, due(b)); if (bal > 0) owed.set(b.party_id || b.party_name || "walk-in", (owed.get(b.party_id || b.party_name || "walk-in") || 0) + bal); }
+    for (const b of allFinal) { if (!isSale(b)) continue; const bal = Math.max(0, due(b)); if (bal > 0) owed.set(b.party_id || b.party_name || "walk-in", (owed.get(b.party_id || b.party_name || "walk-in") || 0) + bal); }
     const debtors = [...owed.values()].filter(x => x > 0);
     const creditTotal = debtors.reduce((a, x) => a + x, 0);
 
@@ -108,14 +110,14 @@ export default function Home() {
   // 14-day sales trend (independent of the period switch)
   const trendBills = useLiveQuery(() => {
     const from = new Date(); from.setHours(0, 0, 0, 0); from.setDate(from.getDate() - 13);
-    return db.bills.where("at").aboveOrEqual(from.toISOString()).filter(b => !b.deleted && b.status === "final" && (priv || b.bill_type !== "estimate")).toArray();
+    return db.bills.where("at").aboveOrEqual(from.toISOString()).filter(b => !b.deleted && b.status === "final" && (priv || !isEstimate(b))).toArray();
   }, [priv], [] as Bill[]);
   const trend = useMemo(() => {
     const days: { label: string; value: number }[] = [];
     for (let i = 13; i >= 0; i--) {
       const day = new Date(); day.setHours(0, 0, 0, 0); day.setDate(day.getDate() - i);
       const next = new Date(day); next.setDate(day.getDate() + 1);
-      const v = trendBills.filter(b => b.at >= day.toISOString() && b.at < next.toISOString()).reduce((a, b) => a + b.net, 0);
+      const v = trendBills.filter(b => isSale(b) && b.at >= day.toISOString() && b.at < next.toISOString()).reduce((a, b) => a + b.net, 0);
       days.push({ label: day.toLocaleDateString("en-IN", { day: "numeric" }), value: v });
     }
     return days;
@@ -197,6 +199,7 @@ export default function Home() {
         {can(me, "bill") && <a href="#/bill" className="gold"><span className="i"><Icon n="plus" /></span>New bill</a>}
         <a href="#/stockin"><span className="i"><Icon n="scan" /></span>Stock in</a>
         <a href="#/move"><span className="i"><Icon n="stock" /></span>Move stock</a>
+        {money && <a href="#/" onClick={e => { e.preventDefault(); setEod(true); }}><span className="i"><Icon n="print" /></span>End of day</a>}
         {can(me, "ai") ? <a href="#/ask"><span className="i"><Icon n="ask" /></span>Ask the shop</a> : <a href="#/labels"><span className="i"><Icon n="print" /></span>Print labels</a>}
       </div>
 
@@ -223,6 +226,8 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      {eod && <EndOfDay onClose={() => setEod(false)} />}
 
       {/* row: urgent tasks + stock status */}
       <div className="dash-grid">

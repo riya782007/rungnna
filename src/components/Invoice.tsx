@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import type { Bill } from "../lib/db";
-import { due, type Shop } from "../lib/billing";
+import { due, docName, type Shop } from "../lib/billing";
 import { rupees } from "../lib/format";
 import { qrSvg } from "../lib/qr";
 
@@ -28,9 +28,10 @@ export function inWords(paise: number) {
 
 export function InvoiceSheet({ b, shop, format }: { b: Bill; shop: Shop; format: PrintFormat }) {
   const d = due(b);
-  const upi = shop.upi && d > 0 ? qrSvg(`upi://pay?pa=${shop.upi}&pn=${encodeURIComponent(shop.name)}&am=${(d / 100).toFixed(2)}&cu=INR&tn=${encodeURIComponent(b.no)}`).svg : "";
+  const money = b.bill_type !== "challan" && b.bill_type !== "return"; // no "pay now" on a challan or credit note
+  const upi = money && shop.upi && d > 0 ? qrSvg(`upi://pay?pa=${shop.upi}&pn=${encodeURIComponent(shop.name)}&am=${(d / 100).toFixed(2)}&cu=INR&tn=${encodeURIComponent(b.no)}`).svg : "";
   const prices = format !== "packing";
-  const title = format === "packing" ? "PACKING SLIP" : b.bill_type === "gst" ? "TAX INVOICE" : "ESTIMATE";
+  const title = format === "packing" ? "PACKING SLIP" : docName(b).toUpperCase();
   const boxes = [...new Set(b.items.map(l => l.box_no))].sort((a, z) => a - z);
   const page = format === "80mm" ? "80mm auto" : format === "a4" ? "A4" : "A5";
   return (
@@ -39,11 +40,13 @@ export function InvoiceSheet({ b, shop, format }: { b: Bill; shop: Shop; format:
       <div className="inv-head">
         <div><div className="inv-shop">{shop.name}</div><div className="inv-sub">{shop.tagline}</div>
           <div className="inv-sub">{[shop.address, shop.phone].filter(Boolean).join(" · ")}</div>
-          {shop.gstin && b.bill_type === "gst" && <div className="inv-sub">GSTIN: <b>{shop.gstin}</b>{shop.state ? " · State: " + shop.state : ""}</div>}</div>
+          {shop.gstin && (b.bill_type === "gst" || (b.bill_type === "return" && b.src_type === "gst")) && <div className="inv-sub">GSTIN: <b>{shop.gstin}</b>{shop.state ? " · State: " + shop.state : ""}</div>}</div>
         <div className="inv-title">{title}{b.status === "void" && <div className="inv-void">CANCELLED</div>}</div>
       </div>
       <div className="inv-meta">
-        <div><b>{b.bill_type === "gst" ? "Invoice" : "Estimate"} No:</b> {b.no || "(draft)"}<br /><b>Date:</b> {new Date(b.at).toLocaleString("en-IN")}</div>
+        <div><b>{docName(b)} No:</b> {b.no || "(draft)"}<br /><b>Date:</b> {new Date(b.at).toLocaleString("en-IN")}
+          {b.return_of_no ? <><br /><b>Against:</b> {b.return_of_no}</> : null}
+          {b.merged_from?.length ? <><br /><b>Covers:</b> {b.merged_from.length} earlier {b.merged_from.length > 1 ? "documents" : "document"}</> : null}</div>
         <div><b>Party:</b> {b.party_name || "Cash"}{b.party_phone ? " · " + b.party_phone : ""}{b.party_gstin ? <><br /><b>GSTIN:</b> {b.party_gstin}</> : null}{b.party_state ? <><br /><b>State:</b> {b.party_state}</> : null}</div>
       </div>
       <table className="inv-t">
@@ -60,8 +63,9 @@ export function InvoiceSheet({ b, shop, format }: { b: Bill; shop: Shop; format:
         <div className="inv-left">
           <div><b>Total pieces:</b> {b.total_qty} · <b>Boxes:</b> {b.box_count}</div>
           {format === "packing" && <div className="inv-boxes">{boxes.map(x => <span key={x}>Box {x}: {b.items.filter(l => l.box_no === x).reduce((a, l) => a + l.qty, 0)} pcs</span>)}</div>}
-          {prices && <div className="inv-words">{inWords(b.net)}</div>}
-          {b.bill_type === "gst" && prices && <div className="inv-sub">HSN {shop.hsn} · GST {b.gst_rate}% {b.gst_mode === "inclusive" ? "(included in rates)" : ""}</div>}
+          {prices && <div className="inv-words">{b.bill_type === "return" ? "Credit: " : ""}{inWords(b.net)}</div>}
+          {b.bill_type === "challan" && <div className="inv-sub">Goods sent on approval / for delivery. Not a tax invoice — the invoice follows.</div>}
+          {(b.bill_type === "gst" || (b.bill_type === "return" && b.src_type === "gst")) && prices && <div className="inv-sub">HSN {shop.hsn} · GST {b.gst_rate}% {b.gst_mode === "inclusive" ? "(included in rates)" : ""}</div>}
           {b.remarks && <div><b>Remarks:</b> {b.remarks}</div>}
           {shop.bank && prices && <div className="inv-sub">Bank: {shop.bank}</div>}
           {upi && prices && <div className="row" style={{ gap: 6, alignItems: "center" }}><span className="inv-qr" dangerouslySetInnerHTML={{ __html: upi }} /><span className="inv-sub">Scan to pay {rupees(d)}<br />UPI: {shop.upi}</span></div>}
@@ -74,10 +78,10 @@ export function InvoiceSheet({ b, shop, format }: { b: Bill; shop: Shop; format:
           {b.sgst ? <tr><td>SGST {b.gst_rate / 2}%</td><td className="r">{rupees(b.sgst)}</td></tr> : null}
           {b.igst ? <tr><td>IGST {b.gst_rate}%</td><td className="r">{rupees(b.igst)}</td></tr> : null}
           {b.adjust ? <tr><td>Round off</td><td className="r">{rupees(b.adjust)}</td></tr> : null}
-          <tr className="inv-net"><td>NET</td><td className="r">{rupees(b.net)}</td></tr>
+          <tr className="inv-net"><td>{b.bill_type === "return" ? "CREDIT" : b.bill_type === "challan" ? "VALUE" : "NET"}</td><td className="r">{rupees(b.net)}</td></tr>
           {b.advance ? <tr><td>Advance</td><td className="r">-{rupees(b.advance)}</td></tr> : null}
           {b.paid ? <tr><td>Paid ({b.payments.filter(p => p.mode !== "credit").map(p => p.mode.toUpperCase()).join("+")})</td><td className="r">-{rupees(b.paid)}</td></tr> : null}
-          {d > 0 ? <tr className="inv-net"><td>Balance</td><td className="r">{rupees(d)}</td></tr> : null}
+          {money && d > 0 ? <tr className="inv-net"><td>Balance</td><td className="r">{rupees(d)}</td></tr> : null}
         </tbody></table>}
       </div>
       <div className="inv-terms">{shop.terms}<span>For {shop.name}</span></div>

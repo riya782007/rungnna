@@ -1,6 +1,6 @@
 import { db, put, uid, now, deviceId, getSetting, setSetting, type Bill, type BillLine, type BillType, type Movement, type Party, type Product, type Config } from "./db";
 import { rupees } from "./format";
-import { isOpen } from "./privacy";
+import { isOpen, isEstimate } from "./privacy";
 import { setTagsSold } from "./rfid";
 
 /* ---------------- shop profile (synced to every device) ---------------- */
@@ -29,9 +29,20 @@ export async function counterCode(): Promise<string> {
   if (!c) { c = "C" + deviceId().slice(-2); await setSetting("counter_code", c); }
   return c;
 }
-export const seriesOf = (t: BillType) => (t === "gst" ? "RJ" : "EST");
-async function nextNo(t: BillType) {
-  const series = seriesOf(t), f = fy(), cc = await counterCode();
+/* RJ = tax invoice, EST = estimate, CH = delivery challan, CN = credit note (ECN when it returns an estimate, so it stays private) */
+export const seriesOf = (t: BillType, src?: BillType) =>
+  t === "gst" ? "RJ" : t === "challan" ? "CH" : t === "return" ? (src === "estimate" ? "ECN" : "CN") : "EST";
+export const isSale = (b: Pick<Bill, "bill_type">) => b.bill_type === "gst" || b.bill_type === "estimate";
+export const isChallan = (b: Pick<Bill, "bill_type">) => b.bill_type === "challan";
+export const isReturn = (b: Pick<Bill, "bill_type">) => b.bill_type === "return";
+/* the sales that count as money owed / sold: saved invoices and estimates (not challans, not merged-away sources) */
+export const isSaleFinal = (b: Bill) => isSale(b) && b.status === "final" && !b.deleted;
+export const docName = (b: Pick<Bill, "bill_type">) =>
+  b.bill_type === "gst" ? "Tax invoice" : b.bill_type === "challan" ? "Delivery challan" : b.bill_type === "return" ? "Credit note" : "Estimate";
+export const docShort = (b: Pick<Bill, "bill_type">) =>
+  b.bill_type === "gst" ? "GST" : b.bill_type === "challan" ? "CH" : b.bill_type === "return" ? "CN" : "EST";
+async function nextNo(t: BillType, src?: BillType) {
+  const series = seriesOf(t, src), f = fy(), cc = await counterCode();
   const key = `seq_${series}_${f}_${cc}`;
   const n = (await getSetting<number>(key, 0)) + 1;
   await setSetting(key, n);
@@ -58,7 +69,8 @@ export function totals(b: Bill, shopState = ""): Bill {
   const box_count = new Set(items.map(l => l.box_no)).size;
   // a discount can never exceed the goods on the bill, so NET can't go negative
   const discount = Math.min(gross, Math.max(0, b.discount_pct ? Math.round(gross * b.discount_pct / 100) : b.discount));
-  const rate = b.bill_type === "gst" ? b.gst_rate : 0;
+  // a credit note against a tax invoice reverses its GST; estimates, challans and their returns carry none
+  const rate = b.bill_type === "gst" || (b.bill_type === "return" && b.src_type === "gst") ? b.gst_rate : 0;
   let base = gross - discount + b.packing, gst = 0;
   if (rate) {
     if (b.gst_mode === "inclusive") { const ex = Math.round(base * 100 / (100 + rate)); gst = base - ex; base = ex; }
@@ -68,10 +80,11 @@ export function totals(b: Bill, shopState = ""): Bill {
   const igst = inter ? gst : 0, cgst = inter ? 0 : Math.floor(gst / 2), sgst = inter ? 0 : gst - Math.floor(gst / 2);
   const raw = base + gst;
   const net = Math.round(raw / 100) * 100;
-  const paid = b.payments.filter(p => p.mode !== "credit").reduce((a, p) => a + p.amount, 0);
+  const paid = b.bill_type === "challan" ? 0 : b.payments.filter(p => p.mode !== "credit").reduce((a, p) => a + p.amount, 0);
   return { ...b, items, gross, total_qty, box_count, discount, gst, cgst, sgst, igst, adjust: net - raw, net, paid };
 }
-export const due = (b: Pick<Bill, "net" | "advance" | "paid">) => b.net - b.advance - b.paid;
+export const due = (b: Pick<Bill, "net" | "advance" | "paid"> & { bill_type?: BillType }) =>
+  b.bill_type === "challan" ? 0 : b.net - b.advance - b.paid;   // a challan asks for no money
 
 /* ---------------- building bills ---------------- */
 export function newBill(by: string, shop: Shop, t: BillType = "estimate"): Bill {
@@ -91,20 +104,25 @@ export function lineFrom(p: Product, box = 1, pkts = 1): BillLine {
 /* ---------------- saving ---------------- */
 export async function holdBill(b: Bill) { await put("bills", { ...b, status: "hold" }); }
 
-/* Final save: number it, take the pieces off the racks (fullest location first), keep a movement per rack. */
-export async function finalize(b: Bill, shopState: string, customerName = ""): Promise<Bill> {
+/* Final save: number it, take the pieces off the racks (fullest location first), keep a movement per rack.
+   Lines marked stock_done already left on another document (merged sources, challans, a split) and are skipped.
+   `after` runs inside the same transaction, so linked changes (e.g. marking merged sources) save all-or-nothing. */
+export async function finalize(b: Bill, shopState: string, customerName = "", after?: (saved: Bill) => Promise<void>): Promise<Bill> {
   const t = totals(b, shopState);
-  const num = t.no ? { no: t.no, series: t.series } : await nextNo(t.bill_type);
+  const num = t.no ? { no: t.no, series: t.series } : await nextNo(t.bill_type, t.src_type);
   const bill: Bill = { ...t, ...num, status: "final", at: t.status === "hold" ? now() : t.at };
   const bucket = new Set((await db.locations.filter(l => l.kind === "bucket").toArray()).map(l => l.id));
   await db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock, db.products], async () => {
     const before = await db.bills.get(bill.id);
     await put("bills", bill);
-    if (before?.status === "final") await setTagsSold((before.rfid_tags || []).filter(x => !(bill.rfid_tags || []).includes(x)), null); // edited: dropped tags are back
-    await setTagsSold(bill.rfid_tags, bill.no);              // these tagged pieces have left the shop
-    if (bill.converted_from) return;                         // stock already left with the estimate
+    if (bill.bill_type !== "return") {
+      if (before?.status === "final") await setTagsSold((before.rfid_tags || []).filter(x => !(bill.rfid_tags || []).includes(x)), null); // edited: dropped tags are back
+      await setTagsSold(bill.rfid_tags, bill.no);            // these tagged pieces have left the shop
+    }
+    if (after) await after(bill);
+    if (bill.converted_from || bill.bill_type === "return") return; // stock already left with the estimate / comes back via saveReturn
     for (const l of bill.items) {
-      if (!l.product_id || l.qty <= 0) continue;
+      if (!l.product_id || l.qty <= 0 || l.stock_done) continue;
       let left = l.qty;
       const cells = (await db.stock.where("product_id").equals(l.product_id).toArray())
         .filter(c => c.qty > 0 && !bucket.has(c.loc_id)).sort((a, z) => z.qty - a.qty);
@@ -116,18 +134,41 @@ export async function finalize(b: Bill, shopState: string, customerName = ""): P
           person_type: "customer", person_name: customerName || bill.party_name, by_staff: bill.by_staff, note: bill.no,
           device: deviceId(), ref_bill: bill.id, at: bill.at, updated_at: now() };
         await put("movements", m);
-        if (x.loc) { const k = l.product_id + "|" + x.loc; const c = await db.stock.get(k); await db.stock.put({ key: k, product_id: l.product_id, loc_id: x.loc, qty: (c?.qty || 0) - x.q }); }
+        if (x.loc) await bumpStock(l.product_id, x.loc, -x.q);
       }
     }
   });
   return bill;
 }
+export async function bumpStock(product_id: string, loc: string, delta: number) {
+  const k = product_id + "|" + loc; const c = await db.stock.get(k);
+  await db.stock.put({ key: k, product_id, loc_id: loc, qty: (c?.qty || 0) + delta });
+}
 
-/* Cancel: the bill stays on record (marked void with a reason); pieces go back to the racks they came from. */
+/* Cancel: the bill stays on record (marked void with a reason); pieces go back to the racks they came from.
+   A credit note being cancelled takes its returned pieces off the racks again.
+   A merged invoice being cancelled gives its source bills / challans back (they hold their own stock). */
 export async function voidBill(b: Bill, reason: string, by: string) {
   await db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock, db.products], async () => {
+    const stamp = `${reason} — by ${by} on ${new Date().toLocaleString("en-IN")}`;
+    if (b.bill_type === "return") {
+      await put("bills", { ...b, status: "void", void_reason: stamp });
+      const ins = await db.movements.where("ref_bill").equals(b.id).filter(m => m.kind === "return" && !m.deleted).toArray();
+      for (const m of ins) {
+        await put("movements", { ...m, id: uid(), kind: "sale", from_loc: m.to_loc, to_loc: null, note: "Void " + b.no, at: now(), updated_at: now(), by_staff: by } as Movement);
+        if (m.to_loc) await bumpStock(m.product_id, m.to_loc, -m.qty);
+      }
+      return;
+    }
     await setTagsSold(b.rfid_tags, null);                   // goods back on the racks: tags are live again
-    await put("bills", { ...b, status: "void", void_reason: `${reason} — by ${by} on ${new Date().toLocaleString("en-IN")}` });
+    await put("bills", { ...b, status: "void", void_reason: stamp });
+    for (const id of b.merged_from || []) {                  // un-merge: sources come back as they were
+      const s = await db.bills.get(id);
+      if (!s || s.status !== "merged" || s.merged_into !== b.id) continue;
+      const back: Bill = { ...s, status: s.no ? "final" : "hold", merged_into: undefined, merged_into_no: undefined };
+      await put("bills", back);
+      if (back.status === "final") await setTagsSold(back.rfid_tags, back.no);
+    }
     const src = b.converted_from || b.id;
     if (b.converted_from) { // voiding a converted GST bill: the estimate's stock is still out, return it too
       const est = await db.bills.get(b.converted_from);
@@ -137,7 +178,7 @@ export async function voidBill(b: Bill, reason: string, by: string) {
     for (const m of outs) {
       const r: Movement = { ...m, id: uid(), kind: "return", from_loc: null, to_loc: m.from_loc, note: "Void " + b.no, at: now(), updated_at: now(), by_staff: by };
       await put("movements", r);
-      if (m.from_loc) { const k = m.product_id + "|" + m.from_loc; const c = await db.stock.get(k); await db.stock.put({ key: k, product_id: m.product_id, loc_id: m.from_loc, qty: (c?.qty || 0) + m.qty }); }
+      if (m.from_loc) await bumpStock(m.product_id, m.from_loc, m.qty);
     }
   });
 }
@@ -156,22 +197,23 @@ export function newParty(name = "", phone = ""): Party {
   return { id: uid(), kind: "customer", name, alt_name: "", phone, gstin: "", address: "", city: "", state: "", pin: "",
     tier: "wholesale", credit_limit: 0, notes: "", updated_at: now() };
 }
+/* What the customer owes on bills: unpaid sales minus credit notes not refunded in cash (opening balance and receipts are in ledger.ts) */
 export async function partyDue(party_id: string) {
-  const bs = await db.bills.where("party_id").equals(party_id).filter(b => b.status === "final" && !b.deleted && (isOpen() || b.bill_type !== "estimate")).toArray();
-  return bs.reduce((a, b) => a + due(b), 0);
+  const bs = await db.bills.where("party_id").equals(party_id).filter(b => b.status === "final" && !b.deleted && (isOpen() || !isEstimate(b))).toArray();
+  return bs.reduce((a, b) => a + (isSale(b) ? due(b) : isReturn(b) ? -(b.net - b.paid) : 0), 0);
 }
 
 /* ---------------- sharing ---------------- */
 export const normPhone = (p: string) => { const d = (p || "").replace(/\D/g, ""); return d.length === 10 ? "91" + d : d; };
 export function billText(b: Bill, shop: Shop) {
-  const L = [`*${shop.name}*`, `${b.bill_type === "gst" ? "Tax Invoice" : "Estimate"} ${b.no}`, new Date(b.at).toLocaleString("en-IN"), ""];
+  const L = [`*${shop.name}*`, `${docName(b)} ${b.no}${b.return_of_no ? " (against " + b.return_of_no + ")" : ""}`, new Date(b.at).toLocaleString("en-IN"), ""];
   b.items.forEach((l, i) => L.push(`${i + 1}. ${[l.item, l.style, l.color].filter(Boolean).join(" ")} — ${l.pkts ? l.pkts + "×" + l.pack + "=" : ""}${l.qty} × ${rupees(l.rate)} = ${rupees(l.amount)}`));
   L.push("", `Pieces: ${b.total_qty} · Boxes: ${b.box_count}`);
   if (b.discount) L.push(`Discount: -${rupees(b.discount)}`);
   if (b.packing) L.push(`Packing: ${rupees(b.packing)}`);
   if (b.gst) L.push(`GST ${b.gst_rate}%: ${rupees(b.gst)}`);
-  L.push(`*Total: ${rupees(b.net)}*`);
-  const d = due(b); if (d > 0) L.push(`Balance due: ${rupees(d)}`);
+  L.push(b.bill_type === "return" ? `*Credit: ${rupees(b.net)}*` : b.bill_type === "challan" ? `*Value: ${rupees(b.net)}* (no payment due on a challan)` : `*Total: ${rupees(b.net)}*`);
+  const d = isSale(b) ? due(b) : 0; if (d > 0) L.push(`Balance due: ${rupees(d)}`);
   if (shop.upi && d > 0) L.push(`Pay by UPI: upi://pay?pa=${encodeURIComponent(shop.upi)}&pn=${encodeURIComponent(shop.name)}&am=${(d / 100).toFixed(2)}&cu=INR`);
   L.push("", "Thank you! 🙏");
   return L.join("\n");
@@ -195,7 +237,7 @@ export async function billImage(b: Bill, shop: Shop): Promise<Blob> {
   if (shop.gstin && b.bill_type === "gst") g.fillText("GSTIN " + shop.gstin, pad, 104);
   let y = 160;
   g.fillStyle = "#241B2E"; g.font = "700 22px sans-serif";
-  g.fillText((b.bill_type === "gst" ? "TAX INVOICE " : "ESTIMATE ") + b.no, pad, y);
+  g.fillText(docName(b).toUpperCase() + " " + b.no, pad, y);
   g.font = "16px sans-serif"; g.fillStyle = "#6B6175";
   g.fillText(new Date(b.at).toLocaleString("en-IN"), pad, y += 26);
   if (b.party_name) g.fillText("To: " + b.party_name + (b.party_phone ? " · " + b.party_phone : ""), pad, y += 24);
@@ -217,8 +259,8 @@ export async function billImage(b: Bill, shop: Shop): Promise<Blob> {
   if (b.discount) row("Discount", "-" + rupees(b.discount));
   if (b.packing) row("Packing", rupees(b.packing));
   if (b.gst) row(`GST ${b.gst_rate}%`, rupees(b.gst));
-  row("TOTAL", rupees(b.net), true);
-  const d = due(b); if (d > 0) row("Balance due", rupees(d), true);
+  row(b.bill_type === "return" ? "CREDIT" : b.bill_type === "challan" ? "VALUE" : "TOTAL", rupees(b.net), true);
+  const d = isSale(b) ? due(b) : 0; if (d > 0) row("Balance due", rupees(d), true);
   g.fillStyle = "#A07E2E"; g.font = "italic 16px Georgia"; g.fillText("Thank you for shopping with us", pad, y += 44);
   return await new Promise<Blob>(r => c.toBlob(x => r(x!), "image/png"));
 }
@@ -244,7 +286,7 @@ export async function lastBills(n = 50) { return db.bills.orderBy("at").reverse(
 export async function deleteEstimates(bills: Bill[], returnStock: boolean, by: string) {
   let n = 0;
   for (const b of bills) {
-    if (b.bill_type !== "estimate" || b.deleted) continue;
+    if (b.bill_type !== "estimate" || b.deleted || b.status === "merged" || b.status === "converted") continue; // its goods live on in another invoice
     await db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock, db.products], async () => {
       if (returnStock && b.status === "final") {
         await setTagsSold(b.rfid_tags, null);

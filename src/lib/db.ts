@@ -93,10 +93,13 @@ export interface Receipt extends Row {
 export interface BillLine {
   id: string; product_id?: string; code: string; item: string; type: string; style: string; color: string;
   box_no: number; pack: number; pkts: number; qty: number; rate: number; disc: string; amount: number;
+  stock_done?: 1;          // these pieces already left the racks on another document (merged / challan / split)
+  src_line?: string;       // credit note: the line of the original bill being returned
 }
-export interface Payment { mode: "cash" | "upi" | "card" | "bank" | "credit"; amount: number; ref?: string }
-export type BillType = "gst" | "estimate";
-export type BillStatus = "hold" | "final" | "void" | "converted";
+export interface Payment { mode: "cash" | "upi" | "card" | "bank" | "credit"; amount: number; ref?: string; at?: string }
+/* gst = tax invoice · estimate = private bill · challan = delivery challan (goods out, no money) · return = credit note */
+export type BillType = "gst" | "estimate" | "challan" | "return";
+export type BillStatus = "hold" | "final" | "void" | "converted" | "merged";
 
 export interface Bill extends Row {
   no: string; series: string; bill_type: BillType; status: BillStatus;
@@ -109,6 +112,10 @@ export interface Bill extends Row {
   photo_id?: string; photo_url?: string; voice_id?: string;
   converted_from?: string; converted_to?: string; void_reason?: string;
   rfid_tags?: string[];    // RFID tags read onto this bill — each counts once, marked sold on save
+  merged_into?: string; merged_into_no?: string; // this bill/challan was combined into another invoice
+  merged_from?: string[];  // the bills / challans this invoice was made from
+  return_of?: string; return_of_no?: string;     // credit note: the bill the goods came back from
+  src_type?: BillType;     // credit note: type of that bill (an estimate's return stays private)
   device: string; by_staff: string; at: string;
 }
 
@@ -188,6 +195,8 @@ class RungnnaDB extends Dexie {
     this.version(6).stores({
       products: "id, code, *barcodes, style, item, item_code, color, model, vendor_id, updated_at, created_at",
     });
+    // credit notes find their bill, merged sources find their invoice
+    this.version(7).stores({ bills: "id, no, status, bill_type, party_id, at, updated_at, return_of, merged_into" });
   }
 }
 
