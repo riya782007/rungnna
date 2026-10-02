@@ -8,7 +8,7 @@ import { rfidDefaults } from "./rfid";
    - Conflicts: last write wins by updated_at for master data; movements are append-only,
      so two phones recording at the same time can never overwrite each other. */
 
-const TABLES = ["config", "staff", "locations", "parties", "products", "movements", "bills", "receipts", "purchases", "voice_notes"] as const;
+const TABLES = ["config", "staff", "locations", "parties", "products", "movements", "bills", "receipts", "purchases", "purchase_returns", "vouchers", "fiscal_year_closes", "voice_notes"] as const;
 const PHOTO_TABLES = ["products", "movements", "bills", "parties", "purchases"];
 type T = (typeof TABLES)[number];
 

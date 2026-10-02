@@ -26,6 +26,12 @@ export interface Product extends Row {
   pack?: number;           // pieces per packet (the X12PCS on the label)
   sold_tags?: Record<string, string>; // RFID tag (also in barcodes) → bill no. it left on
   cost?: number;           // last purchase cost per piece, paise (owner/manager only)
+  vendor_design_code?: string;
+  collection?: string;
+  material?: string;
+  hsn?: string;
+  wholesale_rate?: number; // paise
+  retail_rate?: number;    // paise
   /* --- product-master keying & pricing (spec: SKU/Model + Vendor) --- */
   model?: string;          // vendor's model / article number (may differ from our style)
   vendor_id?: string;      // Party id (kind:"supplier") this piece was bought from
@@ -104,6 +110,7 @@ export type BillStatus = "hold" | "final" | "void" | "converted" | "merged";
 export interface Bill extends Row {
   no: string; series: string; bill_type: BillType; status: BillStatus;
   party_id?: string; party_name: string; party_phone: string; party_gstin: string; party_state: string;
+  price_level?: "wholesale" | "retail" | "dealer";
   salesman: string; box_count: number; total_qty: number;
   gross: number; discount: number; discount_pct: number; packing: number; adjust: number;
   gst_mode: "exclusive" | "inclusive"; gst_rate: number; gst: number; cgst: number; sgst: number; igst: number;
@@ -125,6 +132,26 @@ export interface Purchase extends Row {
   no: string; status: "draft" | "final"; supplier_id?: string; supplier_name: string; supplier_bill: string; loc_id: string;
   items: PurchaseLine[]; total_qty: number; total_cost: number; note: string; photo_id?: string; photo_url?: string;
   rfid_tags?: string[];    // RFID tags read in this stock-in — each counts once
+  device: string; by_staff: string; at: string;
+}
+
+export interface PurchaseReturnLine { id: string; product_id: string; code: string; item: string; style: string; color: string; qty: number; cost: number; loc_id: string }
+export interface PurchaseReturn extends Row {
+  no: string; series: string; supplier_id?: string; supplier_name: string; purchase_id?: string; purchase_no?: string;
+  items: PurchaseReturnLine[]; total_qty: number; total_cost: number; note: string; device: string; by_staff: string; at: string;
+}
+
+export type VoucherType = "payment" | "receipt" | "expense" | "journal";
+export type MoneyMode = "cash" | "upi" | "card" | "bank" | "cheque" | "credit";
+export type ExpenseCategory = "rent" | "salary" | "electricity" | "transport" | "tea" | "other";
+export interface Voucher extends Row {
+  no: string; series: string; type: VoucherType; at: string; mode: MoneyMode; amount: number;
+  party_id?: string; party_name?: string; party_kind?: Party["kind"]; category?: ExpenseCategory; note: string;
+  debit_account?: string; credit_account?: string; device: string; by_staff: string;
+}
+
+export interface FiscalYearClose extends Row {
+  fy: string; closed_upto: string; customer_balances: Record<string, number>; supplier_balances: Record<string, number>;
   device: string; by_staff: string; at: string;
 }
 
@@ -164,6 +191,9 @@ class RungnnaDB extends Dexie {
   config!: Table<Config, string>;
   receipts!: Table<Receipt, string>;
   purchases!: Table<Purchase, string>;
+  purchase_returns!: Table<PurchaseReturn, string>;
+  vouchers!: Table<Voucher, string>;
+  fiscal_year_closes!: Table<FiscalYearClose, string>;
 
   constructor() {
     super("rungnna");
@@ -197,6 +227,12 @@ class RungnnaDB extends Dexie {
     });
     // credit notes find their bill, merged sources find their invoice
     this.version(7).stores({ bills: "id, no, status, bill_type, party_id, at, updated_at, return_of, merged_into" });
+    this.version(8).stores({
+      products: "id, code, *barcodes, style, item, item_code, color, model, vendor_id, vendor_design_code, collection, material, hsn, updated_at, created_at",
+      vouchers: "id, no, type, party_id, party_kind, category, at, updated_at",
+      purchase_returns: "id, no, supplier_id, purchase_id, at, updated_at",
+      fiscal_year_closes: "id, fy, closed_upto, at, updated_at",
+    });
   }
 }
 
@@ -219,7 +255,7 @@ export function deviceId(): string {
 }
 
 /* ---- write helpers: every write lands locally first, then queues for the cloud ---- */
-type Syncable = "products" | "locations" | "movements" | "staff" | "parties" | "bills" | "voice_notes" | "config" | "receipts" | "purchases";
+type Syncable = "products" | "locations" | "movements" | "staff" | "parties" | "bills" | "voice_notes" | "config" | "receipts" | "purchases" | "purchase_returns" | "vouchers" | "fiscal_year_closes";
 
 export async function put<T extends Row>(table: Syncable, row: T) {
   row.updated_at = now();
