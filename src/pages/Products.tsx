@@ -120,10 +120,15 @@ function ProductDetail({ id }: { id: string }) {
               <input className="in" list={"pd-sizes-" + p.id} value={p.size || ""} onChange={e => set("size", e.target.value || undefined)} />
               <datalist id={"pd-sizes-" + p.id}>{(tax?.sizes || []).map(s => <option key={s} value={s} />)}</datalist></label>
             <div style={{ gridColumn: "1/-1" }}><DeadToggle value={p.tk} onChange={v => set("tk", v)} /></div>
-            <label className="f">Rate ₹<input className="in hi mono" inputMode="decimal" value={p.rate ? String(p.rate / 100) : ""} onChange={e => set("rate", toPaise(e.target.value))} /></label>
+            <label className="f">Wholesale rate ₹<input className="in hi mono" inputMode="decimal" value={(p.wholesale_rate || p.rate) ? String((p.wholesale_rate || p.rate) / 100) : ""} onChange={e => { const v = toPaise(e.target.value); setP({ ...p, wholesale_rate: v, rate: v }); }} /></label>
+            <label className="f">Retail rate ₹<input className="in mono" inputMode="decimal" value={p.retail_rate ? String(p.retail_rate / 100) : ""} onChange={e => set("retail_rate", toPaise(e.target.value))} /></label>
             <label className="f">MRP ₹<input className="in mono" inputMode="decimal" value={p.mrp ? String(p.mrp / 100) : ""} onChange={e => set("mrp", toPaise(e.target.value))} /></label>
             <label className="f">Pieces per packet<input className="in mono" inputMode="numeric" value={p.pack || ""} onChange={e => set("pack", parseInt(e.target.value.replace(/\D/g, "")) || undefined)} /></label>
             <label className="f">Item code (old software)<input className="in mono" inputMode="numeric" value={p.item_code || ""} onChange={e => set("item_code", e.target.value.replace(/\D/g, "") || undefined)} /></label>
+            <label className="f">Vendor design code<input className="in mono" value={p.vendor_design_code || ""} onChange={e => set("vendor_design_code", e.target.value.toUpperCase() || undefined)} /></label>
+            <label className="f">Collection<input className="in" value={p.collection || ""} onChange={e => set("collection", e.target.value || undefined)} /></label>
+            <label className="f">Material<input className="in" value={p.material || ""} onChange={e => set("material", e.target.value || undefined)} /></label>
+            <label className="f">HSN<input className="in mono" value={p.hsn || ""} onChange={e => set("hsn", e.target.value.replace(/\D/g, "") || undefined)} /></label>
           </div>
           <label className="f">Notes<textarea className="in" rows={2} value={p.notes} onChange={e => set("notes", e.target.value)} /></label>
           <div className="xs mut">Scans that open this product: <span className="mono">{p.barcodes.join(" · ")}</span></div>

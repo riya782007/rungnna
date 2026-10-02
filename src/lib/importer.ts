@@ -9,6 +9,8 @@ export const FIELDS: Record<Kind, { key: string; label: string; syn: string[] }[
     { key: "style", label: "Style / design", syn: ["style", "styleno", "design", "designno", "model", "article", "artno", "articleno"] },
     { key: "color", label: "Colour", syn: ["color", "colour", "clr", "shade"] },
     { key: "rate", label: "Sale rate", syn: ["rate", "salerate", "saleprice", "sellingprice", "price", "srate", "sp", "wholesalerate"] },
+    { key: "wholesale_rate", label: "Wholesale rate", syn: ["wholesale", "wholesalerate", "wsp", "tradeprice"] },
+    { key: "retail_rate", label: "Retail rate", syn: ["retail", "retailrate", "rsp", "mrpprice"] },
     { key: "mrp", label: "MRP", syn: ["mrp"] },
     { key: "cost", label: "Cost", syn: ["cost", "purchaserate", "prate", "purchaseprice", "cp", "costprice"] },
     { key: "pack", label: "Pieces per packet", syn: ["pack", "packing", "pcsperpacket", "qtyperpack", "pcspkt", "packsize", "set"] },
@@ -16,6 +18,10 @@ export const FIELDS: Record<Kind, { key: string; label: string; syn: string[] }[
     { key: "category", label: "Category / group", syn: ["category", "group", "itemgroup", "type"] },
     { key: "tk", label: "TK (dead)", syn: ["tk", "dead"] },
     { key: "unit", label: "Unit (PCS / PAIR / SET) — optional", syn: ["unit", "uom", "units", "unitname", "per"] },
+    { key: "vendor_design_code", label: "Vendor design code", syn: ["vendordesign", "vendorcode", "designcode", "supplierdesign", "supdesign"] },
+    { key: "collection", label: "Collection", syn: ["collection", "season", "range"] },
+    { key: "material", label: "Material", syn: ["material", "metal", "base"] },
+    { key: "hsn", label: "HSN", syn: ["hsn", "hsncode", "taxcode"] },
   ],
   parties: [
     { key: "name", label: "Name", syn: ["name", "partyname", "customername", "customer", "party", "accountname", "ledgername", "firm"] },
@@ -25,6 +31,7 @@ export const FIELDS: Record<Kind, { key: string; label: string; syn: string[] }[
     { key: "gstin", label: "GSTIN", syn: ["gstin", "gst", "gstno", "gstnumber"] },
     { key: "address", label: "Address", syn: ["address", "addr", "address1"] },
     { key: "opening_balance", label: "Balance due (₹)", syn: ["balance", "openingbalance", "closingbalance", "due", "outstanding", "amount", "opbal", "clbal"] },
+    { key: "kind", label: "Customer / supplier", syn: ["type", "kind", "partytype", "ledgergroup", "group"] },
   ],
 };
 

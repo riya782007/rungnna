@@ -148,14 +148,14 @@ describe("pdf", () => {
     doc.addPage().text(40, 50, "page two");
     const s = new TextDecoder("latin1").decode(doc.bytes());
     expect(s.startsWith("%PDF-1.4")).toBe(true); expect(s.trimEnd().endsWith("%%EOF")).toBe(true);
-    expect(s).toContain("/Count 2"); expect(s).toContain("(Statement Rs. 1,200 - \\(RAVI\\)) Tj");
+    expect(s).toContain("/Count 2"); expect(s).toContain("<feff00530074006100740065006d0065006e0074002020b90031002c0032003000300020002d0020002800520041005600490029> Tj");
     const xref = Number(s.match(/startxref\n(\d+)/)![1]);
     expect(s.slice(xref, xref + 4)).toBe("xref");
     const offs = [...s.slice(xref).matchAll(/^(\d{10}) 00000 n $/gm)].map(m => Number(m[1]));
     offs.forEach((o, i) => expect(s.slice(o).startsWith(`${i + 1} 0 obj`)).toBe(true));
   });
   it("keeps text inside its column", () => {
-    expect(pdfSafe("राम ₹5")).toBe("??? Rs. 5");
+    expect(pdfSafe("राम ₹5")).toBe("राम ₹5");
     const t = fit("A VERY LONG CUSTOMER NAME THAT WILL NOT FIT", 80, 9);
     expect(t.endsWith("...")).toBe(true); expect(textWidth(t, 9)).toBeLessThanOrEqual(80);
   });

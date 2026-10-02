@@ -102,7 +102,7 @@ export default function Billing({ args }: { args: string[] }) {
         const named = p.item ? { item: p.item, type: p.type } : {}; // a scan that just learned the name updates the line too
         return { ...x, items: x.items.map(l => l.id === same.id ? fixLine(l.pack > 1 ? { ...l, ...named, pkts: l.pkts + pkts } : { ...l, ...named, qty: l.qty + pkts }) : l) };
       }
-      let line = lineFrom(p, box, pkts);
+      let line = lineFrom(p, box, pkts, x.price_level || "wholesale");
       if (pieces) line = fixLine({ ...line, pkts: 0, qty: pieces });
       if (rate) line = fixLine({ ...line, rate: toPaise(rate) });
       return { ...x, items: [...x.items, line] };
@@ -404,7 +404,7 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
   const [photo, setPhoto] = useState<string | undefined>();
   const parties = useLiveQuery(() => db.parties.filter(p => !p.deleted).toArray(), [], []);
   const list = useMemo(() => { const x = q.trim().toLowerCase(); return x ? parties.filter(p => (p.name + " " + p.phone + " " + p.city).toLowerCase().includes(x)).slice(0, 12) : parties.slice(0, 12); }, [q, parties]);
-  const pick = (p: Party) => onPick({ party_id: p.id, party_name: p.name, party_phone: p.phone, party_gstin: p.gstin, party_state: p.state });
+  const pick = (p: Party) => onPick({ party_id: p.id, party_name: p.name, party_phone: p.phone, party_gstin: p.gstin, party_state: p.state, price_level: p.tier });
   const create = async () => {
     const isPhone = /^\+?\d[\d\s]{7,}$/.test(q.trim());
     const name = isPhone ? prompt("Customer name") || "" : q.trim();

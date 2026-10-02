@@ -2,6 +2,7 @@ import { db, put, uid, now, deviceId, getSetting, setSetting, type Bill, type Bi
 import { rupees } from "./format";
 import { isOpen, isEstimate } from "./privacy";
 import { setTagsSold } from "./rfid";
+import { assertUnlocked } from "./finance";
 
 /* ---------------- shop profile (synced to every device) ---------------- */
 export interface Shop {
@@ -90,25 +91,36 @@ export const due = (b: Pick<Bill, "net" | "advance" | "paid"> & { bill_type?: Bi
 export function newBill(by: string, shop: Shop, t: BillType = "estimate"): Bill {
   return {
     id: uid(), no: "", series: "", bill_type: t, status: "hold", party_name: "", party_phone: "", party_gstin: "", party_state: "",
+    price_level: "wholesale",
     salesman: "", box_count: 0, total_qty: 0, gross: 0, discount: 0, discount_pct: 0, packing: 0, adjust: 0,
     gst_mode: shop.gst_mode, gst_rate: shop.gst_rate, gst: 0, cgst: 0, sgst: 0, igst: 0, net: 0, advance: 0, paid: 0,
     remarks: "", payments: [], items: [], device: deviceId(), by_staff: by, at: now(), updated_at: now(),
   };
 }
-export function lineFrom(p: Product, box = 1, pkts = 1): BillLine {
+export function priceFor(p: Product, level: Party["tier"] | Bill["price_level"] = "wholesale") {
+  if (level === "retail") return p.retail_rate || p.mrp || p.rate || p.wholesale_rate || 0;
+  return p.wholesale_rate || p.rate || p.retail_rate || p.mrp || 0;
+}
+export function lineFrom(p: Product, box = 1, pkts = 1, level: Party["tier"] | Bill["price_level"] = "wholesale"): BillLine {
   const pack = p.pack && p.pack > 1 ? p.pack : 1;
   return fixLine({ id: uid(), product_id: p.id, code: p.code, item: p.item || (p.item_code ? "ITEM " + p.item_code : ""), type: p.type, style: p.style, color: p.color,
-    box_no: box, pack, pkts: pack > 1 ? pkts : 0, qty: pack > 1 ? pkts * pack : pkts, rate: p.rate, disc: "", amount: 0 });
+    box_no: box, pack, pkts: pack > 1 ? pkts : 0, qty: pack > 1 ? pkts * pack : pkts, rate: priceFor(p, level), disc: "", amount: 0 });
 }
 
 /* ---------------- saving ---------------- */
-export async function holdBill(b: Bill) { await put("bills", { ...b, status: "hold" }); }
+export async function holdBill(b: Bill) {
+  const before = await db.bills.get(b.id);
+  if (before?.at) await assertUnlocked(before.at);
+  await put("bills", { ...b, status: "hold" });
+}
 
 /* Final save: number it, take the pieces off the racks (fullest location first), keep a movement per rack.
    Lines marked stock_done already left on another document (merged sources, challans, a split) and are skipped.
    `after` runs inside the same transaction, so linked changes (e.g. marking merged sources) save all-or-nothing. */
 export async function finalize(b: Bill, shopState: string, customerName = "", after?: (saved: Bill) => Promise<void>): Promise<Bill> {
   const t = totals(b, shopState);
+  const before0 = await db.bills.get(b.id);
+  if (before0?.at) await assertUnlocked(before0.at);
   const num = t.no ? { no: t.no, series: t.series } : await nextNo(t.bill_type, t.src_type);
   const bill: Bill = { ...t, ...num, status: "final", at: t.status === "hold" ? now() : t.at };
   const bucket = new Set((await db.locations.filter(l => l.kind === "bucket").toArray()).map(l => l.id));
@@ -149,6 +161,7 @@ export async function bumpStock(product_id: string, loc: string, delta: number) 
    A credit note being cancelled takes its returned pieces off the racks again.
    A merged invoice being cancelled gives its source bills / challans back (they hold their own stock). */
 export async function voidBill(b: Bill, reason: string, by: string) {
+  await assertUnlocked(b.at);
   await db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock, db.products], async () => {
     const stamp = `${reason} — by ${by} on ${new Date().toLocaleString("en-IN")}`;
     if (b.bill_type === "return") {

@@ -48,7 +48,9 @@ export default function Import() {
           const name = txt(val(r, "name")).toUpperCase(); if (!name) continue;
           const phone = txt(val(r, "phone")).replace(/\D/g, "").slice(-10);
           const old = existing.find(p => (phone && p.phone === phone) || p.name === name);
+          const kindTxt = txt(val(r, "kind")).toLowerCase();
           const p: Party = { ...(old || newParty(name, phone)), name, phone: phone || old?.phone || "",
+            kind: /sup|vendor|creditor|supplier/.test(kindTxt) ? "supplier" : old?.kind || "customer",
             city: txt(val(r, "city")) || old?.city || "", state: txt(val(r, "state")) || old?.state || "", gstin: txt(val(r, "gstin")).toUpperCase() || old?.gstin || "",
             address: txt(val(r, "address")) || old?.address || "" };
           if (map.opening_balance !== undefined) p.opening_balance = balancePaise(val(r, "opening_balance"));
@@ -83,11 +85,17 @@ export default function Import() {
                 if (item) learn[p.item_code] = { name: item, unit: unit || learn[p.item_code]?.unit || "" };
                 else p = withItemInfo(p, learn[p.item_code] || known[p.item_code]) || p; // no name in this row: use the learned one
               }
-              if (map.rate !== undefined && num(val(r, "rate"))) p.rate = toPaise(num(val(r, "rate")));
+              if (map.rate !== undefined && num(val(r, "rate"))) { p.rate = toPaise(num(val(r, "rate"))); p.wholesale_rate ||= p.rate; }
+              if (map.wholesale_rate !== undefined && num(val(r, "wholesale_rate"))) { p.wholesale_rate = toPaise(num(val(r, "wholesale_rate"))); p.rate = p.wholesale_rate; }
+              if (map.retail_rate !== undefined && num(val(r, "retail_rate"))) p.retail_rate = toPaise(num(val(r, "retail_rate")));
               if (map.mrp !== undefined && num(val(r, "mrp"))) p.mrp = toPaise(num(val(r, "mrp")));
               if (map.cost !== undefined && num(val(r, "cost"))) p.cost = toPaise(num(val(r, "cost")));
               if (map.pack !== undefined && num(val(r, "pack")) > 1) p.pack = Math.round(num(val(r, "pack")));
               if (map.tk !== undefined) p.tk = txt(val(r, "tk")) ? "TK" : "";
+              if (map.vendor_design_code !== undefined) p.vendor_design_code = txt(val(r, "vendor_design_code")).toUpperCase() || p.vendor_design_code;
+              if (map.collection !== undefined) p.collection = txt(val(r, "collection")) || p.collection;
+              if (map.material !== undefined) p.material = txt(val(r, "material")) || p.material;
+              if (map.hsn !== undefined) p.hsn = txt(val(r, "hsn")).replace(/\D/g, "") || p.hsn;
               if (!p.barcodes.includes(p.code)) p.barcodes = [...p.barcodes, p.code];
               await put("products", p); idx.set(key(p), p); old ? updated++ : added++;
               const q = Math.round(num(val(r, "qty")));

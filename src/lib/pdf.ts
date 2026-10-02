@@ -1,15 +1,22 @@
 /* A tiny PDF writer (no library, works offline): A4 pages, Helvetica for words, Courier for figures so
-   amounts line up and right-align exactly. Enough for statements and reports.
-   The built-in PDF fonts only carry Western characters: ₹ is written "Rs." and other scripts become "?". */
+   amounts line up and right-align exactly. Text is emitted as UTF-16BE PDF strings, so ₹ and Hindi names
+   are preserved instead of being rewritten to "Rs." or "?". */
 
 const W = 595.28, H = 841.89;
 type Font = "F1" | "F2" | "F3"; // Helvetica, Helvetica-Bold, Courier
 
 export function pdfSafe(s: string) {
-  return String(s ?? "").replace(/₹\s?/g, "Rs. ").replace(/[–—]/g, "-").replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/…/g, "...")
-    .replace(/[^\x20-\x7E]/g, "?");
+  return String(s ?? "").replace(/[–—]/g, "-").replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/…/g, "...");
 }
-const esc = (s: string) => pdfSafe(s).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+const hexText = (s: string) => {
+  const bytes = [0xfe, 0xff];
+  for (const ch of pdfSafe(s)) {
+    const cp = ch.codePointAt(0)!;
+    if (cp > 0xffff) { const u = cp - 0x10000; const hi = 0xd800 + (u >> 10), lo = 0xdc00 + (u & 1023); bytes.push(hi >> 8, hi & 255, lo >> 8, lo & 255); }
+    else bytes.push(cp >> 8, cp & 255);
+  }
+  return "<" + bytes.map(b => b.toString(16).padStart(2, "0")).join("") + ">";
+};
 
 /* Helvetica advance widths (per 1000 em) for printable ASCII, so text can be measured and truncated */
 const HW = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
@@ -37,7 +44,7 @@ export class Pdf {
     const size = o.size ?? 10, font = o.font ?? "F1";
     const w = o.align && o.align !== "left" ? textWidth(s, size, font) : 0;
     const x0 = o.align === "right" ? x - w : o.align === "center" ? x - w / 2 : x;
-    this.cur.push(`${o.gray !== undefined ? o.gray.toFixed(2) + " g " : ""}BT /${font} ${size} Tf ${x0.toFixed(2)} ${(H - y).toFixed(2)} Td (${esc(s)}) Tj ET${o.gray !== undefined ? " 0 g" : ""}`);
+    this.cur.push(`${o.gray !== undefined ? o.gray.toFixed(2) + " g " : ""}BT /${font} ${size} Tf ${x0.toFixed(2)} ${(H - y).toFixed(2)} Td ${hexText(s)} Tj ET${o.gray !== undefined ? " 0 g" : ""}`);
     return this;
   }
   line(x1: number, y1: number, x2: number, y2: number, width = 0.5, gray = 0.75) {
