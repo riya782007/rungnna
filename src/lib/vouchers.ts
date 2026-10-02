@@ -25,6 +25,7 @@ export async function saveVoucher(input: {
   party?: Party;
   category?: ExpenseCategory;
   note?: string;
+  ref?: string;
   by: string;
   at?: string;
   debit_account?: string;
@@ -45,6 +46,7 @@ export async function saveVoucher(input: {
     party_kind: input.party?.kind,
     category: input.category,
     note: input.note || "",
+    ref: input.ref || "",
     debit_account: input.debit_account,
     credit_account: input.credit_account,
     device: deviceId(),

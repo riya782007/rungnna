@@ -1,3 +1,4 @@
+import { inStore, storeStock, currentStore, MAIN_STORE } from "./stores";
 import { db, put, uid, now, deviceId, getSetting, setSetting, type Bill, type Party, type Payment, type Receipt } from "./db";
 import { due, fy, counterCode, isSale, isReturn, type Shop } from "./billing";
 import { rupees } from "./format";
@@ -9,9 +10,9 @@ import { assertUnlocked } from "./finance";
 export type Entry = { at: string; kind: "opening" | "bill" | "paid" | "receipt" | "return" | "refund"; ref: string; id?: string; debit: number; credit: number; balance: number; note?: string };
 
 /* sales that make the customer owe money (not challans, not bills merged into another invoice) */
-const counted = (b: Bill) => b.status === "final" && !b.deleted && isSale(b) && (isOpen() || !isEstimate(b));
+const counted = (b: Bill) => inStore(b) && b.status === "final" && !b.deleted && isSale(b) && (isOpen() || !isEstimate(b));
 /* credit notes reduce what they owe; a refund paid out on one puts it back */
-const creditNote = (b: Bill) => b.status === "final" && !b.deleted && isReturn(b) && (isOpen() || !isEstimate(b));
+const creditNote = (b: Bill) => inStore(b) && b.status === "final" && !b.deleted && isReturn(b) && (isOpen() || !isEstimate(b));
 /* while estimates are locked, the part of a receipt that went to an estimate is left out too */
 const visibleAmount = (r: Receipt) => (isOpen() ? r.amount : r.amount - r.allocations.filter(a => /^EST\//.test(a.bill_no)).reduce((x, a) => x + a.amount, 0));
 const fromReceipt = (p: Payment) => (p.ref || "").startsWith("RCPT");
@@ -19,7 +20,7 @@ const fromReceipt = (p: Payment) => (p.ref || "").startsWith("RCPT");
 export async function ledger(party: Party): Promise<{ entries: Entry[]; balance: number; openingLeft: number }> {
   const [all, rcpts] = await Promise.all([
     db.bills.where("party_id").equals(party.id).toArray(),
-    db.receipts.where("party_id").equals(party.id).filter(r => !r.deleted).toArray(),
+    db.receipts.where("party_id").equals(party.id).filter(r => inStore(r) && !r.deleted).toArray(),
   ]);
   const raw: Omit<Entry, "balance">[] = [];
   if (party.opening_balance) raw.push({ at: "0000", kind: "opening", ref: "Opening balance", debit: Math.max(0, party.opening_balance), credit: Math.max(0, -party.opening_balance) });
@@ -42,11 +43,14 @@ export async function ledger(party: Party): Promise<{ entries: Entry[]; balance:
 }
 
 /* Receive money: clears the opening balance first, then the oldest unpaid bills. Anything extra stays as advance. */
-export async function receive(party: Party, amount: number, mode: Payment["mode"], note: string, by: string): Promise<Receipt> {
-  await assertUnlocked(now());
-  const cc = await counterCode(); const key = `seq_RC_${fy()}_${cc}`;
+export async function receive(party: Party, amount: number, mode: Payment["mode"], note: string, by: string, at = now()): Promise<Receipt> {
+  return db.transaction("rw", [db.bills, db.receipts, db.settings, db.stores, db.config, db.outbox], async () => {
+  await assertUnlocked(at);
+  if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error("Enter a positive amount");
+  const year = fy(new Date(at));
+  const cc = await counterCode(); const key = `seq_RC_${year}_${cc}`;
   const n = (await getSetting<number>(key, 0)) + 1; await setSetting(key, n);
-  const no = `RC/${fy()}/${cc}-${String(n).padStart(4, "0")}`;
+  const no = `RC/${year}/${cc}-${String(n).padStart(4, "0")}`;
   const { openingLeft } = await ledger(party);
   let left = amount;
   const opening_part = Math.min(left, openingLeft); left -= opening_part;
@@ -59,13 +63,14 @@ export async function receive(party: Party, amount: number, mode: Payment["mode"
       const d = due(b); if (d <= 0) continue;
       const a = Math.min(d, left); left -= a;
       allocations.push({ bill_id: b.id, bill_no: b.no, amount: a });
-      await put("bills", { ...b, payments: [...b.payments, { mode, amount: a, ref: "RCPT " + no, at: now() }], paid: b.paid + a });
+      await put("bills", { ...b, payments: [...b.payments, { mode, amount: a, ref: "RCPT " + no, at }], paid: b.paid + a });
     }
     const r: Receipt = { id: uid(), no, party_id: party.id, party_name: party.name, amount, mode, note, allocations, opening_part, unallocated: left,
-      device: deviceId(), by_staff: by, at: now(), updated_at: now() };
+      device: deviceId(), by_staff: by, at, updated_at: now() };
     rec = await put("receipts", r);
   });
   return rec;
+  });
 }
 
 export function statementText(party: Party, entries: Entry[], balance: number, shop: Shop) {
@@ -81,7 +86,7 @@ export function statementText(party: Party, entries: Entry[], balance: number, s
 
 /* Balances for every customer at once (list screens). */
 export async function balances(): Promise<Map<string, number>> {
-  const [parties, bills, rcpts] = await Promise.all([db.parties.toArray(), db.bills.filter(counted).toArray(), db.receipts.filter(r => !r.deleted).toArray()]);
+  const [parties, bills, rcpts] = await Promise.all([db.parties.toArray(), db.bills.filter(counted).toArray(), db.receipts.filter(r => inStore(r) && !r.deleted).toArray()]);
   const m = new Map<string, number>();
   parties.forEach(p => m.set(p.id, p.opening_balance || 0));
   const cns = await db.bills.filter(creditNote).toArray();
