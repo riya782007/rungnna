@@ -98,7 +98,9 @@ export async function finalize(b: Bill, shopState: string, customerName = ""): P
   const bill: Bill = { ...t, ...num, status: "final", at: t.status === "hold" ? now() : t.at };
   const bucket = new Set((await db.locations.filter(l => l.kind === "bucket").toArray()).map(l => l.id));
   await db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock, db.products], async () => {
+    const before = await db.bills.get(bill.id);
     await put("bills", bill);
+    if (before?.status === "final") await setTagsSold((before.rfid_tags || []).filter(x => !(bill.rfid_tags || []).includes(x)), null); // edited: dropped tags are back
     await setTagsSold(bill.rfid_tags, bill.no);              // these tagged pieces have left the shop
     if (bill.converted_from) return;                         // stock already left with the estimate
     for (const l of bill.items) {

@@ -1,16 +1,27 @@
 import { db, put, type Product } from "./db";
 
-/* UHF RFID readers in USB keyboard (HID) mode "type" the tag's EPC and press Enter — exactly like a
-   barcode gun, so useScannerGun / the scan boxes already receive them. A tag is told apart from a
-   printed label by its shape: a 96- or 128-bit EPC in hex (24–32 hex digits). Readers may add
-   spaces, dashes or colons between bytes; those are dropped. */
+/* UHF RFID readers in USB keyboard (HID) mode "type" the tag's EPC and press Enter (or Tab) — exactly
+   like a barcode gun, so useScannerGun / the scan boxes already receive them. A tag is told apart from
+   a printed label by its shape: hex, 64–256 bits (16–64 hex digits, whole 16-bit words) — EPC-96 is
+   24 digits, EPC-128 / TID 32. Readers may add a label ("EPC:", "TID="), spaces, dashes, colons or a
+   "0x"; those are dropped. All-digit strings shorter than 24 are left alone: those are EAN/ITF barcodes. */
 
 export function normTag(raw: string): string {
-  return String(raw ?? "").trim().toUpperCase().replace(/[\s:-]/g, "");
+  return String(raw ?? "").trim().toUpperCase()
+    .replace(/^(EPC|TID|TAG|UII)\s*[:=#]?\s*/, "").replace(/^0X/, "").replace(/[\s:.-]/g, "");
 }
 export function isRfidTag(raw: string): boolean {
   const t = normTag(raw);
-  return /^[0-9A-F]+$/.test(t) && t.length >= 24 && t.length <= 32 && t.length % 4 === 0;
+  if (!/^[0-9A-F]+$/.test(t) || t.length < 16 || t.length > 64 || t.length % 4 !== 0) return false;
+  return t.length >= 24 || /[A-F]/.test(t);
+}
+
+/* Cloud sync sends every row of a batch with the same columns; rows saved before RFID existed lack
+   these fields and would go up as null into NOT NULL columns. Fill them in before upload. */
+export function rfidDefaults<R extends Record<string, any>>(table: string, row: R): R {
+  if (table === "products" && !row.sold_tags) return { ...row, sold_tags: {} };
+  if ((table === "bills" || table === "purchases") && !Array.isArray(row.rfid_tags)) return { ...row, rfid_tags: [] };
+  return row;
 }
 
 /* One tag counts once per bill / stock-in. Keeps the order tags were first read. */
@@ -23,6 +34,18 @@ export class TagSet {
   delete(raw: string) { return this.seen.delete(normTag(raw)); }
   get size() { return this.seen.size; }
   list() { return [...this.seen]; }
+}
+
+/* A reader in continuous mode repeats the same tag many times a second. Warn about an unlinked tag
+   once, then stay quiet about it for a while (but notice it again after it has been linked). */
+export class Recent {
+  private at = new Map<string, number>();
+  constructor(private ms = 8000) {}
+  first(key: string, now = Date.now()): boolean {
+    const k = normTag(key), t = this.at.get(k);
+    this.at.set(k, now);
+    return t === undefined || now - t > this.ms;
+  }
 }
 
 /* Link a tag to a product: it joins the product's barcodes (so findByScan finds it), leaves any
@@ -67,13 +90,14 @@ export interface CountReport { rows: CountRow[]; unknown: string[]; missing: num
 /* Pure: expected pieces per product in the rack, the tags read, and every product (to resolve tags).
    A sold tag that turns up is listed under its product as sold — it is not counted as found stock. */
 export function countReport(expected: Map<string, number>, reads: string[], products: Pick<Product, "id" | "barcodes" | "sold_tags" | "deleted">[]): CountReport {
+  const byId = new Map(products.map(p => [p.id, p]));
   const byTag = new Map<string, Pick<Product, "id" | "barcodes" | "sold_tags" | "deleted">>();
   for (const p of products) if (!p.deleted) for (const b of p.barcodes) if (isRfidTag(b)) byTag.set(normTag(b), p);
   const rows = new Map<string, CountRow>();
   const row = (id: string) => {
     let r = rows.get(id);
     if (!r) {
-      const p = products.find(x => x.id === id);
+      const p = byId.get(id);
       const tagged = p ? p.barcodes.filter(b => isRfidTag(b) && !p.sold_tags?.[normTag(b)]).length : 0;
       r = { product_id: id, expected: expected.get(id) || 0, found: 0, tagged, sold: [] };
       rows.set(id, r);

@@ -1,13 +1,14 @@
 import { db, put, uid, now, deviceId, getSetting, type Product } from "./db";
 import { parseLabel, newCode, type Parsed, type Pattern } from "./parse";
 import { toPaise } from "./format";
+import { isRfidTag, normTag } from "./rfid";
 
 export async function patterns(): Promise<Pattern[]> { return getSetting<Pattern[]>("patterns", []); }
 
 /* Find the product a scanned label belongs to. Exact raw match first, then our code,
    then the decoded style+colour (so a re-printed old label still finds the same product). */
 export async function findByScan(raw: string, parsed?: Parsed): Promise<Product | undefined> {
-  const r = raw.trim();
+  const r = isRfidTag(raw) ? normTag(raw) : raw.trim();   // RFID tags are stored in one canonical form
   let p = await db.products.where("barcodes").equals(r).first();
   if (p && !p.deleted) return p;
   p = await db.products.where("code").equals(r).first();

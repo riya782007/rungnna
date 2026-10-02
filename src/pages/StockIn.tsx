@@ -9,7 +9,7 @@ import { can } from "../lib/roles";
 import { rupees, toPaise, when } from "../lib/format";
 import { CameraScanner, useScannerGun } from "../components/Scanner";
 import { LinkRfid } from "../components/LinkRfid";
-import { isRfidTag, normTag, TagSet } from "../lib/rfid";
+import { isRfidTag, normTag, TagSet, Recent } from "../lib/rfid";
 import { Head, LocationSelect, PhotoButton, Modal, LOC_PREFIX, useLocations } from "../components/common";
 import { parseRackScan } from "../lib/rackLabel";
 import { Icon } from "../components/Icon";
@@ -37,6 +37,7 @@ function StockInSession() {
   const box = useRef<HTMLInputElement>(null);
   /* RFID: one tag counts once per stock-in */
   const tagsRef = useRef(new TagSet());
+  const unlinked = useRef(new Recent());
   useEffect(() => { tagsRef.current = new TagSet(p?.rfid_tags || []); }, [p?.id]);
   useScannerGun(c => onCode(c), { enabled: !rfid && !supOpen });
   const products = useLiveQuery(() => db.products.filter(x => !x.deleted).toArray(), [], []);
@@ -71,7 +72,11 @@ function StockInSession() {
       const tag = normTag(r); setQ("");
       if (!tagsRef.current.add(tag)) return;               // the reader saw it again: still one piece
       const tp = await findByScan(tag);
-      if (!tp) { tagsRef.current.delete(tag); beep(false); toast("RFID tag not linked to a product — tap Link RFID tag", true); return; }
+      if (!tp) {
+        tagsRef.current.delete(tag);
+        if (unlinked.current.first(tag)) { beep(false); toast("RFID tag not linked to a product — tap Link RFID tag", true); }
+        return;
+      }
       beep(true); add(await fillFromItemCode(tp));
       setP(x => x && { ...x, rfid_tags: [...(x.rfid_tags || []), tag] });
       return;
@@ -113,7 +118,7 @@ function StockInSession() {
               <div className="wedge grow">
                 <Icon n="scan" size={20} />
                 <input ref={box} autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Scan packet label (gun or camera)"
-                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); onCode(q); } }} />
+                  onKeyDown={e => { if (e.key === "Enter" || (e.key === "Tab" && isRfidTag(q))) { e.preventDefault(); onCode(q); } }} />
               </div>
               <button className={"btn " + (cam ? "p" : "")} onClick={() => { setCam(!cam); setSetting("stockin_cam", !cam); }}><Icon n="camera" size={18} />{cam ? "Camera on" : "Camera"}</button>
               <button className="btn" onClick={() => setRfid(true)}>Link RFID tag</button>

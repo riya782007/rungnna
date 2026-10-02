@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { db, getSetting, setSetting, rebuildStock, now } from "./db";
+import { rfidDefaults } from "./rfid";
 
 /* Local-first sync.
    - Every save goes to IndexedDB + an outbox row, so the shop never waits on the internet.
@@ -100,8 +101,8 @@ async function uploadVoice(c: SupabaseClient) {
   }
 }
 
-const strip = (t: T, r: any) => {
-  const { photo_id, ...rest } = r;
+const strip = (t: T, r0: any) => {
+  const { photo_id, ...rest } = rfidDefaults(t, r0);
   if (PHOTO_TABLES.includes(t)) return { ...rest, photo_id: photo_id || null };
   return rest;
 };

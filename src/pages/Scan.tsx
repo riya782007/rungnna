@@ -6,6 +6,7 @@ import { findByScan, fromParsed, saveProduct, patterns, label, DEFAULT_ITEMS, DE
 import { CameraScanner, WedgeInput } from "../components/Scanner";
 import { LocationSelect, PhotoButton, Thumb, Head, LOC_PREFIX, locName, useLocations, DeadToggle } from "../components/common";
 import { parseRackScan } from "../lib/rackLabel";
+import { isRfidTag, normTag } from "../lib/rfid";
 import { useApp, toast, beep, go } from "../lib/app";
 import { toPaise, when } from "../lib/format";
 import { uid } from "../lib/db";
@@ -33,8 +34,10 @@ export default function Scan() {
       if (l) { setLoc(l.id); beep(); toast("Location set: " + l.code); } else { beep(false); toast("Unknown rack label " + raw, true); }
       return;
     }
+    if (isRfidTag(raw)) raw = normTag(raw);
     const parsed = parseLabel(raw, await patterns());
     const found = await findByScan(raw, parsed);
+    if (!found && isRfidTag(raw)) { beep(false); toast("RFID tag not linked to a product — use Link RFID tag on Products or Stock in", true); return; }
     const product = found && (await fillFromItemCode(found)); // "ITEM 202" picks up its learned name + unit
     beep(!!product || parsed.how !== "unknown");
     if (product && auto && loc) {

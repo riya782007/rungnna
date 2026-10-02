@@ -1,6 +1,6 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db, type StockCell } from "../lib/db";
+import { db, getSetting, setSetting, type StockCell } from "../lib/db";
 import { label } from "../lib/products";
 import { countReport, isRfidTag, normTag, TagSet } from "../lib/rfid";
 import { parseRackScan } from "../lib/rackLabel";
@@ -16,8 +16,15 @@ export default function RfidCount() {
   const locs = useLocations();
   const [loc, setLoc] = useState("");
   const [reads, setReads] = useState<string[]>([]);
-  const [link, setLink] = useState(false);
+  const [link, setLink] = useState<false | { tag?: string }>(false);
   const seen = useRef(new TagSet());
+  /* a long count survives leaving the page or a closed tab (this device only) */
+  const [ready, setReady] = useState(false);
+  useEffect(() => { getSetting<{ loc: string; reads: string[] } | null>("rfid_count", null).then(d => {
+    if (d) { setLoc(d.loc || ""); setReads(d.reads || []); seen.current = new TagSet(d.reads || []); }
+    setReady(true);
+  }); }, []);
+  useEffect(() => { if (ready) setSetting("rfid_count", { loc, reads }); }, [ready, loc, reads]);
   const products = useLiveQuery(() => db.products.toArray(), [], []);
   const cells = useLiveQuery<StockCell[], StockCell[]>(() => (loc ? db.stock.where("loc_id").equals(loc).toArray() : []), [loc], []);
   const pmap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
@@ -29,7 +36,7 @@ export default function RfidCount() {
     const r = raw.trim(); if (!r) return;
     const rack = parseRackScan(r, locs);
     if (rack || r.startsWith(LOC_PREFIX)) {
-      if (rack) { setLoc(rack.id); restart(); beep(); toast("Counting rack " + rack.code); } else { beep(false); toast("Unknown rack label", true); }
+      if (rack) { if (rack.id !== loc) { setLoc(rack.id); restart(); } beep(); toast("Counting rack " + rack.code); } else { beep(false); toast("Unknown rack label", true); }
       return;
     }
     if (!isRfidTag(r)) { beep(false); toast("Not an RFID tag — this page counts tags only", true); return; }
@@ -43,7 +50,7 @@ export default function RfidCount() {
   return (
     <div>
       <Head title="RFID count" sub="Choose the rack, then wave the reader slowly over every box. Each tag counts once.">
-        <button className="btn" onClick={() => setLink(true)}>Link RFID tag</button>
+        <button className="btn" onClick={() => setLink({})}>Link RFID tag</button>
       </Head>
       <div className="split">
         <div className="stack">
@@ -51,7 +58,7 @@ export default function RfidCount() {
             <LocationSelect value={loc} onChange={v => { setLoc(v); restart(); }} label="Rack being counted (or scan the rack's QR)" buckets={false} />
             {!loc && <div className="note warn sm">Pick the rack first — the count compares the tags read with what that rack should hold.</div>}
             <WedgeInput onCode={onCode} placeholder="Reader output lands here (or anywhere on this page)" autoFocus={!link} />
-            <div className="row"><button className="btn sm" onClick={restart} disabled={!reads.length}>Start again</button><span className="xs mut">{reads.length} distinct tag{reads.length === 1 ? "" : "s"} read</span></div>
+            <div className="row"><button className="btn sm" onClick={() => (reads.length < 5 || confirm("Clear the tags read so far?")) && restart()} disabled={!reads.length}>Start again</button><span className="xs mut">{reads.length} distinct tag{reads.length === 1 ? "" : "s"} read</span></div>
           </div>
 
           {loc && <div className="card tw"><table>
@@ -85,12 +92,13 @@ export default function RfidCount() {
           </div>
           {rep.unknown.length > 0 && <div className="card pad stack">
             <b className="sm">Unknown tags ({rep.unknown.length})</b>
-            <div className="xs mut">Read here but not linked to any product. Use Link RFID tag to attach them.</div>
-            <div className="stack" style={{ gap: 2 }}>{rep.unknown.map(t => <span key={t} className="mono xs">{t}</span>)}</div>
+            <div className="xs mut">Read here but not linked to any product. Tap Link, then scan that piece's QR.</div>
+            <div className="stack" style={{ gap: 4 }}>{rep.unknown.map(t => <div key={t} className="row between" style={{ flexWrap: "nowrap" }}>
+              <span className="mono xs" style={{ wordBreak: "break-all" }}>{t}</span><button className="btn sm" onClick={() => setLink({ tag: t })}>Link</button></div>)}</div>
           </div>}
         </aside>
       </div>
-      {link && <LinkRfid onClose={() => setLink(false)} />}
+      {link && <LinkRfid tag={link.tag} onClose={() => setLink(false)} />}
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, type Bill, type BillLine, type Party, type Payment, type Product } from "../lib/db";
 import { findByScan, fromParsed, saveProduct, patterns, itemInfoFor, withItemInfo, fillFromItemCode, needsName, label } from "../lib/products";
 import { NameItemCodes, unnamedCodes } from "../components/NameItemCodes";
-import { isRfidTag, normTag, soldBill, TagSet } from "../lib/rfid";
+import { isRfidTag, normTag, soldBill, TagSet, Recent } from "../lib/rfid";
 import { parseLabel } from "../lib/parse";
 import { newBill, lineFrom, totals, fixLine, finalize, holdBill, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
 import { voiceBill } from "../lib/ai";
@@ -91,6 +91,7 @@ export default function Billing({ args }: { args: string[] }) {
 
   /* RFID: one tag counts once per bill, however many times the reader sees it */
   const tagsRef = useRef(new TagSet());
+  const unlinked = useRef(new Recent());
   useEffect(() => { tagsRef.current = new TagSet(b?.rfid_tags || []); }, [b?.id]);
 
   function addProduct(p: Product, pkts = 1, pieces = 0, rate = 0) {
@@ -144,7 +145,11 @@ export default function Billing({ args }: { args: string[] }) {
       const tag = normTag(r); setQ("");
       if (!tagsRef.current.add(tag)) return "Tag already on this bill";
       const tp = await findByScan(tag);
-      if (!tp) { tagsRef.current.delete(tag); beep(false); toast("RFID tag not linked to a product — link it in Products", true); return "Not found"; }
+      if (!tp) {
+        tagsRef.current.delete(tag);
+        if (unlinked.current.first(tag)) { beep(false); toast("RFID tag not linked to a product — link it in Products", true); }
+        return "Not found";
+      }
       const sold = soldBill(tp, tag);
       if (sold) toast(`This tag was already sold on ${sold} — check the piece`, true);
       const fp = await fillFromItemCode(tp);
@@ -282,7 +287,7 @@ export default function Billing({ args }: { args: string[] }) {
               <div className="wedge grow" style={{ position: "relative" }}>
                 <Icon n="scan" size={20} />
                 <input ref={scanRef} autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Scan label, or type style / item (F7)"
-                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); suggestions.length === 1 && q.length < 20 ? (addProduct(suggestions[0]), setQ("")) : onCode(q); } }} />
+                  onKeyDown={e => { if (e.key === "Tab" && isRfidTag(q)) { e.preventDefault(); onCode(q); return; } if (e.key === "Enter") { e.preventDefault(); suggestions.length === 1 && q.length < 20 ? (addProduct(suggestions[0]), setQ("")) : onCode(q); } }} />
                 {suggestions.length > 0 && q.length < 25 && (
                   <div className="sugg">{suggestions.map(p => (
                     <button key={p.id} onClick={() => { addProduct(p); setQ(""); scanRef.current?.focus(); }}>

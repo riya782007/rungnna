@@ -1,6 +1,7 @@
 import { Icon } from "./Icon";
 import { useEffect, useRef, useState } from "react";
 import { getSetting, setSetting } from "../lib/db";
+import { isRfidTag } from "../lib/rfid";
 
 /* One scanner for everything: phone / tablet / laptop camera (QR + barcodes) and the USB/Bluetooth
    scanner gun, which simply "types" the code and presses Enter.
@@ -421,7 +422,10 @@ export function WedgeInput({ onCode, placeholder, autoFocus = true }: { onCode: 
       <Icon n="scan" size={20} />
       <input ref={ref} value={v} autoFocus={autoFocus} placeholder={placeholder || "Scan with the gun, or type a code and press Enter (F7)"}
         onChange={e => setV(e.target.value)}
-        onKeyDown={e => { if (e.key === "Enter" && v.trim()) { onCode(v.trim()); setV(""); } }}
+        onKeyDown={e => {
+          // RFID readers are often set to end a read with Tab instead of Enter
+          if ((e.key === "Enter" || (e.key === "Tab" && isRfidTag(v))) && v.trim()) { e.preventDefault(); onCode(v.trim()); setV(""); }
+        }}
         autoComplete="off" autoCapitalize="characters" spellCheck={false} />
       <kbd className="xs mut">Enter</kbd>
     </div>
