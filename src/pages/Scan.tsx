@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { recordMovement, getSetting, setSetting, stockOf, type Product, type StockCell } from "../lib/db";
 import { parseLabel, FIELDS, type Parsed, type Pattern, type Field, guessSep, splitTokens } from "../lib/parse";
-import { findByScan, fromParsed, saveProduct, patterns, label, DEFAULT_ITEMS, DEFAULT_TYPES, distinct, itemNameFor } from "../lib/products";
+import { findByScan, fromParsed, saveProduct, patterns, label, DEFAULT_ITEMS, DEFAULT_TYPES, distinct, itemInfoFor, withItemInfo, fillFromItemCode, needsName } from "../lib/products";
 import { CameraScanner, WedgeInput } from "../components/Scanner";
 import { LocationSelect, PhotoButton, Thumb, Head, LOC_PREFIX, locName, useLocations, DeadToggle } from "../components/common";
 import { parseRackScan } from "../lib/rackLabel";
@@ -34,7 +34,8 @@ export default function Scan() {
       return;
     }
     const parsed = parseLabel(raw, await patterns());
-    const product = await findByScan(raw, parsed);
+    const found = await findByScan(raw, parsed);
+    const product = found && (await fillFromItemCode(found)); // "ITEM 202" picks up its learned name + unit
     beep(!!product || parsed.how !== "unknown");
     if (product && auto && loc) {
       await recordMovement({ product_id: product.id, kind: "intake", qty: 1, from_loc: null, to_loc: loc, person_type: "employee", person_name: me?.name || "", by_staff: me?.id || "", note: "scan count" });
@@ -100,7 +101,7 @@ function HitPanel({ hit, loc, setLoc, onDone, onRetry }: { hit: Hit; loc: string
   }, [hit.product]);
 
   useEffect(() => {
-    if (!hit.product && !p.item && p.item_code) itemNameFor(p.item_code).then(nm => nm && setP(x => (x.item ? x : { ...x, item: nm })));
+    if (!hit.product && p.item_code) itemInfoFor(p.item_code).then(info => setP(x => withItemInfo(x, info) || x));
   }, []);
 
   const set = (k: keyof Product, v: any) => setP(x => ({ ...x, [k]: v }));
@@ -134,7 +135,7 @@ function HitPanel({ hit, loc, setLoc, onDone, onRetry }: { hit: Hit; loc: string
       </header>
       <div className="pad stack">
         {teach && <TeachPattern raw={hit.raw} onSaved={() => { setTeach(false); onRetry(); }} onSkip={() => setTeach(false)} />}
-        {hit.isNew && p.item_code && !p.item && <div className="note warn sm">First time this label's item code <b className="mono">{p.item_code}</b> is seen — type the item name once (e.g. F-RING) and every later label with {p.item_code} fills it in.</div>}
+        {p.item_code && needsName(p) && <div className="note warn sm">First time this label's item code <b className="mono">{p.item_code}</b> is seen — pick the item name (e.g. F-RING) and its unit (PCS / PAIR / SET) once, and every later label with {p.item_code} fills them in.</div>}
         {!hit.isNew && stock.length > 0 && (
           <div className="stack" style={{ gap: 4 }}>
             {stock.map(c => <div key={c.key} className="row between sm"><span>{locName(locs.find(l => l.id === c.loc_id))}</span><span className="mono b">{c.qty}</span></div>)}

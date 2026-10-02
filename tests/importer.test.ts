@@ -6,6 +6,10 @@ describe("importer", () => {
     const m = guessMap(["Item Code", "Item Name", "Design No.", "Colour", "Sale Rate", "Closing Stock", "Packing"], "products");
     expect(m).toEqual({ item_code: 0, item: 1, style: 2, color: 3, rate: 4, qty: 5, pack: 6 });
   });
+  it("maps an optional Unit column without stealing Unit Price", () => {
+    expect(guessMap(["Item Code", "Item Name", "Unit"], "products")).toEqual({ item_code: 0, item: 1, unit: 2 });
+    expect(guessMap(["Item Code", "Item Name", "Unit Price", "UOM"], "products")).toEqual({ item_code: 0, item: 1, rate: 2, unit: 3 });
+  });
   it("maps customer headers", () => {
     expect(guessMap(["Party Name", "Mobile No", "City", "GSTIN", "Closing Balance"], "parties")).toEqual({ name: 0, phone: 1, city: 2, gstin: 3, opening_balance: 4 });
   });

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, type Bill, type BillLine, type Party, type Payment, type Product } from "../lib/db";
-import { findByScan, fromParsed, saveProduct, patterns, itemNameFor, label } from "../lib/products";
+import { findByScan, fromParsed, saveProduct, patterns, itemInfoFor, withItemInfo, fillFromItemCode, needsName, label } from "../lib/products";
+import { NameItemCodes, unnamedCodes } from "../components/NameItemCodes";
 import { parseLabel } from "../lib/parse";
 import { newBill, lineFrom, totals, fixLine, finalize, holdBill, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
 import { voiceBill } from "../lib/ai";
@@ -84,7 +85,8 @@ export default function Billing({ args }: { args: string[] }) {
       if (!x) return x;
       const same = x.items.find(l => l.product_id === p.id && l.box_no === box);
       if (same && !pieces && !rate) {
-        return { ...x, items: x.items.map(l => l.id === same.id ? fixLine(l.pack > 1 ? { ...l, pkts: l.pkts + pkts } : { ...l, qty: l.qty + pkts }) : l) };
+        const named = p.item ? { item: p.item, type: p.type } : {}; // a scan that just learned the name updates the line too
+        return { ...x, items: x.items.map(l => l.id === same.id ? fixLine(l.pack > 1 ? { ...l, ...named, pkts: l.pkts + pkts } : { ...l, ...named, qty: l.qty + pkts }) : l) };
       }
       let line = lineFrom(p, box, pkts);
       if (pieces) line = fixLine({ ...line, pkts: 0, qty: pieces });
@@ -103,13 +105,13 @@ export default function Billing({ args }: { args: string[] }) {
   /* the same new sticker read twice in a split second must not create two products */
   const creating = useRef(new Map<string, Promise<Product | undefined>>());
   async function resolve(r: string): Promise<Product | undefined> {
-    const found = await findByScan(r); if (found) return found;
+    const found = await findByScan(r); if (found) return fillFromItemCode(found);
     if (creating.current.has(r)) return creating.current.get(r);
     const job = (async () => {
       const parsed = parseLabel(r, await patterns());
       if (!(parsed.style && (parsed.how === "shop label" || parsed.how === "rungnna"))) return undefined;
-      const np = fromParsed(parsed, me?.id || "");
-      np.item = np.item || (await itemNameFor(np.item_code)) || "";
+      let np = fromParsed(parsed, me?.id || "");
+      np = withItemInfo(np, await itemInfoFor(np.item_code)) || np;
       const p = await saveProduct(np);
       toast(`New product added from label: ${label(p)}`);
       return p;
@@ -128,7 +130,7 @@ export default function Billing({ args }: { args: string[] }) {
     let p = await resolve(r);
     if (!p) {
       const hits = products.filter(x => (x.style + " " + x.code + " " + x.item).toUpperCase().includes(r.toUpperCase()));
-      if (hits.length === 1) p = hits[0];
+      if (hits.length === 1) p = await fillFromItemCode(hits[0]);
     }
     if (!p) { beep(false); toast("Not found — scan the label or record it in Scan & record", true); return "Not found"; }
     beep(true); addProduct(p); setQ("");
@@ -222,6 +224,7 @@ export default function Billing({ args }: { args: string[] }) {
   });
 
   if (!b || !t) return <div className="card pad">Loading…</div>;
+  const unnamed = unnamedCodes(t.items, id => (id ? pmap.get(id)?.item_code : undefined));
   const boxes = [...new Set([...t.items.map(l => l.box_no), box])].sort((a, z) => a - z);
   const balance = due(t);
 
@@ -269,6 +272,8 @@ export default function Billing({ args }: { args: string[] }) {
             {cam && !small && <div style={{ maxWidth: 560 }}><CameraScanner onCode={c => { onCode(c); }} /></div>}
           </div>
 
+          <NameItemCodes codes={unnamed} onNamed={(code, name, unit) => setB(x => x && { ...x, items: x.items.map(l =>
+            (l.item === "ITEM " + code || (!l.item && l.product_id && pmap.get(l.product_id)?.item_code === code)) ? { ...l, item: name, type: unit } : l) })} />
           <div className="card tw">
             <table className="pos-t">
               <thead><tr><th>#</th><th>Box</th><th>Item · Style · Colour</th><th className="r">Pkt</th><th className="r">Pcs</th><th className="r">Rate ₹</th><th className="r">Disc</th><th className="r">Amount</th><th /></tr></thead>

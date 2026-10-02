@@ -1,5 +1,5 @@
 import { db, put, uid, now, deviceId, getSetting, setSetting, type Movement, type Product, type Purchase, type PurchaseLine } from "./db";
-import { findByScan, fromParsed, saveProduct, patterns, itemNameFor } from "./products";
+import { findByScan, fromParsed, saveProduct, patterns, itemInfoFor, withItemInfo, fillFromItemCode } from "./products";
 import { parseLabel } from "./parse";
 import { fy, counterCode } from "./billing";
 
@@ -23,10 +23,10 @@ export async function resolveScan(raw: string, by: string): Promise<{ product?: 
   const r = raw.trim(); if (!r) return {};
   const parsed = parseLabel(r, await patterns());
   let product = await findByScan(r, parsed);
-  if (product) return { product };
+  if (product) return { product: await fillFromItemCode(product) };
   if (parsed.style || parsed.code || parsed.icode) {
-    const np = fromParsed(parsed, by);
-    np.item = np.item || (await itemNameFor(np.item_code)) || "";
+    let np = fromParsed(parsed, by);
+    np = withItemInfo(np, await itemInfoFor(np.item_code)) || np;
     if (!np.style && !np.item) return {};
     product = await saveProduct(np);
     return { product, created: true };

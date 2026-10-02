@@ -3,6 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, type Purchase, type PurchaseLine, type Product } from "../lib/db";
 import { newPurchase, sum, lineOf, resolveScan, finalizePurchase, lineQty } from "../lib/stockin";
 import { newParty } from "../lib/billing";
+import { fillFromItemCode } from "../lib/products";
 import { useApp, toast, beep, go } from "../lib/app";
 import { can } from "../lib/roles";
 import { rupees, toPaise, when } from "../lib/format";
@@ -10,6 +11,7 @@ import { CameraScanner } from "../components/Scanner";
 import { Head, LocationSelect, PhotoButton, Modal, LOC_PREFIX, useLocations } from "../components/common";
 import { parseRackScan } from "../lib/rackLabel";
 import { Icon } from "../components/Icon";
+import { NameItemCodes, unnamedCodes } from "../components/NameItemCodes";
 
 /* Stock in: stand at a rack, scan packet after packet, save once.
    Every scan is +1 packet. Labels the system hasn't seen become products on the spot.
@@ -45,7 +47,7 @@ function StockInSession() {
     setP(x => {
       if (!x) return x;
       const same = x.items.find(l => l.product_id === prod.id);
-      if (same) return { ...x, items: [{ ...same, ...(same.pack > 1 ? { pkts: same.pkts + 1 } : { qty: same.qty + 1 }) }, ...x.items.filter(l => l.id !== same.id)] };
+      if (same) return { ...x, items: [{ ...same, item: prod.item || same.item, ...(same.pack > 1 ? { pkts: same.pkts + 1 } : { qty: same.qty + 1 }) }, ...x.items.filter(l => l.id !== same.id)] };
       return { ...x, items: [lineOf(prod, created), ...x.items] };
     });
     setFlash(prod.id); setTimeout(() => setFlash(""), 600);
@@ -61,7 +63,7 @@ function StockInSession() {
     const { product, created } = await resolveScan(r, me?.id || "");
     if (!product) {
       const hits = products.filter(x => (x.style + " " + x.code + " " + x.item).toUpperCase().includes(r.toUpperCase()));
-      if (hits.length === 1) { beep(); add(hits[0]); setQ(""); return; }
+      if (hits.length === 1) { beep(); add(await fillFromItemCode(hits[0])); setQ(""); return; }
       beep(false); toast("Not recognised — use Scan & record for this one", true); return;
     }
     beep(true); add(product, created); setQ("");
@@ -103,7 +105,8 @@ function StockInSession() {
             {!p.loc_id && <div className="note warn sm">Pick the rack first — every packet you scan goes there.</div>}
           </div>
 
-          <NameUnknown lines={t.items} onNamed={(code, name) => setP(x => x && { ...x, items: x.items.map(l => (l.item === "ITEM " + code ? { ...l, item: name } : l)) })} />
+          <NameItemCodes codes={unnamedCodes(t.items, id => products.find(x => x.id === id)?.item_code)}
+            onNamed={(code, name) => setP(x => x && { ...x, items: x.items.map(l => (l.item === "ITEM " + code || (!l.item && products.find(x => x.id === l.product_id)?.item_code === code) ? { ...l, item: name } : l)) })} />
           <div className="list">
             {t.items.map(l => (
               <div key={l.id} className="li" style={{ background: flash === l.product_id ? "var(--gold-l)" : undefined, transition: "background .4s" }}>
@@ -198,31 +201,6 @@ function StockInView({ id }: { id: string }) {
           <b className="mono">{l.qty}</b>
           {l.isNew && <a className="btn sm" href={"#/labels/" + l.product_id}><Icon n="print" size={15} />Label</a>}
         </div>))}</div>
-    </div>
-  );
-}
-
-/* Old labels carry only an item number (202). Ask once per number; every product and every future label gets the name. */
-function NameUnknown({ lines, onNamed }: { lines: PurchaseLine[]; onNamed: (code: string, name: string) => void }) {
-  const codes = [...new Set(lines.filter(l => /^ITEM \d+$/.test(l.item)).map(l => l.item.slice(5)))];
-  const [v, setV] = useState<Record<string, string>>({});
-  if (!codes.length) return null;
-  return (
-    <div className="card pad stack" style={{ borderColor: "#E3CF9E", background: "var(--gold-l)" }}>
-      <b className="sm">Name {codes.length > 1 ? "these item numbers" : "this item number"} once</b>
-      {codes.map(c => (
-        <form key={c} className="row" style={{ flexWrap: "nowrap" }} onSubmit={async e => {
-          e.preventDefault(); const name = (v[c] || "").trim().toUpperCase(); if (!name) return;
-          const ps = await db.products.where("item_code").equals(c).toArray();
-          for (const pr of ps) if (!pr.item) await put("products", { ...pr, item: name });
-          const map = ((await db.config.get("item_codes"))?.value || {}) as Record<string, string>;
-          await put("config", { id: "item_codes", value: { ...map, [c]: name }, updated_at: new Date().toISOString() } as any);
-          onNamed(c, name); toast(`Item ${c} = ${name} — remembered for every label`);
-        }}>
-          <span className="mono b" style={{ width: 70 }}>Item {c}</span>
-          <input className="in grow" placeholder="e.g. F-RING" value={v[c] || ""} onChange={e => setV({ ...v, [c]: e.target.value })} />
-          <button className="btn p">Save</button>
-        </form>))}
     </div>
   );
 }

@@ -55,7 +55,8 @@ export function totals(b: Bill, shopState = ""): Bill {
   const gross = items.reduce((a, l) => a + l.amount, 0);
   const total_qty = items.reduce((a, l) => a + l.qty, 0);
   const box_count = new Set(items.map(l => l.box_no)).size;
-  const discount = b.discount_pct ? Math.round(gross * b.discount_pct / 100) : b.discount;
+  // a discount can never exceed the goods on the bill, so NET can't go negative
+  const discount = Math.min(gross, Math.max(0, b.discount_pct ? Math.round(gross * b.discount_pct / 100) : b.discount));
   const rate = b.bill_type === "gst" ? b.gst_rate : 0;
   let base = gross - discount + b.packing, gst = 0;
   if (rate) {

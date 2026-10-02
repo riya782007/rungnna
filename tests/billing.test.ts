@@ -25,6 +25,14 @@ describe("billing maths", () => {
     const t = totals(bill({ bill_type: "estimate", items: [line({})], discount_pct: 10, packing: 5000, payments: [{ mode: "cash", amount: 50000 }, { mode: "credit", amount: 0 }] }), "");
     expect(t.gst).toBe(0); expect(t.discount).toBe(8640); expect(t.net).toBe(82800); expect(t.paid).toBe(50000);
   });
+  it("bill discount is capped at the bill amount — NET never goes negative", () => {
+    const one = [line({ pkts: 1 })]; // 12 × ₹24 = ₹288
+    expect(totals(bill({ items: one, discount: 100000 }), "").net).toBe(0);
+    expect(totals(bill({ items: one, discount: 100000 }), "").discount).toBe(28800);
+    expect(totals(bill({ items: one, discount_pct: 150 }), "").discount).toBe(28800);
+    expect(totals(bill({ bill_type: "estimate", items: one, discount: 100000, packing: 5000 }), "").net).toBe(5000);
+    expect(totals(bill({ items: [], discount: 5000 }), "").net).toBe(0);
+  });
   it("boxes and pieces", () => { const t = totals(bill({ items: [line({}), line({ id: "m", box_no: 2, pack: 1, pkts: 0, qty: 5 })] }), ""); expect(t.total_qty).toBe(41); expect(t.box_count).toBe(2); });
   it("financial year", () => { expect(fy(new Date(2026, 8, 25))).toBe("26-27"); expect(fy(new Date(2027, 1, 1))).toBe("26-27"); expect(fy(new Date(2027, 3, 1))).toBe("27-28"); });
   it("amount in words, Indian system", () => { expect(inWords(12345600)).toBe("Rupees One Lakh Twenty Three Thousand Four Hundred Fifty Six Only"); expect(inWords(89000)).toBe("Rupees Eight Hundred Ninety Only"); });

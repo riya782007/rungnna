@@ -15,6 +15,7 @@ export const FIELDS: Record<Kind, { key: string; label: string; syn: string[] }[
     { key: "qty", label: "Stock (pieces)", syn: ["qty", "stock", "closingstock", "balanceqty", "quantity", "closingqty", "balance", "stockqty"] },
     { key: "category", label: "Category / group", syn: ["category", "group", "itemgroup", "type"] },
     { key: "tk", label: "TK (dead)", syn: ["tk", "dead"] },
+    { key: "unit", label: "Unit (PCS / PAIR / SET) — optional", syn: ["unit", "uom", "units", "unitname", "per"] },
   ],
   parties: [
     { key: "name", label: "Name", syn: ["name", "partyname", "customername", "customer", "party", "accountname", "ledgername", "firm"] },

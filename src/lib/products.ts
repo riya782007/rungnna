@@ -73,14 +73,91 @@ export function fromParsed(x: Parsed, by: string): Product {
   return p;
 }
 
-/* The old labels carry only a number for the item (202). Once any product with that number
-   has a name (F-RING), every later scan of that number fills the name in by itself. */
-export async function itemNameFor(icode?: string) {
-  if (!icode) return "";
-  const hit = await db.products.where("item_code").equals(icode).filter(p => !!p.item && !p.deleted).first();
-  if (hit?.item) return hit.item;
-  const map = (await db.config.get("item_codes"))?.value as Record<string, string> | undefined; // imported item list
-  return map?.[icode] || "";
+/* The old labels carry only a number for the item (202). The owner names it once (F-RING, PAIR) and
+   every later scan of that number — billing, stock in, scan, import — fills the name and unit by itself.
+   The list lives in config "item_codes" (synced): { "202": { name: "F-RING", unit: "PAIR" } }.
+   Older copies stored just the name ("202": "F-RING"); those still read fine. */
+export const UNITS = ["PCS", "PAIR", "SET"] as const;
+export type ItemInfo = { name: string; unit: string };
+export type ItemMap = Record<string, ItemInfo>;
+
+export function normUnit(v: unknown): string {
+  const s = String(v ?? "").trim().toUpperCase().replace(/[^A-Z]/g, "");
+  if (!s) return "";
+  if (/^(PCS?|PIECES?|NOS?|NUMBERS?|PCE)$/.test(s)) return "PCS";
+  if (/^(PAIRS?|PRS?)$/.test(s)) return "PAIR";
+  if (/^SETS?$/.test(s)) return "SET";
+  return s;
+}
+export function readItemMap(value: unknown): ItemMap {
+  const out: ItemMap = {};
+  if (!value || typeof value !== "object") return out;
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v === "string") { if (v.trim()) out[k] = { name: v.trim().toUpperCase(), unit: "" }; }
+    else if (v && typeof v === "object") {
+      const o = v as Partial<ItemInfo>;
+      const name = String(o.name || "").trim().toUpperCase(), unit = normUnit(o.unit);
+      if (name || unit) out[k] = { name, unit };
+    }
+  }
+  return out;
+}
+export async function itemMap(): Promise<ItemMap> { return readItemMap((await db.config.get("item_codes"))?.value); }
+
+/* Merge names/units into the list. keep=true only fills numbers that aren't named yet. */
+export async function learnItems(entries: Record<string, Partial<ItemInfo>>, keep = false) {
+  const cur = await itemMap(); let changed = false;
+  for (const [code, e] of Object.entries(entries)) {
+    if (!code) continue;
+    const old = cur[code], name = (e.name || "").trim().toUpperCase(), unit = normUnit(e.unit);
+    if (keep && old?.name) { if (!old.unit && unit) { cur[code] = { ...old, unit }; changed = true; } continue; }
+    const next = { name: name || old?.name || "", unit: unit || old?.unit || "" };
+    if (!next.name && !next.unit) continue;
+    if (old?.name !== next.name || old?.unit !== next.unit) { cur[code] = next; changed = true; }
+  }
+  if (changed) await put("config", { id: "item_codes", value: cur, updated_at: now() } as any);
+  return cur;
+}
+
+/* "ITEM 202" is what an unnamed old label shows — treat it as no name at all */
+export const placeholderItem = (icode?: string) => (icode ? "ITEM " + icode : "");
+export const needsName = (p: Pick<Product, "item" | "item_code">) =>
+  !!p.item_code && (!p.item?.trim() || p.item.trim().toUpperCase() === placeholderItem(p.item_code));
+
+/* Pure: the product with the learned name/unit filled in, or null when nothing changes. */
+export function withItemInfo(p: Product, info?: ItemInfo): Product | null {
+  if (!info || !p.item_code) return null;
+  const unnamed = needsName(p), x = { ...p };
+  if (unnamed && info.name) x.item = info.name;
+  if (info.unit && x.type !== info.unit && (unnamed || !x.type || x.type === "PCS")) x.type = info.unit;
+  return x.item !== p.item || x.type !== p.type ? x : null;
+}
+
+export async function itemInfoFor(icode?: string): Promise<ItemInfo | undefined> {
+  if (!icode) return undefined;
+  const m = (await itemMap())[icode];
+  if (m?.name) return m;
+  const hit = await db.products.where("item_code").equals(icode).filter(p => !p.deleted && !needsName(p)).first();
+  if (hit) return { name: hit.item, unit: m?.unit || (hit.type && hit.type !== "PCS" ? hit.type : "") };
+  return m;
+}
+export async function itemNameFor(icode?: string) { return (await itemInfoFor(icode))?.name || ""; }
+
+/* On every scan: a product still called "ITEM 202" picks up the learned name and unit (and is saved). */
+export async function fillFromItemCode(p: Product): Promise<Product> {
+  if (!p.item_code) return p;
+  const x = withItemInfo(p, await itemInfoFor(p.item_code));
+  return x ? put("products", x) : p;
+}
+
+/* The owner names a number: remember it, and fix every product that still carries no name. */
+export async function nameItemCode(code: string, name: string, unit: string) {
+  const info = { name: name.trim().toUpperCase(), unit: normUnit(unit) || "PCS" };
+  if (!code || !info.name) return info;
+  await learnItems({ [code]: info });
+  const ps = await db.products.where("item_code").equals(code).filter(p => !p.deleted).toArray();
+  for (const p of ps) { const x = withItemInfo(p, info); if (x) await put("products", x); }
+  return info;
 }
 export async function itemCodeFor(item: string) {
   if (!item) return "";
@@ -92,7 +169,10 @@ export async function saveProduct(p: Product) {
   p.item = p.item.trim().toUpperCase(); p.style = p.style.trim().toUpperCase(); p.color = p.color.trim().toUpperCase();
   p.type = (p.type || "PCS").trim().toUpperCase();
   if (!p.barcodes.includes(p.code)) p.barcodes = [...p.barcodes, p.code];
-  return put("products", p);
+  const saved = await put("products", p);
+  // the first time a number gets a real name (e.g. typed on Scan & record), every later label learns it
+  if (p.item_code && !needsName(p)) await learnItems({ [p.item_code]: { name: p.item, unit: p.type !== "PCS" ? p.type : "" } }, true);
+  return saved;
 }
 
 /* TK on the old labels = dead stock. Any value in that slot marks the piece as dead. */

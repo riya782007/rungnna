@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
-import { db, put, uid, now, deviceId, type Party, type Product, type Movement, type Config } from "../lib/db";
+import { db, put, uid, now, deviceId, type Party, type Product, type Movement } from "../lib/db";
 import { FIELDS, guessMap, parseCSV, findHeader, num, txt, balancePaise, type Kind } from "../lib/importer";
-import { blankProduct } from "../lib/products";
+import { blankProduct, learnItems, itemMap, normUnit, withItemInfo, type ItemInfo } from "../lib/products";
 import { newParty } from "../lib/billing";
 import { useApp, toast, go } from "../lib/app";
 import { toPaise } from "../lib/format";
@@ -56,13 +56,14 @@ export default function Import() {
         }
         setDone(`${added} customers added, ${updated} updated.`);
       } else if (itemOnly) {
-        const cur = ((await db.config.get("item_codes"))?.value || {}) as Record<string, string>;
-        let n = 0;
-        for (const r of body) { const c = txt(val(r, "item_code")), nm = txt(val(r, "item")).toUpperCase(); if (c && nm) { cur[c] = nm; n++; } }
-        await put("config", { id: "item_codes", value: cur, updated_at: now() } as Config);
-        setDone(`${n} item names learnt. Every label with these item codes now fills its name by itself.`);
+        const learn: Record<string, ItemInfo> = {};
+        for (const r of body) { const c = txt(val(r, "item_code")), nm = txt(val(r, "item")).toUpperCase(); if (c && nm) learn[c] = { name: nm, unit: normUnit(val(r, "unit")) }; }
+        await learnItems(learn);
+        const n = Object.keys(learn).length;
+        setDone(`${n} item names learnt${map.unit !== undefined ? " with their units" : ""}. Every label with these item codes now fills its name by itself.`);
       } else {
         const all = await db.products.toArray();
+        const known = await itemMap(), learn: Record<string, ItemInfo> = {};
         const key = (p: { style: string; color: string; item_code?: string }) => (p.style ? p.style + "|" + p.color : "#" + (p.item_code || ""));
         const idx = new Map(all.filter(p => !p.deleted).map(p => [key(p), p]));
         let added = 0, updated = 0, pcs = 0;
@@ -74,8 +75,14 @@ export default function Import() {
               const item_code = txt(val(r, "item_code"));
               if (!style && !item && !item_code) continue;
               const old = idx.get(key({ style, color, item_code }));
-              const p: Product = { ...(old || blankProduct(me?.id || "")), style: style || old?.style || "", color: color || old?.color || "", item: item || old?.item || "",
+              const unit = normUnit(val(r, "unit"));
+              let p: Product = { ...(old || blankProduct(me?.id || "")), style: style || old?.style || "", color: color || old?.color || "", item: item || old?.item || "",
                 item_code: item_code || old?.item_code, category: txt(val(r, "category")) || old?.category || "" };
+              if (unit) p.type = unit;
+              if (p.item_code) {
+                if (item) learn[p.item_code] = { name: item, unit: unit || learn[p.item_code]?.unit || "" };
+                else p = withItemInfo(p, learn[p.item_code] || known[p.item_code]) || p; // no name in this row: use the learned one
+              }
               if (map.rate !== undefined && num(val(r, "rate"))) p.rate = toPaise(num(val(r, "rate")));
               if (map.mrp !== undefined && num(val(r, "mrp"))) p.mrp = toPaise(num(val(r, "mrp")));
               if (map.cost !== undefined && num(val(r, "cost"))) p.cost = toPaise(num(val(r, "cost")));
@@ -94,6 +101,7 @@ export default function Import() {
             }
           });
         }
+        await learnItems(learn, true);
         setDone(`${added} products added, ${updated} updated${pcs ? `, ${pcs.toLocaleString("en-IN")} pieces placed as opening stock` : ""}.`);
       }
       toast("Import finished");
