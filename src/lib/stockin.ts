@@ -3,6 +3,7 @@ import { findByScan, fromParsed, saveProduct, patterns, itemInfoFor, withItemInf
 import { parseLabel } from "./parse";
 import { fy, counterCode } from "./billing";
 import { setTagsSold } from "./rfid";
+import { assertUnlocked } from "./finance";
 
 export function newPurchase(by: string, loc = ""): Purchase {
   return { id: uid(), no: "", status: "draft", supplier_name: "", supplier_bill: "", loc_id: loc, items: [], total_qty: 0, total_cost: 0,
@@ -37,6 +38,7 @@ export async function resolveScan(raw: string, by: string): Promise<{ product?: 
 
 /* Save: one intake movement per line into the chosen rack, remember the cost, number the stock-in. */
 export async function finalizePurchase(p0: Purchase): Promise<Purchase> {
+  await assertUnlocked(now());
   const p = sum(p0);
   const cc = await counterCode(); const key = `seq_PI_${fy()}_${cc}`;
   const n = (await getSetting<number>(key, 0)) + 1; await setSetting(key, n);

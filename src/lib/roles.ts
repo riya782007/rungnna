@@ -1,9 +1,9 @@
 import type { Staff } from "./db";
 
 /* Who may do what. Kept deliberately short: a shop floor needs a few clear rules, not a matrix. */
-export type Perm = "bill" | "sales" | "void" | "settings" | "staff" | "rates" | "discount" | "ai";
+export type Perm = "bill" | "sales" | "void" | "settings" | "staff" | "rates" | "discount" | "ai" | "reports" | "lock";
 const R: Record<Staff["role"], Perm[]> = {
-  owner: ["bill", "sales", "void", "settings", "staff", "rates", "discount", "ai"],
+  owner: ["bill", "sales", "void", "settings", "staff", "rates", "discount", "ai", "reports", "lock"],
   manager: ["bill", "sales", "void", "settings", "rates", "discount", "ai"],
   cashier: ["bill", "sales"],
   salesman: ["bill"],

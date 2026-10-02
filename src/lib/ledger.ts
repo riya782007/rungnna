@@ -3,6 +3,7 @@ import { due, fy, counterCode, isSale, isReturn, type Shop } from "./billing";
 import { rupees } from "./format";
 import { isOpen, isEstimate } from "./privacy";
 import { Pdf, fit } from "./pdf";
+import { assertUnlocked } from "./finance";
 
 /* A customer's account, the way a khata reads: what they bought (debit), what they paid (credit), balance. */
 export type Entry = { at: string; kind: "opening" | "bill" | "paid" | "receipt" | "return" | "refund"; ref: string; id?: string; debit: number; credit: number; balance: number; note?: string };
@@ -42,6 +43,7 @@ export async function ledger(party: Party): Promise<{ entries: Entry[]; balance:
 
 /* Receive money: clears the opening balance first, then the oldest unpaid bills. Anything extra stays as advance. */
 export async function receive(party: Party, amount: number, mode: Payment["mode"], note: string, by: string): Promise<Receipt> {
+  await assertUnlocked(now());
   const cc = await counterCode(); const key = `seq_RC_${fy()}_${cc}`;
   const n = (await getSetting<number>(key, 0)) + 1; await setSetting(key, n);
   const no = `RC/${fy()}/${cc}-${String(n).padStart(4, "0")}`;

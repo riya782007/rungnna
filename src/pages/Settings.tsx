@@ -13,6 +13,8 @@ import { getPrivate, setCode, lockNow, usePrivate } from "../lib/privacy";
 import { getRule, saveRule, validateKey, priceFromCost, DEFAULT_RULE, type PricingRule, type RoundTo } from "../lib/pricing";
 import { rupees, toPaise } from "../lib/format";
 import { getTaxonomy, addTo, removeFrom, addColour, removeColour, colourCodeFor, type Taxonomy } from "../lib/taxonomy";
+import { initLang, setLang, type Lang } from "../lib/i18n";
+import { closeFinancialYear, lockedUpto, setVoucherLock } from "../lib/finance";
 
 export default function Settings() {
   const { me, setMe } = useApp();
@@ -75,6 +77,7 @@ export default function Settings() {
         </div>
         <div className="stack">
           {boss && <PrivateCard />}
+          {can(me, "lock") && <OperationsCard by={me?.id || ""} />}
           {admin && <ShopProfile />}
           {admin && <PricingCard />}
           {admin && <TaxonomyCard />}
@@ -102,6 +105,33 @@ export default function Settings() {
 }
 
 const ROLES: Staff["role"][] = ["owner", "manager", "cashier", "salesman", "helper", "packer"];
+
+function OperationsCard({ by }: { by: string }) {
+  const [language, setLanguage] = useState<Lang>("en");
+  const [lock, setLock] = useState("");
+  const [closeDate, setCloseDate] = useState("");
+  useEffect(() => { initLang().then(setLanguage); lockedUpto().then(setLock); }, []);
+  return (
+    <div className="card"><header><h3>Language, lock &amp; year close</h3></header>
+      <div className="pad stack">
+        <label className="f">Language<select className="in" value={language} onChange={async e => { const l = e.target.value as Lang; setLanguage(l); await setLang(l); toast(l === "hi" ? "भाषा सेव हो गई" : "Language saved"); }}>
+          <option value="en">English</option><option value="hi">हिन्दी</option></select></label>
+        <div className="grid g2">
+          <label className="f">Lock vouchers up to<input className="in" type="date" value={lock} onChange={e => setLock(e.target.value)} /></label>
+          <button className="btn p" style={{ alignSelf: "end" }} onClick={async () => { await setVoucherLock(lock); toast("Locked up to " + lock); }}>Save lock</button>
+        </div>
+        <div className="grid g2">
+          <label className="f">Close financial year up to<input className="in" type="date" value={closeDate} onChange={e => setCloseDate(e.target.value)} /></label>
+          <button className="btn bad" style={{ alignSelf: "end" }} onClick={async () => {
+            if (!closeDate) return toast("Choose date", true);
+            if (!confirm("Carry all current customer and supplier balances forward as opening balances and lock old vouchers?")) return;
+            const r = await closeFinancialYear(by, closeDate); toast("Closed " + r.fy);
+          }}>Close year</button>
+        </div>
+        <div className="xs mut">Locked vouchers cannot be edited, deleted or voided on any role. Year close carries customer and supplier balances forward as opening balances.</div>
+      </div></div>
+  );
+}
 
 export function ShopLogin({ onDone }: { onDone?: () => void }) {
   const [email, setEmail] = useState("shop@rungnna.in");

@@ -27,7 +27,8 @@ export function EndOfDay({ onClose }: { onClose: () => void }) {
     const m = new Map<string, Bill>(); [...a, ...b].forEach(x => m.set(x.id, x)); return [...m.values()];
   }, [start, end], []);
   const receipts = useLiveQuery(() => db.receipts.where("at").between(start, end).toArray(), [start, end], []);
-  const r = useMemo(() => eodReport(bills, receipts, day, toPaise(opening), open), [bills, receipts, day, opening, open]);
+  const vouchers = useLiveQuery(() => db.vouchers.where("at").between(start, end).toArray(), [start, end], []);
+  const r = useMemo(() => eodReport(bills, receipts, day, toPaise(opening), open, vouchers), [bills, receipts, vouchers, day, opening, open]);
   useEffect(() => { if (!printing) return; const t = setTimeout(() => { window.print(); setPrinting(false); }, 200); return () => clearTimeout(t); }, [printing]);
   const isToday = day === localDay(new Date().toISOString());
   const nice = new Date(day + "T00:00").toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
@@ -44,6 +45,8 @@ export function EndOfDay({ onClose }: { onClose: () => void }) {
           {modesTotal(r.orders) > 0 && <ModeRow name="Advance on orders" m={r.orders} />}
           {modesTotal(r.later) > 0 && <ModeRow name="Paid on older bills" m={r.later} />}
           <ModeRow name={`Receipts (${r.receipts.count})`} m={r.receipts.modes} />
+          {modesTotal(r.vouchers.in) > 0 && <ModeRow name="Receipt vouchers" m={r.vouchers.in} />}
+          {modesTotal(r.vouchers.out) > 0 && <tr><td>Payment / expense vouchers ({r.vouchers.count})</td><td />{MODES.map(m => <td key={m} className="r mono">{r.vouchers.out[m] ? "−" + rupees(r.vouchers.out[m]) : ""}</td>)}<td /><td className="r mono">−{rupees(modesTotal(r.vouchers.out))}</td></tr>}
           {r.returns.count > 0 || modesTotal(r.returns.refunds) > 0 ? <tr><td>Returns ({r.returns.count}) · credit {rupees(r.returns.net)}</td><td />
             {MODES.map(m => <td key={m} className="r mono">{r.returns.refunds[m] ? "−" + rupees(r.returns.refunds[m]) : ""}</td>)}<td /><td className="r mono">{modesTotal(r.returns.refunds) ? "−" + rupees(modesTotal(r.returns.refunds)) : ""}</td></tr> : null}
         </tbody>

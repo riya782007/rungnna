@@ -6,6 +6,7 @@ import { warmScanner } from "./components/Scanner";
 import { SearchPalette } from "./components/Search";
 import { Icon } from "./components/Icon";
 import { can } from "./lib/roles";
+import { t, initLang, onLang } from "./lib/i18n";
 import Home from "./pages/Home";
 import { WhoAreYou } from "./pages/Settings";
 
@@ -24,6 +25,9 @@ const Move = lazy(() => import("./pages/Move"));
 const Products = lazy(() => import("./pages/Products"));
 const Activity = lazy(() => import("./pages/Activity"));
 const StockIn = lazy(() => import("./pages/StockIn"));
+const Suppliers = lazy(() => import("./pages/Suppliers"));
+const Vouchers = lazy(() => import("./pages/Vouchers"));
+const Reports = lazy(() => import("./pages/Reports"));
 const Import = lazy(() => import("./pages/Import"));
 const Remote = lazy(() => import("./pages/Remote"));
 const Settings = lazy(() => import("./pages/Settings"));
@@ -32,12 +36,13 @@ const Settings = lazy(() => import("./pages/Settings"));
 type Sec = { key: string; label: string; icon: string; tabs?: [string, string][] };
 const SECTIONS: Sec[] = [
   { key: "home", label: "Home", icon: "home" },
-  { key: "sell", label: "Sell", icon: "sell", tabs: [["bill", "New bill"], ["bills", "Bills"], ["customers", "Customers"]] },
+  { key: "sell", label: "Sell", icon: "sell", tabs: [["bill", "New bill"], ["bills", "Bills"], ["customers", "Customers"], ["suppliers", "Suppliers"], ["vouchers", "Vouchers"]] },
   { key: "stock", label: "Stock", icon: "stock", tabs: [["products", "Products"], ["stockin", "Stock in"], ["scan", "Scan & record"], ["recheck", "Recheck"], ["rfid", "RFID count"], ["labels", "Labels"], ["catalogue", "Catalogue"], ["racks", "Racks"], ["move", "Move"], ["activity", "Activity"], ["import", "Import"]] },
+  { key: "reports", label: "Reports", icon: "sales" },
   { key: "ask", label: "Ask", icon: "ask" },
   { key: "settings", label: "Settings", icon: "settings" },
 ];
-const sectionOf = (r: string) => (["bill", "bills", "customers"].includes(r) ? "sell" : ["products", "product", "stockin", "scan", "recheck", "rfid", "labels", "catalogue", "racks", "move", "activity", "import"].includes(r) ? "stock" : r === "ask" || r === "settings" ? r : "home");
+const sectionOf = (r: string) => (["bill", "bills", "customers", "suppliers", "vouchers"].includes(r) ? "sell" : ["products", "product", "stockin", "scan", "recheck", "rfid", "labels", "catalogue", "racks", "move", "activity", "import"].includes(r) ? "stock" : r === "ask" || r === "settings" || r === "reports" ? r : "home");
 const lastTab: Record<string, string> = { sell: "bill", stock: "products" };
 
 function useSync() {
@@ -60,9 +65,11 @@ function Shell() {
   const { me, setMe, ready } = useApp();
   const [route, args] = useRoute();
   const [pal, setPal] = useState(false);
+  const [, setLangTick] = useState("");
   const [scrolled, setScrolled] = useState(false);
   const sec = sectionOf(route);
   useEffect(() => { startSync(); warmScanner(); }, []);
+  useEffect(() => { initLang().then(setLangTick); return onLang(setLangTick) as any; }, []);
   useEffect(() => {
     const f = (e: PromiseRejectionEvent) => { const m = String(e.reason?.message || e.reason || ""); if (m && !/abort/i.test(m)) toast(m.slice(0, 120), true); };
     addEventListener("unhandledrejection", f); return () => removeEventListener("unhandledrejection", f);
@@ -79,10 +86,10 @@ function Shell() {
   if (!ready) return null;
   if (!me) return <WhoAreYou />;
 
-  const visible = SECTIONS.filter(s => (s.key !== "sell" || can(me, "bill")) && (s.key !== "ask" || can(me, "ai")));
+  const visible = SECTIONS.filter(s => (s.key !== "sell" || can(me, "bill")) && (s.key !== "ask" || can(me, "ai")) && (s.key !== "reports" || can(me, "reports")));
   const cur = SECTIONS.find(s => s.key === sec)!;
   const hrefOf = (s: Sec) => "#/" + (s.tabs ? lastTab[s.key] || s.tabs[0][0] : s.key);
-  const tabs = cur.tabs?.filter(([k]) => (k !== "bill" || can(me, "bill")) && (k !== "import" || can(me, "settings")));
+  const tabs = cur.tabs?.filter(([k]) => (k !== "bill" || can(me, "bill")) && (k !== "import" || can(me, "settings")) && (k !== "suppliers" || can(me, "rates")));
   const tabOn = (k: string) => route === k || (k === "products" && route === "product");
 
   let page: ReactNode;
@@ -90,6 +97,9 @@ function Shell() {
     case "bill": page = can(me, "bill") ? <Billing args={args} /> : <NoAccess />; break;
     case "bills": page = can(me, "bill") ? <Bills args={args} /> : <NoAccess />; break;
     case "customers": page = can(me, "bill") ? <Customers args={args} /> : <NoAccess />; break;
+    case "suppliers": page = can(me, "rates") ? <Suppliers args={args} /> : <NoAccess />; break;
+    case "vouchers": page = can(me, "bill") ? <Vouchers /> : <NoAccess />; break;
+    case "reports": page = can(me, "reports") ? <Reports /> : <NoAccess />; break;
     case "ask": page = can(me, "ai") ? <Ask /> : <NoAccess />; break;
     case "scan": page = <Scan />; break;
     case "recheck": page = <Recheck args={args} />; break;
@@ -112,9 +122,9 @@ function Shell() {
     <div className="shell">
       <aside className="rail">
         <div className="brand"><span className="mark">R</span><div><b>Rungnna</b><span>Jewellery &amp; Co</span></div></div>
-        {can(me, "bill") && <a href="#/bill" className="newbill"><Icon n="plus" size={18} /><span className="t">New bill</span><kbd style={{ background: "rgba(255,255,255,.15)", color: "#fff" }}>F2</kbd></a>}
+        {can(me, "bill") && <a href="#/bill" className="newbill"><Icon n="plus" size={18} /><span className="t">{t("New bill")}</span><kbd style={{ background: "rgba(255,255,255,.15)", color: "#fff" }}>F2</kbd></a>}
         <button className="railsearch" onClick={() => setPal(true)}><Icon n="search" size={17} /><span className="grow">Search</span><kbd>Ctrl K</kbd></button>
-        {visible.map(s => <a key={s.key} href={hrefOf(s)} className={"nav" + (sec === s.key ? " on" : "")}><Icon n={s.icon} /><span className="grow">{s.label}</span></a>)}
+        {visible.map(s => <a key={s.key} href={hrefOf(s)} className={"nav" + (sec === s.key ? " on" : "")}><Icon n={s.icon} /><span className="grow">{t(s.label)}</span></a>)}
         <div className="railfoot">
           <Status />
           <button className="me" onClick={() => setMe(null)} title="Switch person">
@@ -125,14 +135,14 @@ function Shell() {
       </aside>
       <div className="main">
         <div className="top">
-          <span className="brandm"><span className="mark">R</span>{cur.label === "Home" ? "Rungnna" : cur.label}</span>
+          <span className="brandm"><span className="mark">R</span>{cur.label === "Home" ? "Rungnna" : t(cur.label)}</span>
           <span className="grow" />
           <button className="iconbtn" aria-label="Search" onClick={() => setPal(true)}><Icon n="search" size={18} /></button>
           <button className="avatar" onClick={() => go("settings")} aria-label="Me">{me.name.slice(0, 1).toUpperCase()}</button>
         </div>
         {tabs && tabs.length > 1 && (
           <div className={"subnav" + (scrolled ? " scrolled" : "")}>
-            <nav className="tabs">{tabs.map(([k, t]) => <a key={k} href={"#/" + k} className={tabOn(k) ? "on" : ""} ref={el => { if (el && tabOn(k)) el.scrollIntoView({ block: "nearest", inline: "center" }); }}>{t}</a>)}</nav>
+            <nav className="tabs">{tabs.map(([k, label]) => <a key={k} href={"#/" + k} className={tabOn(k) ? "on" : ""} ref={el => { if (el && tabOn(k)) el.scrollIntoView({ block: "nearest", inline: "center" }); }}>{t(label)}</a>)}</nav>
             <span className="grow" /><Status />
           </div>)}
         <main className={"page" + (route === "bill" ? " wide" : "")}>
@@ -140,9 +150,9 @@ function Shell() {
         </main>
       </div>
       <nav className="tabbar">
-        {[visible.find(s => s.key === "home"), visible.find(s => s.key === "sell")].filter(Boolean).map(s => <a key={s!.key} href={hrefOf(s!)} className={sec === s!.key ? "on" : ""}><Icon n={s!.icon} size={22} />{s!.label}</a>)}
+        {[visible.find(s => s.key === "home"), visible.find(s => s.key === "sell")].filter(Boolean).map(s => <a key={s!.key} href={hrefOf(s!)} className={sec === s!.key ? "on" : ""}><Icon n={s!.icon} size={22} />{t(s!.label)}</a>)}
         <a href="#/stockin" className="fab"><span className="c"><Icon n="scan" size={24} sw={2} /></span></a>
-        {[visible.find(s => s.key === "stock"), visible.find(s => s.key === "ask") || visible.find(s => s.key === "settings")].filter(Boolean).map(s => <a key={s!.key} href={hrefOf(s!)} className={sec === s!.key ? "on" : ""}><Icon n={s!.icon} size={22} />{s!.label}</a>)}
+        {[visible.find(s => s.key === "stock"), visible.find(s => s.key === "reports") || visible.find(s => s.key === "ask") || visible.find(s => s.key === "settings")].filter(Boolean).map(s => <a key={s!.key} href={hrefOf(s!)} className={sec === s!.key ? "on" : ""}><Icon n={s!.icon} size={22} />{t(s!.label)}</a>)}
       </nav>
       {pal && <SearchPalette onClose={() => setPal(false)} />}
       <UpdateBar />

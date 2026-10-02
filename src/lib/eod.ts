@@ -1,4 +1,4 @@
-import type { Bill, Payment, Receipt } from "./db";
+import type { Bill, Payment, Receipt, Voucher } from "./db";
 import { due, isSale } from "./billing";
 import { isEstimate } from "./privacy";
 import { localDay } from "./ledger";
@@ -11,7 +11,7 @@ import { localDay } from "./ledger";
 
 export type Modes = { cash: number; upi: number; card: number; bank: number };
 const zero = (): Modes => ({ cash: 0, upi: 0, card: 0, bank: 0 });
-const addMode = (m: Modes, p: Pick<Payment, "mode" | "amount">) => { if (p.mode !== "credit") m[p.mode] += p.amount; };
+const addMode = (m: Modes, p: Pick<Payment, "mode" | "amount">) => { if (p.mode !== "credit" && p.mode in m) m[p.mode as keyof Modes] += p.amount; };
 export const modesTotal = (m: Modes) => m.cash + m.upi + m.card + m.bank;
 
 export interface SalesPart { count: number; net: number; pcs: number; received: Modes; credit: number }
@@ -23,6 +23,7 @@ export interface EodReport {
   later: Modes;                       // money received today on older bills
   receipts: { count: number; modes: Modes };
   returns: { count: number; net: number; refunds: Modes };
+  vouchers: { count: number; in: Modes; out: Modes; expense: number };
   challans: { count: number; pcs: number };
   cashIn: number; cashOut: number; opening: number; closing: number;
   collected: number;                  // all money in today, every mode
@@ -31,9 +32,9 @@ export interface EodReport {
 const part = (): SalesPart => ({ count: 0, net: 0, pcs: 0, received: zero(), credit: 0 });
 const fromReceipt = (p: Payment) => (p.ref || "").startsWith("RCPT");
 
-export function eodReport(bills: Bill[], receipts: Receipt[], day: string, opening: number, open: boolean): EodReport {
+export function eodReport(bills: Bill[], receipts: Receipt[], day: string, opening: number, open: boolean, vouchers: Voucher[] = []): EodReport {
   const r: EodReport = { day, gst: part(), est: open ? part() : null, orders: zero(), later: zero(), receipts: { count: 0, modes: zero() },
-    returns: { count: 0, net: 0, refunds: zero() }, challans: { count: 0, pcs: 0 }, cashIn: 0, cashOut: 0, opening, closing: 0, collected: 0 };
+    returns: { count: 0, net: 0, refunds: zero() }, vouchers: { count: 0, in: zero(), out: zero(), expense: 0 }, challans: { count: 0, pcs: 0 }, cashIn: 0, cashOut: 0, opening, closing: 0, collected: 0 };
   const today = (iso?: string) => !!iso && localDay(iso) === day;
 
   for (const b of bills) {
@@ -73,11 +74,18 @@ export function eodReport(bills: Bill[], receipts: Receipt[], day: string, openi
     const amount = rc.amount - hidden; if (amount <= 0) continue;
     r.receipts.count++; addMode(r.receipts.modes, { mode: rc.mode, amount });
   }
+  for (const v of vouchers) {
+    if (v.deleted || !today(v.at) || v.mode === "credit") continue;
+    r.vouchers.count++;
+    if (v.type === "receipt") addMode(r.vouchers.in, { mode: v.mode as any, amount: v.amount });
+    if (v.type === "payment" || v.type === "expense") addMode(r.vouchers.out, { mode: v.mode as any, amount: v.amount });
+    if (v.type === "expense") r.vouchers.expense += v.amount;
+  }
 
-  const ins = [r.gst.received, r.est?.received || zero(), r.orders, r.later, r.receipts.modes];
+  const ins = [r.gst.received, r.est?.received || zero(), r.orders, r.later, r.receipts.modes, r.vouchers.in];
   r.cashIn = ins.reduce((a, m) => a + m.cash, 0);
   r.collected = ins.reduce((a, m) => a + modesTotal(m), 0);
-  r.cashOut = r.returns.refunds.cash;
+  r.cashOut = r.returns.refunds.cash + r.vouchers.out.cash;
   r.closing = opening + r.cashIn - r.cashOut;
   return r;
 }
