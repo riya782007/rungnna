@@ -1,5 +1,6 @@
 import { db, type Bill, type Product } from "./db";
 import { parseLabel } from "./parse";
+import { VERIFIED_ITEM_CODES } from "./verified-labels";
 import { findByScan, fromParsed, patterns, saveProduct, itemInfoFor, withItemInfo, readItemMap, type ItemMap } from "./products";
 
 const realName = (name?: string) => !!name?.trim() && !/^ITEM\s+\d+$/i.test(name.trim());
@@ -12,7 +13,7 @@ export function withBillNames(b: Bill, products: Product[], names: ItemMap): Bil
     if (realName(l.item)) return l;
     const p = (l.product_id ? byId.get(l.product_id) : undefined) || byCode.get(l.code);
     const code = p?.item_code || /^ITEM\s+(\d+)$/i.exec(l.item?.trim() || "")?.[1];
-    const name = realName(p?.item) ? p!.item.trim() : code ? names[code]?.name : "";
+    const name = realName(p?.item) ? p!.item.trim() : code ? (names[code]?.name || VERIFIED_ITEM_CODES[code as keyof typeof VERIFIED_ITEM_CODES]?.name) : "";
     return realName(name) ? { ...l, item: name! } : l;
   }) };
 }

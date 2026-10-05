@@ -59,7 +59,7 @@ export function InvoiceSheet({ b, shop, format }: { b: Bill; shop: Shop; format:
         <tbody>
           {b.items.map((l, i) => (
             <tr key={l.id}><td>{i + 1}</td><td>{l.box_no}</td>
-              <td><b>{l.item}</b> {l.style} <span className="inv-c">{l.color}</span>{l.disc ? <span className="inv-c"> · disc {l.disc}</span> : null}</td>
+              <td><b>{l.item}</b> {l.style} <span className="inv-c">{l.color} · {l.type}</span>{l.disc ? <span className="inv-c"> · disc {l.disc}</span> : null}</td>
               <td className="r">{l.pkts ? `${l.pkts}×${l.pack}` : ""}</td><td className="r">{l.qty}</td>
               {prices && <><td className="r">{(l.rate / 100).toFixed(2)}</td><td className="r">{(l.amount / 100).toFixed(2)}</td></>}</tr>))}
         </tbody>

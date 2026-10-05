@@ -2,6 +2,7 @@ import { db, put, uid, now, deviceId, getSetting, type Product } from "./db";
 import { parseLabel, newCode, type Parsed, type Pattern } from "./parse";
 import { toPaise } from "./format";
 import { isRfidTag, normTag } from "./rfid";
+import { VERIFIED_ITEM_CODES } from "./verified-labels";
 
 export async function patterns(): Promise<Pattern[]> { return getSetting<Pattern[]>("patterns", []); }
 
@@ -140,7 +141,7 @@ export async function itemInfoFor(icode?: string): Promise<ItemInfo | undefined>
   if (m?.name) return m;
   const hit = await db.products.where("item_code").equals(icode).filter(p => !p.deleted && !needsName(p)).first();
   if (hit) return { name: hit.item, unit: m?.unit || (hit.type && hit.type !== "PCS" ? hit.type : "") };
-  return m;
+  return m?.name ? m : { ...VERIFIED_ITEM_CODES[icode as keyof typeof VERIFIED_ITEM_CODES], ...m };
 }
 export async function itemNameFor(icode?: string) { return (await itemInfoFor(icode))?.name || ""; }
 
