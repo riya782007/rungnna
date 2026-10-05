@@ -245,6 +245,16 @@ tr.click{cursor:pointer}tr.click:hover td{background:var(--bg)}
 .cell:hover{border-color:var(--line)}
 .cell:focus{border-color:var(--ink);background:#fff}
 .cell:disabled{opacity:.55}
+.pos-tools{min-width:0}
+.pos-picklist{max-height:250px;overflow:auto;border-block:1px solid var(--line)}
+.pos-pick{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;padding:12px 4px;border:0;border-bottom:1px solid var(--line);background:transparent;color:inherit}
+.pos-pick>span{display:flex;flex-direction:column;min-width:0;overflow-wrap:anywhere}
+.pos-pick:hover{background:var(--bg)}
+.pos-keypad{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.pos-keypad .btn{height:46px;min-width:0;justify-content:center;border-radius:6px;font-size:18px}
+.pos-keypad .btn:last-child{grid-column:1/-1}
+.pos-calc-result{display:block;text-align:right;font-size:28px;overflow-wrap:anywhere;min-height:40px}
+.pos-calc-history{color:var(--muted);border-top:1px solid var(--line);padding-top:8px;overflow-wrap:anywhere}
 .pos-t td{padding:8px 10px}
 .pos-t th{padding:10px}
 .sugg{position:absolute;left:0;right:0;top:calc(100% + 6px);z-index:25;background:#fff;border-radius:14px;box-shadow:0 18px 40px -18px rgba(0,0,0,.35);border:1px solid var(--line);padding:6px;display:flex;flex-direction:column;animation:pop .16s var(--ease)}

@@ -1,6 +1,9 @@
 import { selectedBox, mergeBoxLine, type BillingDraft } from "../lib/billingBox";
 import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Calculator, Plus } from "lucide-react";
+import { validatePosLines } from "../lib/pos";
+import type { CalcTarget } from "../components/PosTools";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, type Bill, type BillLine, type Party, type Payment, type Product } from "../lib/db";
 import { findByScan, fillFromItemCode, label, readItemMap } from "../lib/products";
@@ -27,9 +30,13 @@ import { resolveBillingScan, withBillNames } from "../lib/billing-products";
 
 const KEYS: [string, string][] = [["F2", "New"], ["F3", "Customer"], ["F4", "Hold"], ["F5", "Held"], ["F6", "Next box"], ["F7", "Scan"],
   ["F8", "Save"], ["F9", "Save+Print"], ["F10", "WhatsApp"]];
+const ManualItems = lazy(() => import("../components/PosTools").then(m => ({ default: m.ManualItems })));
+const PosCalculator = lazy(() => import("../components/PosTools").then(m => ({ default: m.PosCalculator })));
 
 export default function Billing({ args }: { args: string[] }) {
   const { me } = useApp();
+  const [manual, setManual] = useState(false), [calculator, setCalculator] = useState(false), [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [shop, setShop] = useState<Shop>(DEFAULT_SHOP);
   const [b, setB] = useState<Bill | null>(null);
   const [box, setBox] = useState(1);
@@ -90,7 +97,7 @@ export default function Billing({ args }: { args: string[] }) {
   useEffect(() => { if (b && !b.no) setSetting("draft_bill", { ...b, selected_box: box }); }, [b, box]);
   useEffect(() => { if (!b) return; (async () => {
     const cc = await counterCode(); const n = (await getSetting<number>(`seq_${seriesOf(b.bill_type)}_${fy()}_${cc}`, 0)) + 1;
-    setNextNo(`${seriesOf(b.bill_type)}/${fy()}/${cc}-${String(n).padStart(4, "0")}`);
+    setNextNo(`${seriesOf(b.bill_type)}/${fy().slice(0, 2)}${cc}${String(n).padStart(4, "0")}`);
   })(); }, [b?.bill_type]);
   useEffect(() => { b?.party_id ? partyDue(b.party_id).then(setDue0) : setDue0(0); }, [b?.party_id, priv]);
 
@@ -125,6 +132,7 @@ export default function Billing({ args }: { args: string[] }) {
   useEffect(() => { tagsRef.current = new TagSet(b?.rfid_tags || []); }, [b?.id]);
 
   function addProduct(p: Product, pkts = 1, pieces = 0, rate = 0) {
+    if (savingRef.current) return;
     setB(x => {
       if (!x) return x;
       const same = x.items.find(l => l.product_id === p.id && l.box_no === boxRef.current);
@@ -215,7 +223,11 @@ export default function Billing({ args }: { args: string[] }) {
 
   async function doSave(print = false, share = false) {
     if (!b || !t) return;
+    if (savingRef.current) return;
+    savingRef.current = true; setSaving(true);
+    try {
     if (!t.items.length) return toast("No items on the bill", true);
+    validatePosLines(t.items);
     /* discount above the shop's limit needs an owner/manager PIN */
     const list = t.items.reduce((a, l) => a + l.qty * l.rate, 0);
     const offPct = list ? ((list - t.gross + t.discount) / list) * 100 : 0;
@@ -234,8 +246,11 @@ export default function Billing({ args }: { args: string[] }) {
     if (share) await shareBill(done, shop);
     setB(newBill(me?.id || "", shop, b.bill_type)); setBox(1);
     setNextNo("");
+    } catch (e: any) { toast(e.message || "Could not save bill", true); }
+    finally { savingRef.current = false; setSaving(false); }
   }
   async function doHold() {
+    if (savingRef.current) return;
     if (!b?.items.length) return toast("Nothing to hold", true);
     await holdBill(totals(b, shop.state)); await setSetting("draft_bill", null);
     toast("Bill on hold — F5 to bring it back"); setB(newBill(me?.id || "", shop, b.bill_type)); setBox(1);
@@ -265,6 +280,7 @@ export default function Billing({ args }: { args: string[] }) {
     const f = (e: KeyboardEvent) => {
       const k = e.key;
       if (!/^F\d+$/.test(k)) return;
+      if (manual || calculator || savingRef.current) return;
       e.preventDefault();
       if (k === "F2") { setB(newBill(me?.id || "", shop, priv ? b?.bill_type || "gst" : "gst")); setBox(1); }
       if (k === "F3") setCustOpen(true);
@@ -332,9 +348,11 @@ export default function Billing({ args }: { args: string[] }) {
               <button className={"btn " + (cam || sheet ? "p" : "g")} onClick={() => (small ? setSheet(true) : setCam(!cam))} title="Scan with the camera"><Icon n="scan" size={20} />Scan</button>
               {!small && <button className={"btn " + (peers ? "p" : "")} onClick={() => setPairOpen(true)} title="Use a phone as the scanner"><Icon n="sell" size={18} />{peers ? "Phone linked" : "Phone as scanner"}</button>}
               <MicButton onAudio={a => doVoice(a)} busy={aiBusy} label="🎙 Speak order" />
+              <button className="btn" disabled={saving} onClick={() => setManual(true)}><Plus size={18} />Add item</button>
+              <button className="btn" disabled={saving} title="POS calculator" aria-label="POS calculator" onClick={() => setCalculator(true)}><Calculator size={20} /></button>
             </div>
             {lastScan && <div className="lastscan" role="status" aria-live="polite">
-              <span><b>Last scanned:</b> {lastScan.item || lastScan.style || lastScan.code} · Box {lastScan.box_no} · {lastScan.qty} pcs</span>
+              <span><b>Last added:</b> {lastScan.item || lastScan.style || lastScan.code} · Box {lastScan.box_no} · {lastScan.qty} {lastScan.type || "PCS"}</span>
               <button className="chip" onClick={() => showLine(lastScan.id)}>Show line</button>
             </div>}
             {cam && !small && <div style={{ maxWidth: 560 }}><CameraScanner onCode={c => { onCode(c); }} /></div>}
@@ -344,17 +362,17 @@ export default function Billing({ args }: { args: string[] }) {
             (l.item === "ITEM " + code || (!l.item && l.product_id && pmap.get(l.product_id)?.item_code === code)) ? { ...l, item: name, type: unit } : l) })} />
           <div className="card tw">
             <table className="pos-t">
-              <thead><tr><th>#</th><th>Box</th><th>Item · Style · Colour</th><th className="r">Pkt</th><th className="r">Pcs</th><th className="r">Rate ₹</th><th className="r">Disc</th><th className="r">Amount</th><th /></tr></thead>
+              <thead><tr><th>#</th><th>Box</th><th>Item · Style · Colour</th><th className="r">Pkt</th><th className="r">Qty</th><th className="r">Rate ₹</th><th className="r">Disc</th><th className="r">Amount</th><th /></tr></thead>
               <tbody>
                 {t.items.map((l, i) => (
                   <tr key={l.id} className="ln" ref={row => { if (row) rowRefs.current.set(l.id, row); else rowRefs.current.delete(l.id); }}>
                     <td className="mut" data-l="#">{i + 1}</td>
                     <td data-l="Box"><input className="cell" style={{ width: 38 }} inputMode="numeric" value={l.box_no} onChange={e => setLine(l.id, { box_no: Math.max(1, parseInt(e.target.value) || 1) })}
                       onBlur={() => setB(x => x ? { ...x, items: mergeBoxLine(x.items, l.id) } : x)} /></td>
-                    <td data-l=""><input className="cell" style={{ width: "100%", fontWeight: 700 }} aria-label={`Product name for line ${i + 1}`} placeholder="Product name" value={/^ITEM\s+\d+$/i.test(l.item || "") ? "" : l.item || ""} onChange={e => setLine(l.id, { item: e.target.value })} /> <span className="mono">{l.style}</span> <span className="mut">{l.color}</span>{l.product_id && pmap.get(l.product_id)?.tk?.trim() ? <span className="pill warn" style={{ marginLeft: 6 }}>dead stock</span> : null}</td>
+                    <td data-l=""><input className="cell" style={{ width: "100%", fontWeight: 700 }} title={l.item} aria-label={`Product name for line ${i + 1}`} placeholder="Product name" value={/^ITEM\s+\d+$/i.test(l.item || "") ? "" : l.item || ""} onChange={e => setLine(l.id, { item: e.target.value })} /> <span className="mono">{l.style}</span> <span className="mut">{l.color} · {l.type}</span>{!l.product_id && <span className="pill">Custom</span>}{l.product_id && pmap.get(l.product_id)?.tk?.trim() ? <span className="pill warn" style={{ marginLeft: 6 }}>dead stock</span> : null}</td>
                     <td className="r" data-l="Packets">{l.pack > 1 ? <span className="row" style={{ gap: 2, justifyContent: "flex-end", flexWrap: "nowrap" }}>
                       <input className="cell r" style={{ width: 44 }} inputMode="numeric" value={l.pkts || ""} onChange={e => setLine(l.id, { pkts: parseInt(e.target.value) || 0 })} /><span className="xs mut">×{l.pack}</span></span> : <span className="mut">—</span>}</td>
-                    <td className="r" data-l="Pieces"><input className="cell r" style={{ width: 56 }} inputMode="numeric" value={l.qty || ""} disabled={l.pack > 1 && l.pkts > 0}
+                    <td className="r" data-l={l.type || "Quantity"}><input className="cell r" style={{ width: 56 }} inputMode="numeric" value={l.qty || ""} disabled={l.pack > 1 && l.pkts > 0}
                       onChange={e => setLine(l.id, { qty: parseInt(e.target.value) || 0, pkts: 0 })} /></td>
                     <td className="r" data-l="Rate ₹"><input className="cell r" style={{ width: 70 }} inputMode="decimal" disabled={!can(me, "rates") && !!(l.product_id && pmap.get(l.product_id)?.rate)} value={l.rate ? l.rate / 100 : ""} onChange={e => setLine(l.id, { rate: toPaise(e.target.value) })} /></td>
                     <td className="r" data-l="Disc"><input className="cell r" style={{ width: 54 }} placeholder="—" value={l.disc} onChange={e => setLine(l.id, { disc: e.target.value })} /></td>
@@ -393,18 +411,36 @@ export default function Billing({ args }: { args: string[] }) {
               <option value="a5">A5 invoice</option><option value="a4">A4 invoice</option><option value="80mm">80 mm thermal</option><option value="58mm">58 mm thermal</option><option value="packing">Packing slip (no rates)</option></select>
           </div>
           <div className="grid g2" style={{ gap: 6 }}>
-            <button className="btn" onClick={doHold}>Hold · F4</button>
-            <button className="btn" onClick={() => setHeld(true)}>Held · F5</button>
-            <button className="btn p" onClick={() => doSave(false)}>Save · F8</button>
-            <button className="btn dk" onClick={() => doSave(true)}>Print · F9</button>
+            <button className="btn" disabled={saving} onClick={doHold}>Hold · F4</button>
+            <button className="btn" disabled={saving} onClick={() => setHeld(true)}>Held · F5</button>
+            <button className="btn p" disabled={saving} onClick={() => doSave(false)}>{saving ? "Saving…" : "Save · F8"}</button>
+            <button className="btn dk" disabled={saving} onClick={() => doSave(true)}>Print · F9</button>
           </div>
-          <button className="btn g w" onClick={() => doSave(false, true)}>Save & WhatsApp · F10</button>
+          <button className="btn g w" disabled={saving} onClick={() => doSave(false, true)}>Save & WhatsApp · F10</button>
         </aside>
       </div>
 
       <div className="fkeys">{KEYS.map(([k, v]) => <span key={k}><kbd>{k}</kbd>{v}</span>)}</div>
       <div className="pos-mbar"><div><span className="xs">{t.total_qty} pcs · {t.items.length} lines</span><b>{rupees(t.net)}</b></div>
-        <button className="btn g" onClick={() => doSave(false, true)}>Save & Send</button><button className="btn p" onClick={() => doSave(false)}>Save</button></div>
+        <button className="btn g" disabled={saving} onClick={() => doSave(false, true)}>Save & Send</button><button className="btn p" disabled={saving} onClick={() => doSave(false)}>{saving ? "Saving…" : "Save"}</button></div>
+      <Suspense fallback={<div className="toast" role="status">Loading billing tool…</div>}>
+        {manual && <ManualItems products={products} box={box} level={b.price_level || "wholesale"} canRates={can(me, "rates")} onClose={() => { setManual(false); scanRef.current?.focus(); }}
+          onProduct={(p, count, pieces, rate) => {
+            const line = fixLine({ ...lineFrom(p, box, pieces ? 0 : count, b.price_level || "wholesale"), ...(pieces ? { qty: count, pkts: 0 } : {}), rate });
+            setB(x => {
+              if (!x) return x;
+              const items = mergeBoxLine([...x.items, line], line.id);
+              pendingScan.current = items.find(l => l.product_id === line.product_id && l.box_no === line.box_no && l.rate === line.rate && l.disc === line.disc)?.id || line.id;
+              return { ...x, items };
+            });
+          }} onCustom={line => { pendingScan.current = line.id; setB(x => x && { ...x, items: [...x.items, line] }); }} />}
+        {calculator && <PosCalculator lines={t.items} onClose={() => setCalculator(false)} onApply={(value, target: CalcTarget, id) => {
+          if (value < 0) throw new Error("Billing amounts cannot be negative");
+          if (target === "rate") { const l = t.items.find(l => l.id === id); if (!l) throw new Error("Select an item"); if (!can(me, "rates") && l.product_id && pmap.get(l.product_id)?.rate) throw new Error("Owner approval is required to change this price"); setLine(id, { rate: value }); }
+          if (target === "packing") set({ packing: value });
+          if (target === "discount") set({ discount: value, discount_pct: 0 });
+        }} />}
+      </Suspense>
 
       {custOpen && <CustomerPicker bill={b} onPick={p => { set(p); setCustOpen(false); scanRef.current?.focus(); }} onClose={() => setCustOpen(false)} />}
       {sheet && <ScanSheet onCode={onCode} onClose={() => setSheet(false)} lines={t.items.length} pcs={t.total_qty} net={t.net} last={t.items[t.items.length - 1]} />}

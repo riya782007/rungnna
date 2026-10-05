@@ -5,6 +5,7 @@ import { setTagsSold } from "./rfid";
 import { assertUnlocked } from "./finance";
 import { currentStore, inStore, assertStoreRow, storeLocations } from "./stores";
 import { fillBillNames } from "./billing-products";
+import { validatePosLines } from "./pos";
 
 /* ---------------- shop profile (synced to every device) ---------------- */
 export interface Shop {
@@ -126,11 +127,13 @@ export async function holdBill(b: Bill) {
    Lines marked stock_done already left on another document (merged sources, challans, a split) and are skipped.
    `after` runs inside the same transaction, so linked changes (e.g. marking merged sources) save all-or-nothing. */
 export async function finalize(b: Bill, shopState: string, customerName = "", after?: (saved: Bill) => Promise<void>): Promise<Bill> {
+  return db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock, db.products, db.stores, db.locations, db.settings, db.config], async () => {
   await assertStoreRow(b);
   b = await fillBillNames(b);
   if (b.items.some(l => !l.item?.trim() || /^ITEM\s+\d+$/i.test(l.item.trim()))) throw new Error("Every bill item needs a product name");
   if (b.compliance?.irn || b.compliance?.ewb) throw new Error("Registered documents cannot be edited; use a credit note");
   const t = totals(b, shopState);
+  validatePosLines(t.items);
   const before0 = await db.bills.get(b.id);
   if (before0?.at) await assertUnlocked(before0.at);
   const num = t.no ? { no: t.no, series: t.series } : await nextNo(t.bill_type, t.src_type);
@@ -164,6 +167,7 @@ export async function finalize(b: Bill, shopState: string, customerName = "", af
     }
   });
   return bill;
+  });
 }
 export async function bumpStock(product_id: string, loc: string, delta: number) {
   const k = product_id + "|" + loc; const c = await db.stock.get(k);
