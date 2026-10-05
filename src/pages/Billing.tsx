@@ -1,3 +1,4 @@
+import { selectedBox, mergeBoxLine, type BillingDraft } from "../lib/billingBox";
 import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -32,6 +33,31 @@ export default function Billing({ args }: { args: string[] }) {
   const [shop, setShop] = useState<Shop>(DEFAULT_SHOP);
   const [b, setB] = useState<Bill | null>(null);
   const [box, setBox] = useState(1);
+  const boxRef = useRef(box); boxRef.current = box;
+  const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
+  const pendingScan = useRef<string | null>(null);
+  const [lastScanId, setLastScanId] = useState<string | null>(null);
+  const [flashId, setFlashId] = useState<string | null>(null);
+  function showLine(id: string) {
+    const row = rowRefs.current.get(id);
+    if (!row) return;
+    row.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "auto" });
+    row.classList.remove("flash");
+    void row.offsetWidth; // restart the highlight when the same item is scanned again
+    row.classList.add("flash");
+    setFlashId(id);
+  }
+  useEffect(() => {
+    if (!pendingScan.current) return;
+    const id = pendingScan.current; pendingScan.current = null;
+    setLastScanId(id); showLine(id);
+  }, [b]);
+  useEffect(() => {
+    if (!flashId) return;
+    const timer = setTimeout(() => { rowRefs.current.get(flashId)?.classList.remove("flash"); setFlashId(null); }, 1600);
+    return () => clearTimeout(timer);
+  }, [flashId, b]);
+  useEffect(() => { setLastScanId(null); setFlashId(null); pendingScan.current = null; }, [b?.id]);
   const [q, setQ] = useState("");
   const [cam, setCam] = useState(false);
   const [held, setHeld] = useState(false);
@@ -53,12 +79,14 @@ export default function Billing({ args }: { args: string[] }) {
     (async () => {
       const s = await getShop(); setShop(s);
       setFmt(await getSetting<PrintFormat>("print_fmt", "a5"));
-      if (args[0]) { const x = await db.bills.get(args[0]); if (x && inStore(x)) { setB(x); return; } }
-      const d = await getSetting<Bill | null>("draft_bill", null);
-      setB(d && d.status === "hold" && !d.no && (d.bill_type !== "estimate" || isOpen()) ? d : newBill(me?.id || "", s, "gst"));
+      if (args[0]) { const x = await db.bills.get(args[0]); if (x && inStore(x)) { setBox(selectedBox(x)); setB(x); return; } }
+      const d = await getSetting<BillingDraft | null>("draft_bill", null);
+      const restored = d && d.status === "hold" && !d.no && (d.bill_type !== "estimate" || isOpen()) ? d : null;
+      setBox(restored ? selectedBox(restored) : 1);
+      setB(restored || newBill(me?.id || "", s, "gst"));
     })();
   }, [args[0]]);
-  useEffect(() => { if (b && !b.no) setSetting("draft_bill", b); }, [b]);
+  useEffect(() => { if (b && !b.no) setSetting("draft_bill", { ...b, selected_box: box }); }, [b, box]);
   useEffect(() => { if (!b) return; (async () => {
     const cc = await counterCode(); const n = (await getSetting<number>(`seq_${seriesOf(b.bill_type)}_${fy()}_${cc}`, 0)) + 1;
     setNextNo(`${seriesOf(b.bill_type)}/${fy()}/${cc}-${String(n).padStart(4, "0")}`);
@@ -70,7 +98,7 @@ export default function Billing({ args }: { args: string[] }) {
   useEffect(() => {
     if (priv || !b || b.bill_type !== "estimate") return;
     // locked while an estimate was open: park it out of sight, continue with a GST invoice
-    (async () => { if (b.items.length) await holdBill(totals(b, shop.state)); await setSetting("draft_bill", null); setB(newBill(me?.id || "", shop, "gst")); })();
+    (async () => { if (b.items.length) await holdBill(totals(b, shop.state)); await setSetting("draft_bill", null); setB(newBill(me?.id || "", shop, "gst")); setBox(1); })();
   }, [priv]);
   const press = useRef<any>(0);
   const hintProps = {
@@ -98,14 +126,16 @@ export default function Billing({ args }: { args: string[] }) {
   function addProduct(p: Product, pkts = 1, pieces = 0, rate = 0) {
     setB(x => {
       if (!x) return x;
-      const same = x.items.find(l => l.product_id === p.id && l.box_no === box);
+      const same = x.items.find(l => l.product_id === p.id && l.box_no === boxRef.current);
       if (same && !pieces && !rate) {
+        pendingScan.current = same.id;
         const named = p.item ? { item: p.item, type: p.type } : {}; // a scan that just learned the name updates the line too
-        return { ...x, items: x.items.map(l => l.id === same.id ? fixLine(l.pack > 1 ? { ...l, ...named, pkts: l.pkts + pkts } : { ...l, ...named, qty: l.qty + pkts }) : l) };
+        return { ...x, items: x.items.map(l => l.id === same.id ? fixLine(l.pack > 1 && l.pkts > 0 ? { ...l, ...named, pkts: l.pkts + pkts } : { ...l, ...named, qty: l.qty + pkts * Math.max(1, l.pack) }) : l) };
       }
-      let line = lineFrom(p, box, pkts, x.price_level || "wholesale");
+      let line = lineFrom(p, boxRef.current, pkts, x.price_level || "wholesale");
       if (pieces) line = fixLine({ ...line, pkts: 0, qty: pieces });
       if (rate) line = fixLine({ ...line, rate: toPaise(rate) });
+      pendingScan.current = line.id;
       return { ...x, items: [...x.items, line] };
     });
   }
@@ -258,6 +288,7 @@ export default function Billing({ args }: { args: string[] }) {
   const unnamed = unnamedCodes(t.items, id => (id ? pmap.get(id)?.item_code : undefined));
   const boxes = [...new Set([...t.items.map(l => l.box_no), box])].sort((a, z) => a - z);
   const balance = due(t);
+  const lastScan = t.items.find(l => l.id === lastScanId);
 
   return (
     <div className="pos">
@@ -306,6 +337,10 @@ export default function Billing({ args }: { args: string[] }) {
               {!small && <button className={"btn " + (peers ? "p" : "")} onClick={() => setPairOpen(true)} title="Use a phone as the scanner"><Icon n="sell" size={18} />{peers ? "Phone linked" : "Phone as scanner"}</button>}
               <MicButton onAudio={a => doVoice(a)} busy={aiBusy} label="🎙 Speak order" />
             </div>
+            {lastScan && <div className="lastscan" role="status" aria-live="polite">
+              <span><b>Last scanned:</b> {lastScan.item || lastScan.style || lastScan.code} · Box {lastScan.box_no} · {lastScan.qty} pcs</span>
+              <button className="chip" onClick={() => showLine(lastScan.id)}>Show line</button>
+            </div>}
             {cam && !small && <div style={{ maxWidth: 560 }}><CameraScanner onCode={c => { onCode(c); }} /></div>}
           </div>
 
@@ -316,9 +351,10 @@ export default function Billing({ args }: { args: string[] }) {
               <thead><tr><th>#</th><th>Box</th><th>Item · Style · Colour</th><th className="r">Pkt</th><th className="r">Pcs</th><th className="r">Rate ₹</th><th className="r">Disc</th><th className="r">Amount</th><th /></tr></thead>
               <tbody>
                 {t.items.map((l, i) => (
-                  <tr key={l.id} className="ln">
+                  <tr key={l.id} className="ln" ref={row => { if (row) rowRefs.current.set(l.id, row); else rowRefs.current.delete(l.id); }}>
                     <td className="mut" data-l="#">{i + 1}</td>
-                    <td data-l="Box"><input className="cell" style={{ width: 38 }} inputMode="numeric" value={l.box_no} onChange={e => setLine(l.id, { box_no: parseInt(e.target.value) || 1 })} /></td>
+                    <td data-l="Box"><input className="cell" style={{ width: 38 }} inputMode="numeric" value={l.box_no} onChange={e => setLine(l.id, { box_no: Math.max(1, parseInt(e.target.value) || 1) })}
+                      onBlur={() => setB(x => x ? { ...x, items: mergeBoxLine(x.items, l.id) } : x)} /></td>
                     <td data-l=""><b>{l.item || "—"}</b> <span className="mono">{l.style}</span> <span className="mut">{l.color}</span>{l.product_id && pmap.get(l.product_id)?.tk?.trim() ? <span className="pill warn" style={{ marginLeft: 6 }}>dead stock</span> : null}</td>
                     <td className="r" data-l="Packets">{l.pack > 1 ? <span className="row" style={{ gap: 2, justifyContent: "flex-end", flexWrap: "nowrap" }}>
                       <input className="cell r" style={{ width: 44 }} inputMode="numeric" value={l.pkts || ""} onChange={e => setLine(l.id, { pkts: parseInt(e.target.value) || 0 })} /><span className="xs mut">×{l.pack}</span></span> : <span className="mut">—</span>}</td>
@@ -378,7 +414,7 @@ export default function Billing({ args }: { args: string[] }) {
       {sheet && <ScanSheet onCode={onCode} onClose={() => setSheet(false)} lines={t.items.length} pcs={t.total_qty} net={t.net} last={t.items[t.items.length - 1]} />}
       {pairOpen && <PairPhone id={pairId} peers={peers} onNew={async () => { const id = Math.random().toString(36).slice(2, 10); await setSetting("remote_id", id); setPairId(id); }} onClose={() => setPairOpen(false)} />}
       {askCode && <CodePrompt onDone={ok => { setAskCode(false); if (ok) set({ bill_type: "estimate" }); }} />}
-      {held && <HeldBills onPick={x => { setB(x); setHeld(false); }} onClose={() => setHeld(false)} />}
+      {held && <HeldBills onPick={x => { setBox(selectedBox(x)); setB(x); setHeld(false); }} onClose={() => setHeld(false)} />}
       {printing && <PrintBill b={printing.bill} shop={shop} format={printing.fmt} onDone={() => setPrinting(null)} />}
     </div>
   );
