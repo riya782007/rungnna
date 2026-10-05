@@ -524,3 +524,10 @@ img,svg,video,canvas{max-width:100%}
 .eod-t td{padding:7px 6px;border-bottom:1px solid var(--line);vertical-align:top;white-space:nowrap}
 .eod-t td:first-child{white-space:normal;min-width:120px}
 .eod-t .inv-net td{border-top:2px solid var(--ink);font-size:15px}
+
+/* billing: show the line reached by every scan */
+.pos-t tr.ln.flash td{animation:lnflash 1.6s ease-out}
+@keyframes lnflash{0%{background:#fde68a}100%{background:transparent}}
+@media (prefers-reduced-motion:reduce){.pos-t tr.ln.flash td{animation:none;background:#fef3c7}}
+.lastscan{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:14px;padding:8px 10px;border-radius:10px;background:var(--line-2,#f3f1ec)}
+.lastscan .chip{margin-left:auto}
