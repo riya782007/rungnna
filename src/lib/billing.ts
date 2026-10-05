@@ -4,6 +4,7 @@ import { isOpen, isEstimate } from "./privacy";
 import { setTagsSold } from "./rfid";
 import { assertUnlocked } from "./finance";
 import { currentStore, inStore, assertStoreRow, storeLocations } from "./stores";
+import { fillBillNames } from "./billing-products";
 
 /* ---------------- shop profile (synced to every device) ---------------- */
 export interface Shop {
@@ -126,6 +127,8 @@ export async function holdBill(b: Bill) {
    `after` runs inside the same transaction, so linked changes (e.g. marking merged sources) save all-or-nothing. */
 export async function finalize(b: Bill, shopState: string, customerName = "", after?: (saved: Bill) => Promise<void>): Promise<Bill> {
   await assertStoreRow(b);
+  b = await fillBillNames(b);
+  if (b.items.some(l => !l.item?.trim() || /^ITEM\s+\d+$/i.test(l.item.trim()))) throw new Error("Every bill item needs a product name");
   if (b.compliance?.irn || b.compliance?.ewb) throw new Error("Registered documents cannot be edited; use a credit note");
   const t = totals(b, shopState);
   const before0 = await db.bills.get(b.id);

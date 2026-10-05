@@ -19,8 +19,8 @@ export async function findByScan(raw: string, parsed?: Parsed): Promise<Product 
     if (p && !p.deleted) return p;
   }
   if (x.style) {
-    const same = await db.products.where("style").equals(x.style).toArray();
-    const hit = same.find(q => !q.deleted && (!x.color || q.color === x.color) && (!x.item || q.item === x.item));
+    const same = await db.products.where("style").equals(x.style.trim().toUpperCase()).toArray();
+    const hit = same.find(q => !q.deleted && (!x.color || q.color === x.color.trim().toUpperCase()) && (!x.item || q.item === x.item.trim().toUpperCase() || !q.item?.trim() || needsName(q)) && (!x.icode || !q.item_code || q.item_code === x.icode));
     if (hit) return hit;
   }
   return undefined;
@@ -70,7 +70,7 @@ export function fromParsed(x: Parsed, by: string): Product {
   if (x.how === "rungnna" && x.code) p.code = x.code;
   if (x.icode) p.item_code = x.icode;
   if (x.ref) p.ref = x.ref;
-  const pk = parseInt(x.qty || ""); if (x.how === "shop label" && pk > 0) p.pack = pk;
+  const pk = parseInt(x.qty || ""); if (["shop label", "rungnna"].includes(x.how) && pk > 0) p.pack = pk;
   return p;
 }
 

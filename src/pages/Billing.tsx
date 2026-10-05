@@ -2,10 +2,9 @@ import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, type Bill, type BillLine, type Party, type Payment, type Product } from "../lib/db";
-import { findByScan, fromParsed, saveProduct, patterns, itemInfoFor, withItemInfo, fillFromItemCode, needsName, label } from "../lib/products";
+import { findByScan, fillFromItemCode, label, readItemMap } from "../lib/products";
 import { NameItemCodes, unnamedCodes } from "../components/NameItemCodes";
 import { isRfidTag, normTag, soldBill, TagSet, Recent } from "../lib/rfid";
-import { parseLabel } from "../lib/parse";
 import { newBill, lineFrom, totals, fixLine, finalize, holdBill, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
 import { voiceBill } from "../lib/ai";
 import { useApp, toast, beep, go } from "../lib/app";
@@ -20,6 +19,7 @@ import { createPortal } from "react-dom";
 import { MicButton } from "../components/Voice";
 import { Modal, PhotoButton, Thumb } from "../components/common";
 import { PrintBill, type PrintFormat } from "../components/Invoice";
+import { resolveBillingScan, withBillNames } from "../lib/billing-products";
 
 /* The counter screen. Built like the shop's current PACKING SLIP: scan → lines → totals → save/print,
    every action on a function key, works with no internet (numbers come from this counter's own series). */
@@ -46,6 +46,7 @@ export default function Billing({ args }: { args: string[] }) {
   const priv = usePrivate();
   const products = useLiveQuery(() => db.products.filter(p => !p.deleted).toArray(), [], []);
   const pmap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
+  const itemNames = useLiveQuery(() => db.config.get("item_codes"), []);
   const staff = useLiveQuery(() => db.staff.filter(s => inStore(s) && !!s.active && !s.deleted).toArray(), [], []);
 
   /* load shop profile + a resumed bill (#/bill/<id>) or the unsaved draft on this device */
@@ -65,7 +66,7 @@ export default function Billing({ args }: { args: string[] }) {
   })(); }, [b?.bill_type]);
   useEffect(() => { b?.party_id ? partyDue(b.party_id).then(setDue0) : setDue0(0); }, [b?.party_id, priv]);
 
-  const t = useMemo(() => (b ? totals(b, shop.state) : null), [b, shop.state]);
+  const t = useMemo(() => (b ? totals(withBillNames(b, products, readItemMap(itemNames?.value)), shop.state) : null), [b, shop.state, products, itemNames]);
   const [askCode, setAskCode] = useState(false);
   useEffect(() => {
     if (priv || !b || b.bill_type !== "estimate") return;
@@ -120,16 +121,9 @@ export default function Billing({ args }: { args: string[] }) {
   /* the same new sticker read twice in a split second must not create two products */
   const creating = useRef(new Map<string, Promise<Product | undefined>>());
   async function resolve(r: string): Promise<Product | undefined> {
-    const found = await findByScan(r); if (found) return fillFromItemCode(found);
     if (creating.current.has(r)) return creating.current.get(r);
     const job = (async () => {
-      const parsed = parseLabel(r, await patterns());
-      if (!(parsed.style && (parsed.how === "shop label" || parsed.how === "rungnna"))) return undefined;
-      let np = fromParsed(parsed, me?.id || "");
-      np = withItemInfo(np, await itemInfoFor(np.item_code)) || np;
-      const p = await saveProduct(np);
-      toast(`New product added from label: ${label(p)}`);
-      return p;
+      return resolveBillingScan(r, me?.id || "");
     })();
     creating.current.set(r, job);
     try { return await job; } finally { setTimeout(() => creating.current.delete(r), 3000); }
@@ -201,7 +195,9 @@ export default function Billing({ args }: { args: string[] }) {
       if (!ok) return toast("Discount not approved", true);
     }
     if (b.bill_type === "gst" && !shop.gstin) toast("Tip: add the shop GSTIN in Settings → Shop profile", true);
-    const done = await finalize(b, shop.state, b.party_name);
+    const missing = t.items.find(l => !l.item?.trim() || /^ITEM\s+\d+$/i.test(l.item.trim()));
+    if (missing) return toast("Add the product name before saving: " + (missing.style || missing.code), true);
+    const done = await finalize(t, shop.state, b.party_name);
     toast(`Saved ${done.no} · ${rupees(done.net)}`);
     await setSetting("draft_bill", null);
     if (print) setPrinting({ bill: done, fmt });
@@ -319,7 +315,7 @@ export default function Billing({ args }: { args: string[] }) {
                   <tr key={l.id} className="ln">
                     <td className="mut" data-l="#">{i + 1}</td>
                     <td data-l="Box"><input className="cell" style={{ width: 38 }} inputMode="numeric" value={l.box_no} onChange={e => setLine(l.id, { box_no: parseInt(e.target.value) || 1 })} /></td>
-                    <td data-l=""><b>{l.item || "—"}</b> <span className="mono">{l.style}</span> <span className="mut">{l.color}</span>{l.product_id && pmap.get(l.product_id)?.tk?.trim() ? <span className="pill warn" style={{ marginLeft: 6 }}>dead stock</span> : null}</td>
+                    <td data-l="">{!l.item?.trim() || /^ITEM\s+\d+$/i.test(l.item.trim()) ? <input className="in" aria-label={`Product name for line ${i + 1}`} placeholder="Product name" value={/^ITEM\s+\d+$/i.test(l.item || "") ? "" : l.item} onChange={e => setLine(l.id, { item: e.target.value })} /> : <b>{l.item}</b>} <span className="mono">{l.style}</span> <span className="mut">{l.color}</span>{l.product_id && pmap.get(l.product_id)?.tk?.trim() ? <span className="pill warn" style={{ marginLeft: 6 }}>dead stock</span> : null}</td>
                     <td className="r" data-l="Packets">{l.pack > 1 ? <span className="row" style={{ gap: 2, justifyContent: "flex-end", flexWrap: "nowrap" }}>
                       <input className="cell r" style={{ width: 44 }} inputMode="numeric" value={l.pkts || ""} onChange={e => setLine(l.id, { pkts: parseInt(e.target.value) || 0 })} /><span className="xs mut">×{l.pack}</span></span> : <span className="mut">—</span>}</td>
                     <td className="r" data-l="Pieces"><input className="cell r" style={{ width: 56 }} inputMode="numeric" value={l.qty || ""} disabled={l.pack > 1 && l.pkts > 0}

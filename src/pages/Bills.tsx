@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { fillBillNames } from "../lib/billing-products";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, type Bill, type BillType, type Payment } from "../lib/db";
 import { GstBill } from "../components/GstBill";
@@ -166,7 +167,7 @@ function DeleteEstimates({ bills, onClose }: { bills: Bill[]; onClose: () => voi
 
 function BillView({ id }: { id: string }) {
   const { me } = useApp();
-  const b = useLiveQuery(() => db.bills.get(id), [id]);
+  const b = useLiveQuery(async () => { const bill = await db.bills.get(id); return bill ? fillBillNames(bill) : undefined; }, [id]);
   const related = useLiveQuery(() => db.bills.where("return_of").equals(id).filter(x => !x.deleted).toArray(), [id], []);
   const sources = useLiveQuery(async () => (b?.merged_from?.length ? ((await db.bills.bulkGet(b.merged_from)).filter(Boolean) as Bill[]) : []), [b?.merged_from?.join()], []);
   const [shop, setShop] = useState<Shop>(DEFAULT_SHOP);

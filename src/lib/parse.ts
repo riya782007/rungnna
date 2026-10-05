@@ -26,6 +26,8 @@ export const OWN_PREFIX = "RJ1";
 
 const ALIASES: Record<string, Field> = {
   item: "item", itm: "item", product: "item", name: "item", category: "item",
+  item_name: "item", product_name: "item", itemname: "item", productname: "item",
+  icode: "icode", item_code: "icode", itemcode: "icode",
   type: "type", unit: "type", uom: "type",
   style: "style", sty: "style", design: "style", art: "style", artno: "style", "art no": "style", sku: "style", model: "style",
   color: "color", colour: "color", col: "color", clr: "color",
@@ -62,8 +64,8 @@ export function parseLabel(rawIn: string, patterns: Pattern[] = []): Parsed {
   // 1. our own QR
   if (raw.startsWith(OWN_PREFIX + "|")) {
     const t = raw.split("|");
-    const [, code, item, type, style, color, tk, rate] = t;
-    return { raw, how: "rungnna", tokens: t, code, item, type, style, color, tk, rate: num(rate || "") };
+    const [, code, item, type, style, color, tk, rate, pack] = t;
+    return { raw, how: "rungnna", tokens: t, code, item, type, style, color, tk, rate: num(rate || ""), qty: num(pack || "") };
   }
 
   // 1b. the shop's existing labels (old billing software):
@@ -142,7 +144,7 @@ export function ownPayload(p: { code: string; item: string; type: string; style:
     return [c(p.item_code), p.rate ? String(Math.round(p.rate) / 100) : "0", String(p.pack || 1), c(p.ref || ""), c(p.tk), c(p.style), c(p.color)].join("~");
   }
   const s = (v: string) => (v || "").replace(/\|/g, "/").trim();
-  return [OWN_PREFIX, s(p.code), s(p.item), s(p.type), s(p.style), s(p.color), s(p.tk), p.rate ? String(Math.round(p.rate) / 100) : ""].join("|");
+  return [OWN_PREFIX, s(p.code), s(p.item), s(p.type), s(p.style), s(p.color), s(p.tk), p.rate ? String(Math.round(p.rate) / 100) : "", String(p.pack || 1)].join("|");
 }
 
 /* A short, unique, human-typeable code. Device letter + time base36 keeps it collision-free offline. */
