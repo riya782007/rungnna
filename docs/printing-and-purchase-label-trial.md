@@ -7,6 +7,8 @@ is consistent with a missing print document or a paper/driver mismatch, but the
 photographs alone do not identify the exact cause. No printer/spooler logs or
 confirmed printer model were supplied. The old receipts establish box-wise item
 lines, unit, quantity, rate, amount, discount, advance, packing and net amount.
+Karan's follow-up on 6 October 2026 confirms automatic half/partial cutting.
+The model, driver configuration and output from the updated app remain unverified.
 
 ## Changes
 
@@ -55,7 +57,10 @@ provider quota availability.
 3. In the browser dialog choose the correct printer, receipt/roll paper, 100%
    scale, and turn off Headers and footers. Do not use A4 paper on a receipt roll.
 4. In the manufacturer's Windows driver enable cutting at End of Document / End
-   of Job, if the printer has an automatic cutter. Names vary by manufacturer.
+   of Job with Partial / Half cut, not a cut after each page. Settings > Printing
+   records this per-device cutter preference (half cut by default); it does not
+   configure Windows. Full cut and manual tear-off remain selectable for other
+   counters. Names and supported cut modes vary by manufacturer.
    Browser CSS cannot turn a physical cutter on or supply a missing driver.
 5. Print a small two-box bill; check names, quantities, totals, paper length and
    one cut after the bill. Exact auto-cut behavior remains unverified until this
@@ -101,7 +106,8 @@ that every Sadar Bazaar shop uses the same software or printer:
 ## Short Message For Karan
 
 Karan ji, please update the app and try one small bill first. Set Printing to your
-roll width, turn browser headers/footers off and enable end-of-bill cutting in the
+roll width, turn browser headers/footers off and enable Partial / Half cut at End
+of Document / End of Job in the
 printer driver. Check both boxes, names, totals and the cut. Then upload one clear
 purchase bill in Stock in > Purchase bill photos. Check the pricing rule, supplier,
 rack, quantities, rates and payable, then press Save purchase & print labels once.

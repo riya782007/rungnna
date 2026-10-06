@@ -17,6 +17,7 @@ import { initLang, setLang, type Lang } from "../lib/i18n";
 import { closeFinancialYear, lockedUpto, setVoucherLock } from "../lib/finance";
 import { SecuritySettings } from "../components/OwnerSecurity";
 import { gstRequest } from "../lib/compliance";
+import { RECEIPT_CUTS, receiptCut, receiptCutSetup, type ReceiptCut } from "../lib/printing";
 
 export default function Settings() {
   const { me, setMe } = useApp();
@@ -113,8 +114,21 @@ const ROLES: Staff["role"][] = ["owner", "manager", "cashier", "salesman", "help
 
 function PrintingSettings() {
   const [width, setWidth] = useState("80mm");
-  useEffect(() => { getSetting("thermal_width", "80mm").then(setWidth); }, []);
-  return <section className="stack"><h3>Printing</h3><label className="f">Thermal paper width<select className="in" value={width} onChange={async e => { const value = e.target.value; setWidth(value); await db.transaction("rw", db.settings, async () => { await setSetting("thermal_width", value); await setSetting("print_fmt", value); }); toast("Printer preference saved"); }}><option value="58mm">58 mm</option><option value="80mm">80 mm</option></select></label><span className="sm">Receipt size: fitted to each bill · Cut: Windows printer driver</span><a className="btn" href="#/labels">Label printer settings</a></section>;
+  const [cut, setCut] = useState<ReceiptCut>("partial");
+  useEffect(() => {
+    getSetting("thermal_width", "80mm").then(setWidth);
+    getSetting("receipt_cut", "partial").then(value => setCut(receiptCut(value)));
+  }, []);
+  return <section className="stack"><h3>Printing</h3>
+    <label className="f">Thermal paper width<select className="in" value={width} onChange={async e => { const value = e.target.value; setWidth(value); await db.transaction("rw", db.settings, async () => { await setSetting("thermal_width", value); await setSetting("print_fmt", value); }); toast("Printer preference saved"); }}><option value="58mm">58 mm</option><option value="80mm">80 mm</option></select></label>
+    <label className="f">Receipt cutter (driver setup)<select className="in" value={cut} onChange={async e => {
+      const value = receiptCut(e.target.value);
+      try { await setSetting("receipt_cut", value); setCut(value); toast("Preference saved; match it in Windows printer preferences"); }
+      catch { toast("Could not save cutter preference", true); }
+    }}>{Object.entries(RECEIPT_CUTS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+    <span className="sm">{receiptCutSetup(cut)}</span>
+    <span className="sm">Receipt size: fitted to each bill</span><a className="btn" href="#/labels">Label printer settings</a>
+  </section>;
 }
 function GstSettings() {
   const [status, setStatus] = useState("Download JSON only");

@@ -1,5 +1,20 @@
 import { useEffect, useRef } from "react";
 
+export const RECEIPT_CUTS = {
+  partial: "Automatic half cut (partial)",
+  full: "Automatic full cut",
+  manual: "Manual tear-off",
+} as const;
+export type ReceiptCut = keyof typeof RECEIPT_CUTS;
+export function receiptCut(value: unknown): ReceiptCut {
+  return value === "full" || value === "manual" ? value : "partial";
+}
+export function receiptCutSetup(cut: ReceiptCut) {
+  return cut === "manual"
+    ? "Windows printer preferences: disable automatic cutting; tear off after the complete bill."
+    : `Windows printer preferences: ${cut === "partial" ? "Partial / Half cut" : "Full cut"} at End of Document / End of Job, not after each page. This device preference does not change the printer driver.`;
+}
+
 export async function printDocument(source: Document, frame: () => Promise<void>, onDone = () => {}, cancelled = () => false) {
   const content = source.getElementById("printroot");
   if (!content?.textContent?.trim() || !content.children.length) throw new Error("No printable content. Close print and try again.");

@@ -4,8 +4,20 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { InvoiceSheet } from "../src/components/Invoice";
 import { newBill, DEFAULT_SHOP } from "../src/lib/billing";
 import { manualLine } from "../src/lib/pos";
-import { preparePrint, thermalPage } from "../src/lib/printing";
+import { preparePrint, thermalPage, receiptCut, receiptCutSetup } from "../src/lib/printing";
 describe("thermal invoices", () => {
+  it("defaults to the confirmed half-cut profile without accepting invalid settings", () => {
+    for (const value of [undefined, null, "partial", "unknown", "toString"]) expect(receiptCut(value)).toBe("partial");
+    expect(receiptCut("full")).toBe("full");
+    expect(receiptCut("manual")).toBe("manual");
+  });
+  it("requires driver setup for an end-of-job cut, not a cut between bill pages", () => {
+    expect(receiptCutSetup("partial")).toContain("Partial / Half cut");
+    expect(receiptCutSetup("partial")).toContain("not after each page");
+    expect(receiptCutSetup("partial")).toContain("does not change the printer driver");
+    expect(receiptCutSetup("full")).toContain("Full cut");
+    expect(receiptCutSetup("manual")).toContain("disable automatic cutting");
+  });
   it("prints product names, units and the old counter's per-box quantities", () => {
     const b = { ...newBill("o", DEFAULT_SHOP), items: [manualLine({ item: "BALI", style: "K5209", color: "G", unit: "PAIR", hsn: "7117", qty: "4", rate: "100", box: 1 })] };
     for (const format of ["80mm", "58mm"] as const) {
