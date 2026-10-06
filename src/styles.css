@@ -310,6 +310,11 @@ tr.click{cursor:pointer}tr.click:hover td{background:var(--bg)}
 .inv.thermal .inv-head,.inv.thermal .inv-meta,.inv.thermal .inv-foot,.inv.thermal .inv-terms{flex-direction:column}
 .inv.thermal .inv-title{text-align:left}.inv.thermal .inv-sum{width:100%}
 .inv.thermal .inv-t th:nth-child(2),.inv.thermal .inv-t td:nth-child(2){display:none}
+.inv.thermal{max-width:100%;overflow-wrap:anywhere}
+.inv.thermal .inv-t{table-layout:fixed}
+.inv.thermal .inv-t th{white-space:normal}
+.inv.thermal .inv-t th:nth-child(3){width:34%}
+.inv.thermal .inv-title,.inv.thermal .inv-terms span{white-space:normal}
 .inv.narrow{width:54mm;max-width:100%;font-size:9px}
 .inv.narrow .inv-shop{font-size:13px;overflow-wrap:anywhere}
 .inv.narrow .inv-t{table-layout:fixed;font-size:8px}
@@ -357,9 +362,10 @@ tr.click{cursor:pointer}tr.click:hover td{background:var(--bg)}
 }
 @media(max-width:860px){.menu-toggle{display:none}.pos-inline .pos-tools>.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media print{
-  #root,.toast,.modal{display:none!important}
-  html,body{background:#fff;margin:0}
-  #printroot{display:block}
+  body > :not(#printroot){display:none!important}
+  html,body{background:#fff;margin:0;padding:0;height:auto;min-height:0}
+  #printroot{display:block;position:static;height:auto;min-height:0;margin:0;padding:0}
+  #printroot .inv-t tr{break-inside:avoid}
   .lbl{box-shadow:none}
 }
 .switch{display:flex;align-items:center;gap:12px;width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}

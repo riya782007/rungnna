@@ -470,6 +470,7 @@ export default function Billing({ args }: { args: string[] }) {
             <select className="in" style={{ flex: 1, minHeight: 36, padding: "4px 8px" }} value={fmt} onChange={e => { setFmt(e.target.value as PrintFormat); setSetting("print_fmt", e.target.value); }}>
               <option value="a5">A5 invoice</option><option value="a4">A4 invoice</option><option value="80mm">80 mm thermal</option><option value="58mm">58 mm thermal</option><option value="packing">Packing slip (no rates)</option></select>
           </div>
+          <div className="xs mut">Roll printer: choose 58 mm or 80 mm thermal to match your paper. Enable auto-cut in the printer's preferences.</div>
           <div className="grid g2" style={{ gap: 6 }}>
             <button className="btn" disabled={saving} onClick={doHold}>Hold · F3</button>
             <button className="btn" disabled={saving} onClick={() => setHeld(true)}>Held · F4</button>

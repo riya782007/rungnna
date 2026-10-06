@@ -35,9 +35,10 @@ export function InvoiceSheet({ b, shop, format }: { b: Bill; shop: Shop; format:
   const boxes = [...new Set(b.items.map(l => l.box_no))].sort((a, z) => a - z);
   const thermal = format === "80mm" || format === "58mm";
   const page = thermal ? "auto" : format === "a4" ? "A4" : "A5";
+  const pageName = thermal ? "rj-receipt" : format === "a4" ? "rj-a4" : "rj-a5";
   return (
-    <div className={"inv " + (thermal ? "thermal " : "") + (format === "58mm" ? "narrow" : "")}>
-      <style data-thermal-width={thermal ? format.slice(0, 2) : undefined}>{`@page{size:${page};margin:${thermal ? "2mm" : "8mm"}}`}</style>
+    <div style={{ page: pageName }} className={"inv " + (thermal ? "thermal " : "") + (format === "58mm" ? "narrow" : "")}>
+      <style data-thermal-width={thermal ? format.slice(0, 2) : undefined}>{`@page ${pageName}{size:${page};margin:${thermal ? "2mm" : "8mm"}}`}</style>
       <div className="inv-head">
         <div><div className="inv-shop">{shop.name}</div><div className="inv-sub">{shop.tagline}</div>
           <div className="inv-sub">{[shop.address, shop.phone].filter(Boolean).join(" · ")}</div>
