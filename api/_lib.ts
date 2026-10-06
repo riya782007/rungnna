@@ -34,6 +34,7 @@ export async function gemini(parts: Part[], opts: { json?: boolean; system?: str
   if (opts.system) body.systemInstruction = { parts: [{ text: opts.system }] };
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: "POST", headers: { "content-type": "application/json", "x-goog-api-key": key }, body: JSON.stringify(body),
+    signal: AbortSignal.timeout(45000),
   });
   const j: any = await r.json().catch(() => ({}));
   if (!r.ok) throw Object.assign(new Error(j?.error?.message || `Gemini error ${r.status}`), { status: r.status === 429 ? 429 : 502 });
