@@ -11,6 +11,7 @@ import { WedgeInput } from "../components/Scanner";
 import { useApp, toast } from "../lib/app";
 import { can } from "../lib/roles";
 import { inStore } from "../lib/scope";
+import { purchaseLabelJobs } from "../lib/purchase-labels";
 import { toPaise } from "../lib/format";
 import { getRule, priceFromCost, type PricingRule } from "../lib/pricing";
 import { buildTSPL, labelFromProduct, printTSPL, directPrintSupported, connectSerial, serialSupported } from "../lib/tsc";
@@ -57,12 +58,14 @@ export default function Labels({ args }: { args: string[] }) {
   const [addStock, setAddStock] = useState(false);
   const [loc, setLoc] = useState("");
   const [printing, setPrinting] = useState(false);
+  const [printerReady, setPrinterReady] = useState(false), [loadedPurchase, setLoadedPurchase] = useState("");
+  const autoPrinted = useRef("");
   const [rule, setRule] = useState<PricingRule | null>(null);
   const [cost, setCost] = useState("");          // ₹ cost entered by the operator
   const vendors = useLiveQuery(() => db.parties.filter(p => p.kind === "supplier" && !p.deleted).toArray(), [], []);
   const items = useLiveQuery(() => distinct("item"), [], []);
 
-  useEffect(() => { getSetting<LabelCfg>("label_cfg", DEFAULT_CFG).then(c => setCfg({ ...DEFAULT_CFG, ...c, show: { ...DEFAULT_CFG.show, ...c.show } })); }, []);
+  useEffect(() => { getSetting<LabelCfg>("label_cfg", DEFAULT_CFG).then(c => { setCfg({ ...DEFAULT_CFG, ...c, show: { ...DEFAULT_CFG.show, ...c.show } }); setPrinterReady(true); }); }, []);
   useEffect(() => { getRule().then(setRule); }, []);
 
   /* Consistent pricing: the moment a cost is entered, the sell RATE and the
@@ -79,17 +82,23 @@ export default function Labels({ args }: { args: string[] }) {
     setForm(f => ({ ...f, cost: paise, rate: f.price_locked ? f.rate : rate, cost_code }));
   };
   useEffect(() => {
+    let dead = false;
     if (args[0] === "purchase" && args[1]) {
       (async () => {
         const purchase = await db.purchases.get(args[1]);
         if (!purchase || purchase.deleted || !inStore(purchase)) return;
-        const queue: Job[] = [];
-        for (const line of purchase.items) { const p = await db.products.get(line.product_id); if (p && !p.deleted) queue.push({ p, qtyOnLabel: line.pack || 1, copies: Math.ceil(line.qty / Math.max(1, line.pack)) }); }
-        if (queue.reduce((n, j) => n + j.copies, 0) > 5000) { toast("Purchase has over 5000 labels. Prepare smaller batches from the item form.", true); return; }
-        setJobs(queue);
-      })();
+        const products = await db.products.bulkGet(purchase.items.map(l => l.product_id));
+        const queue = purchaseLabelJobs(purchase, products.filter((p): p is Product => !!p));
+        if (!dead) { setJobs(queue); setLoadedPurchase(purchase.id); }
+      })().catch(e => { if (!dead) toast(e.message || "Could not prepare purchase labels", true); });
     } else if (args[0]) db.products.get(args[0]).then(p => { if (p) { setForm({ ...p }); setQty(String(p.pack || 1)); } });
+    return () => { dead = true; };
   }, [args[0], args[1]]);
+  useEffect(() => {
+    if (args[0] === "purchase" && args[2] === "print" && printerReady && loadedPurchase === args[1] && jobs.length && autoPrinted.current !== loadedPurchase) {
+      autoPrinted.current = loadedPurchase; setPrinting(true);
+    }
+  }, [args[0], args[1], args[2], printerReady, loadedPurchase, jobs]);
   const upd = (patch: Partial<LabelCfg>) => { const c = { ...cfg, ...patch }; setCfg(c); setSetting("label_cfg", c); };
   const set = (k: keyof Product, v: any) => setForm(f => ({ ...f, [k]: v }));
 

@@ -1,8 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { env, json, gemini } from "./_lib.js";
 
-export async function POST(req: Request) {
-  try {
+async function ownerAccess(req: Request): Promise<Response | null> {
     const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
     const url = env("SUPABASE_URL"), key = env("SUPABASE_ANON_KEY");
     if (!url || !key || !token) return json({ error: "Sign in to Cloud in Settings first" }, 401);
@@ -11,8 +10,21 @@ export async function POST(req: Request) {
     if (error || !user) return json({ error: "Shop login expired" }, 401);
     const allow = (env("PURCHASE_OWNER_EMAILS") || env("GST_OWNER_EMAILS")).split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
     if (user.app_metadata?.role !== "owner" && !allow.includes((user.email || "").toLowerCase())) return json({ error: "Owner account required. Configure PURCHASE_OWNER_EMAILS in Vercel." }, 403);
+    return null;
+}
+
+export async function GET(req: Request) {
+  try {
+    const denied = await ownerAccess(req); if (denied) return denied;
+    return json({ configured: !!env("GEMINI_API_KEY"), provider: "Gemini", model: env("GEMINI_MODEL") || "gemini-2.5-flash" });
+  } catch { return json({ error: "Could not check Gemini connection" }, 503); }
+}
+
+export async function POST(req: Request) {
+  try {
+    const denied = await ownerAccess(req); if (denied) return denied;
     const b = await req.json();
-    if (!Array.isArray(b.images) || !b.images.length || b.images.length > 3 || b.images.some((i: any) => !/^image\/(jpeg|png|webp)$/.test(i.mime) || typeof i.data !== "string" || i.data.length > 1500000)) return json({ error: "Upload up to three JPG, PNG or WebP bill photos" }, 400);
+    if (!Array.isArray(b?.images) || !b.images.length || b.images.length > 3 || b.images.some((i: any) => !i || !/^image\/(jpeg|png|webp)$/.test(i.mime) || typeof i.data !== "string" || !i.data.length || i.data.length > 1500000)) return json({ error: "Upload up to three JPG, PNG or WebP bill photos" }, 400);
     if (b.images.reduce((n: number, i: any) => n + i.data.length, 0) > 3300000) return json({ error: "Bill photos are too large" }, 400);
     const out = await gemini([
       ...b.images.map((i: any) => ({ inline_data: { mime_type: i.mime, data: i.data } })),

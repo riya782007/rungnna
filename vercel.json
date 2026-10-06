@@ -8,6 +8,7 @@
     { "source": "/robots.txt", "destination": "/api/page?view=robots" }
   ],
   "functions": {
-    "api/ai.ts": { "maxDuration": 60 }
+    "api/ai.ts": { "maxDuration": 60 },
+    "api/purchase-photo.ts": { "maxDuration": 60 }
   }
 }
