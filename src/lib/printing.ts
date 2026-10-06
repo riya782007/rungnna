@@ -49,17 +49,23 @@ export async function preparePrint(doc: Document, frame: () => Promise<void>) {
   if (root && page) {
     const old = root.style.cssText;
     try {
-      root.style.cssText = "display:block;position:fixed;left:-10000px;top:0;visibility:hidden";
-      const height = root.querySelector<HTMLElement>(".inv")?.getBoundingClientRect().height || 0;
-      if (height > 0) page.textContent = thermalPage(Number(page.dataset.thermalWidth), height);
+      const width = Number(page.dataset.thermalWidth);
+      // Measure only the receipt, at the printable roll width. A hidden or
+      // unmeasurable receipt must never fall back to the driver's full roll.
+      root.style.cssText = `display:block;position:absolute;left:-10000px;top:0;visibility:hidden;width:${width - 4}mm;height:auto;min-height:0`;
+      const receipt = root.querySelector<HTMLElement>(".inv");
+      const height = receipt ? Math.max(receipt.getBoundingClientRect().height, receipt.scrollHeight) : 0;
+      page.textContent = thermalPage(width, height);
     } finally { root.style.cssText = old; }
   }
 }
 
 export function thermalPage(width: number, heightPx: number) {
   if (![58, 80].includes(width) || !Number.isFinite(heightPx) || heightPx <= 0) throw new Error("Invalid receipt dimensions");
-  const height = Math.min(1000, Math.max(30, Math.ceil(heightPx * 25.4 / 96 + 6)));
-  return `@page{size:${width}mm ${height}mm;margin:2mm}`;
+  // Capping at 1 metre makes longer estimates print another full metre page,
+  // including blank paper after the final line. Let the content set the length.
+  const height = Math.max(30, Math.ceil(heightPx * 25.4 / 96 + 6));
+  return `@page rj-receipt{size:${width}mm ${height}mm;margin:2mm}`;
 }
 
 /* Some mobile browsers return from print() before the preview has captured the DOM. */
