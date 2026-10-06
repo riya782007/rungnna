@@ -11,13 +11,14 @@ import { WedgeInput } from "../components/Scanner";
 import { useApp, toast } from "../lib/app";
 import { can } from "../lib/roles";
 import { inStore } from "../lib/scope";
-import { purchaseLabelJobs } from "../lib/purchase-labels";
+import { purchaseLabelJobs, productForLabel } from "../lib/purchase-labels";
 import { toPaise } from "../lib/format";
 import { getRule, priceFromCost, type PricingRule } from "../lib/pricing";
-import { buildTSPL, labelFromProduct, printTSPL, directPrintSupported, connectSerial, serialSupported } from "../lib/tsc";
+import { buildTSPL, labelFromProduct, printTSPL, directPrintSupported, connectSerial, connectUSB, serialSupported, usbSupported } from "../lib/tsc";
 
 /* Label settings — every number is in millimetres so what you see is what the printer gets. */
 export type LabelCfg = {
+  output?: "browser" | "tspl";
   preset: string; mode: "roll" | "sheet";
   w: number; h: number; cols: number; gapX: number; gapY: number;
   sheetW: number; sheetH: number; top: number; left: number; rows: number;
@@ -39,12 +40,20 @@ export const PRESETS: { key: string; name: string; cfg: Partial<LabelCfg> }[] = 
 ];
 
 export const DEFAULT_CFG: LabelCfg = {
+  output: "browser",
   preset: "rj", mode: "roll", w: 50, h: 20, cols: 1, gapX: 0, gapY: 0, sheetW: 210, sheetH: 297, top: 0, left: 0, rows: 1,
   qr: 15, font: 7.5, pad: 1.2, offX: 0, offY: 0, shop: "RUNGNNA", format: "shop", layout: "shop",
   show: { shop: true, item: true, style: true, color: true, rate: true, tk: false, code: false, qty: true, cost_code: false },
 };
 
 type Job = { p: Product; qtyOnLabel: number; copies: number };
+
+export function validateLabelPrint(cfg: LabelCfg, jobs: Job[]) {
+  if (![cfg.w, cfg.h, cfg.qr, cfg.font].every(n => Number.isFinite(n) && n > 0) || cfg.w > 200 || cfg.h > 300 || ![cfg.gapX, cfg.gapY, cfg.pad].every(n => Number.isFinite(n) && n >= 0) || ![cfg.offX, cfg.offY].every(Number.isFinite) || !Number.isSafeInteger(cfg.cols) || cfg.cols < 1 || cfg.cols > 20) throw new Error("Check label size, gaps and columns in printer settings");
+  if (cfg.mode === "sheet" && (!Number.isSafeInteger(cfg.rows) || cfg.rows < 1 || cfg.rows > 100 || ![cfg.sheetW, cfg.sheetH].every(n => Number.isFinite(n) && n > 0) || ![cfg.top, cfg.left].every(n => Number.isFinite(n) && n >= 0) || cfg.left + cfg.cols * cfg.w + (cfg.cols - 1) * cfg.gapX > cfg.sheetW || cfg.top + cfg.rows * cfg.h + (cfg.rows - 1) * cfg.gapY > cfg.sheetH)) throw new Error("Labels do not fit the selected sheet");
+  if (cfg.pad * 2 >= Math.min(cfg.w, cfg.h) || cfg.qr + cfg.pad * 2 >= cfg.w) throw new Error("Leave room for the product name beside the QR");
+  if (!jobs.length || jobs.some(j => !j.p.item.trim() || !Number.isSafeInteger(j.copies) || j.copies < 1 || !Number.isSafeInteger(j.qtyOnLabel) || j.qtyOnLabel < 1) || jobs.reduce((n, j) => n + j.copies, 0) > 5000) throw new Error("Review product names and print quantities (maximum 5000 labels)");
+}
 
 export default function Labels({ args }: { args: string[] }) {
   const { me } = useApp();
@@ -58,6 +67,7 @@ export default function Labels({ args }: { args: string[] }) {
   const [addStock, setAddStock] = useState(false);
   const [loc, setLoc] = useState("");
   const [printing, setPrinting] = useState(false);
+  const directLock = useRef(false), [directBusy, setDirectBusy] = useState(false);
   const [printerReady, setPrinterReady] = useState(false), [loadedPurchase, setLoadedPurchase] = useState("");
   const autoPrinted = useRef("");
   const [rule, setRule] = useState<PricingRule | null>(null);
@@ -96,7 +106,8 @@ export default function Labels({ args }: { args: string[] }) {
   }, [args[0], args[1]]);
   useEffect(() => {
     if (args[0] === "purchase" && args[2] === "print" && printerReady && loadedPurchase === args[1] && jobs.length && autoPrinted.current !== loadedPurchase) {
-      autoPrinted.current = loadedPurchase; setPrinting(true);
+      autoPrinted.current = loadedPurchase;
+      if (cfg.output === "tspl") void doPrintTSC(false); else doPrint();
     }
   }, [args[0], args[1], args[2], printerReady, loadedPurchase, jobs]);
   const upd = (patch: Partial<LabelCfg>) => { const c = { ...cfg, ...patch }; setCfg(c); setSetting("label_cfg", c); };
@@ -109,6 +120,7 @@ export default function Labels({ args }: { args: string[] }) {
     const n = Number(copies), packet = Number(qty);
     if (!Number.isSafeInteger(n) || n < 1 || n > 5000 || !Number.isSafeInteger(packet) || packet < 1 || packet > 1000000) return toast("Check packet quantity and print quantity (1–5000)", true);
     if (jobs.reduce((sum, j) => sum + j.copies, 0) + n > 5000) return toast("Print this queue before adding more than 5000 labels", true);
+    if (print) { try { validateLabelPrint(cfg, [...jobs, { p: { ...form, item: form.item || "Pending" }, qtyOnLabel: packet, copies: n }]); } catch (e: any) { return toast(e.message, true); } }
     queueLock.current = true; setQueueBusy(true);
     try {
     const saved = await db.transaction("rw", [db.products, db.config, db.settings, db.stock, db.locations, db.movements, db.outbox], async () => {
@@ -123,6 +135,7 @@ export default function Labels({ args }: { args: string[] }) {
           model: form.model || existing.model, vendor_id: form.vendor_id || existing.vendor_id, vendor_name: form.vendor_name || existing.vendor_name }
       : { ...form, pack, item_code, created_by: form.created_by || me?.id || "" };
     const saved = await saveProduct(p);
+    if (!saved.item.trim()) throw new Error("Enter the product name before printing labels");
     if (addStock) {
       if (!loc) { toast("Choose the rack the new stock goes to", true); return; }
       await recordMovement({ product_id: saved.id, kind: "intake", qty: n * Math.max(1, parseInt(qty) || 1), from_loc: null, to_loc: loc, person_type: "employee", person_name: me?.name || "", by_staff: me?.id || "", note: "labelled at print" });
@@ -141,38 +154,39 @@ export default function Labels({ args }: { args: string[] }) {
   const flat = useMemo(() => jobs.flatMap(j => Array.from({ length: Math.max(0, Math.min(5000, j.copies)) }, () => j)).slice(0, 5000), [jobs]);
   const total = flat.length;
 
-  usePrintJob(printing, () => setPrinting(false));
-  const doPrint = () => { if (total) setPrinting(true); };
+  usePrintJob(printing, () => setPrinting(false), "", message => toast(message, true));
+  const doPrint = () => { try { validateLabelPrint(cfg, jobs); setPrinting(true); } catch (e: any) { toast(e.message, true); } };
 
   /* Direct-to-TSC: send TSPL for every queued label straight to the printer.
      Falls back to the on-screen print sheet if the browser can't reach the printer. */
-  const doPrintTSC = async () => {
-    if (!flat.length) return;
+  const doPrintTSC = async (prompt = true) => {
+    if (!flat.length || directLock.current) return;
+    directLock.current = true; setDirectBusy(true);
     try {
-      if (serialSupported()) { try { await connectSerial(); } catch { /* user may already have granted a port */ } }
-      let sent = 0;
-      for (const j of jobs) {
-        const qr = ownPayload({ ...j.p, pack: j.p.pack || j.qtyOnLabel }, cfg.format || "shop");
-        const lbl = labelFromProduct(j.p, {
+      validateLabelPrint(cfg, jobs);
+      if (cfg.mode !== "roll" || cfg.cols !== 1) throw new Error("Direct TSC printing requires a single-column roll. Use browser printing for sheets or 2-up labels.");
+      const commands = jobs.map(j => {
+        const product = productForLabel(j.p, j.qtyOnLabel);
+        const qr = ownPayload(product, cfg.format || "shop");
+        const lbl = labelFromProduct(product, {
           qr, costCode: cfg.show.cost_code ? j.p.cost_code : undefined,
           wmm: cfg.w, hmm: cfg.h, gapmm: cfg.gapY || 2, copies: j.copies,
           offXmm: cfg.offX, offYmm: cfg.offY,
         });
-        await printTSPL(buildTSPL(lbl));
-        sent += j.copies;
-      }
-      toast(`Sent ${sent} labels to the TSC printer`);
+        return buildTSPL(lbl);
+      }).join("");
+      await printTSPL(commands, prompt);
+      toast(`Sent ${total} labels to the TSC printer`);
     } catch (e: any) {
-      toast((e?.message || "Direct print failed") + " — using on-screen print instead", true);
-      doPrint();
-    }
+      toast((e?.message || "Direct print failed") + " · Check the printer before retrying to avoid duplicate labels.", true);
+    } finally { directLock.current = false; setDirectBusy(false); }
   };
 
   return (
     <div className="label-counter">
       <Head eyebrow="Barcode print" title="QR labels" sub="Same fields as the old BARCODE PRINT screen. Every label carries its own details inside the QR, so it scans even on a phone with no internet.">
-        {directPrintSupported() && <button className="btn dk" disabled={!total} onClick={doPrintTSC} title="Send straight to the TSC label printer">Print to TSC {total || ""}</button>}
-        <button className="btn g" disabled={!total} onClick={doPrint}>Print {total || ""} labels</button>
+        {directPrintSupported() && <button className="btn dk" disabled={!total || directBusy || printing} onClick={() => doPrintTSC()} title="Send straight to a compatible TSC label printer">{directBusy ? "Sending…" : `Print to TSC ${total || ""}`}</button>}
+        <button className="btn g" disabled={!total || directBusy || printing} onClick={doPrint}>Print {total || ""} labels</button>
       </Head>
       <div className="split">
         <div className="stack">
@@ -226,7 +240,7 @@ export default function Labels({ args }: { args: string[] }) {
             </div>
           )}
         </div>
-        <div className="stack"><div className="labelprev"><LabelView cfg={cfg} p={jobs[0]?.p || form} qtyOnLabel={parseInt(qty) || 1} /></div><details><summary>Printer settings</summary><LabelSettings cfg={cfg} upd={upd} sample={jobs[0]?.p || { ...form, code: form.code }} qty={parseInt(qty) || 1} /></details></div>
+        <div className="stack"><div className="labelprev"><LabelView cfg={cfg} p={jobs[0]?.p || form} qtyOnLabel={jobs[0]?.qtyOnLabel || parseInt(qty) || 1} /></div><details><summary>Printer settings</summary><LabelSettings cfg={cfg} upd={upd} sample={jobs[0]?.p || { ...form, code: form.code }} qty={jobs[0]?.qtyOnLabel || parseInt(qty) || 1} /></details></div>
       </div>
       {printing && createPortal(<PrintSheet cfg={cfg} jobs={flat} />, document.getElementById("printroot")!)}
       {printing && <button className="btn print-notice" onClick={() => setPrinting(false)}>Close print</button>}
@@ -235,7 +249,7 @@ export default function Labels({ args }: { args: string[] }) {
 }
 
 export function LabelView({ cfg, p, qtyOnLabel = 1 }: { cfg: LabelCfg; p: Product; qtyOnLabel?: number }) {
-  const pp = { ...p, pack: p.pack || qtyOnLabel };
+  const pp = productForLabel(p, qtyOnLabel);
   const { svg } = useMemo(() => qrSvg(ownPayload(pp, cfg.format || "shop")), [p.code, p.item, p.type, p.style, p.color, p.tk, p.rate, p.item_code, pp.pack, p.ref, cfg.format]);
   const s = cfg.show, fs = cfg.font;
   const q = Math.min(cfg.qr, cfg.h - cfg.pad * 2);
@@ -248,7 +262,7 @@ export function LabelView({ cfg, p, qtyOnLabel = 1 }: { cfg: LabelCfg; p: Produc
         {s.color && p.color && <div>{p.color}</div>}
         {s.tk && p.tk && <div>TK {p.tk}</div>}
         {s.rate && p.rate > 0 && <div style={{ fontWeight: 800, fontSize: fs * 1.35 + "pt" }}>₹{p.rate / 100}{s.qty ? `X${pp.pack}${p.type || "PCS"}` : ""}</div>}
-        {s.cost_code && p.cost_code && <div style={{ fontFamily: "monospace", fontWeight: 700, fontSize: fs * 0.95 + "pt" }}>{p.cost_code}</div>}
+        {s.cost_code && pp.cost_code && <div style={{ fontFamily: "monospace", fontWeight: 700, fontSize: fs * 0.95 + "pt" }}>{pp.cost_code}</div>}
         {s.code && <div style={{ fontFamily: "monospace", fontSize: fs * 0.8 + "pt" }}>{p.code}</div>}
       </div>
       <div className="q" style={{ width: q + "mm", height: q + "mm" }} dangerouslySetInnerHTML={{ __html: svg }} />
@@ -266,7 +280,7 @@ export function LabelView({ cfg, p, qtyOnLabel = 1 }: { cfg: LabelCfg; p: Produc
         {s.tk && p.tk && <div>TK {p.tk}</div>}
         {s.qty && <div>{qtyOnLabel} {p.type || "PCS"}</div>}
         {s.rate && p.rate > 0 && <div style={{ fontWeight: 800, fontSize: fs * 1.25 + "pt" }}>₹{p.rate / 100}</div>}
-        {s.cost_code && p.cost_code && <div style={{ fontFamily: "monospace", fontWeight: 700, fontSize: fs * 0.95 + "pt" }}>{p.cost_code}</div>}
+        {s.cost_code && pp.cost_code && <div style={{ fontFamily: "monospace", fontWeight: 700, fontSize: fs * 0.95 + "pt" }}>{pp.cost_code}</div>}
         {s.code && <div style={{ fontFamily: "monospace", fontSize: fs * 0.85 + "pt" }}>{p.code}</div>}
       </div>
     </div>
@@ -282,6 +296,9 @@ function LabelSettings({ cfg, upd, sample, qty }: { cfg: LabelCfg; upd: (p: Part
     <div className="card" style={{ position: "sticky", top: 70 }}>
       <header><h3>Label size &amp; layout</h3><span className="xs mut">saved on this device</span></header>
       <div className="pad stack">
+        <label className="f">Purchase label output<select className="in" value={cfg.output || "browser"} onChange={e => upd({ output: e.target.value as "browser" | "tspl" })}><option value="browser">Browser / Windows printer driver</option><option value="tspl" disabled={!directPrintSupported()}>Direct TSC (TSPL, 203 dpi only)</option></select></label>
+        {cfg.output === "tspl" && serialSupported() && <button className="btn" onClick={() => connectSerial().then(() => toast("Serial printer connected")).catch(e => toast(e.message, true))}>Connect serial printer</button>}
+        {cfg.output === "tspl" && usbSupported() && <button className="btn" onClick={() => connectUSB().then(() => toast("USB printer connected")).catch(e => toast(e.message, true))}>Connect TSC USB printer</button>}
         <label className="f">Sticker
           <select className="in" value={cfg.preset} onChange={e => { const p = PRESETS.find(x => x.key === e.target.value); upd({ preset: e.target.value, ...(p?.cfg || {}) }); }}>
             {PRESETS.map(p => <option key={p.key} value={p.key}>{p.name}</option>)}

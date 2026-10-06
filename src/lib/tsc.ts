@@ -3,7 +3,7 @@ import type { Product } from "./db";
 /* ===========================================================================
    TSC thermal label printer integration (TSPL / TSPL2).
 
-   The shop prints on a TSC TTP-244 Pro. That printer speaks TSPL — a plain-text
+   Compatible TSC printers speak TSPL — a plain-text
    command language. This module:
      • builds the TSPL for one label (QR + item/category + model/SKU + the
        encrypted cost code), and
@@ -34,10 +34,12 @@ export interface TscLabel {
 }
 
 /* Escape a string for a TSPL quoted argument. */
-const q = (s: string) => `"${String(s || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+const q = (s: string) => `"${String(s || "").replace(/[\x00-\x1f\x7f]/g, " ").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 
 /* Build the TSPL program for one label design × N copies. */
 export function buildTSPL(l: TscLabel): string {
+  if (![l.wmm, l.hmm, l.gapmm, l.offXmm ?? 0, l.offYmm ?? 0].every(Number.isFinite) || l.wmm < 10 || l.wmm > 200 || l.hmm < 10 || l.hmm > 300 || l.gapmm < 0 || l.gapmm > 20 || !Number.isSafeInteger(l.copies) || l.copies < 1 || l.copies > 5000) throw new Error("Check label dimensions, gap and print quantity before printing");
+  if ([...l.lines, l.costCode || ""].some(s => /[^\x00-\x7f]/.test(s))) throw new Error("Use browser printing for Hindi / Unicode labels; this direct printer font is ASCII only");
   const wDots = mm(l.wmm), hMm = l.hmm;
   const ox = mm(l.offXmm || 0), oy = mm(l.offYmm || 0);
   const cmds: string[] = [];
@@ -91,38 +93,57 @@ export async function connectSerial(): Promise<boolean> {
   return true;
 }
 
-async function sendSerial(tspl: string): Promise<void> {
+async function sendSerial(tspl: string, prompt: boolean): Promise<boolean> {
   const nav: any = navigator;
   if (!serialPort) {
     const ports = await nav.serial.getPorts();
-    serialPort = ports[0] || (await nav.serial.requestPort());
+    serialPort = ports[0];
+    if (!serialPort && !prompt) return false;
+    if (!serialPort) serialPort = await nav.serial.requestPort();
     if (!serialPort.readable) await serialPort.open({ baudRate: 9600 });
   }
   const writer = serialPort.writable.getWriter();
   try { await writer.write(new TextEncoder().encode(tspl)); }
   finally { writer.releaseLock(); }
+  return true;
 }
 
-async function sendUSB(tspl: string): Promise<void> {
+export async function connectUSB(): Promise<boolean> {
+  if (!usbSupported()) return false;
+  await (navigator as any).usb.requestDevice({ filters: [{ vendorId: 0x1203 }] });
+  return true;
+}
+
+async function sendUSB(tspl: string, prompt: boolean): Promise<boolean> {
   const nav: any = navigator;
-  const dev = await nav.usb.requestDevice({ filters: [{ vendorId: 0x1203 }] }); // TSC vendor id
+  const known = await nav.usb.getDevices();
+  let dev = known.find((d: any) => d.vendorId === 0x1203);
+  if (!dev && !prompt) return false;
+  if (!dev) dev = await nav.usb.requestDevice({ filters: [{ vendorId: 0x1203 }] });
   await dev.open();
+  try {
   if (dev.configuration === null) await dev.selectConfiguration(1);
   // find the first bulk-OUT endpoint
   const iface = dev.configuration.interfaces.find((i: any) =>
     i.alternate.endpoints.some((e: any) => e.direction === "out" && e.type === "bulk"));
+  if (!iface) throw new Error("Printer has no compatible bulk output endpoint");
   await dev.claimInterface(iface.interfaceNumber);
   const ep = iface.alternate.endpoints.find((e: any) => e.direction === "out" && e.type === "bulk");
-  await dev.transferOut(ep.endpointNumber, new TextEncoder().encode(tspl));
-  await dev.close();
+  const bytes = new TextEncoder().encode(tspl);
+  const result = await dev.transferOut(ep.endpointNumber, bytes);
+  if (result.status !== "ok" || result.bytesWritten !== bytes.length) throw new Error("Printer did not accept the complete job");
+  } finally { await dev.close(); }
+  return true;
 }
 
 /* Fire the label. Returns the transport actually used, or throws if none work
    (the caller then falls back to the browser print sheet). */
-export async function printTSPL(tspl: string): Promise<"serial" | "usb"> {
-  if (serialSupported()) { await sendSerial(tspl); return "serial"; }
-  if (usbSupported()) { await sendUSB(tspl); return "usb"; }
-  throw new Error("This browser can't talk to the printer directly. Use Chrome/Edge on a computer, or use the on-screen print.");
+export async function printTSPL(tspl: string, prompt = true): Promise<"serial" | "usb"> {
+  if (serialSupported() && await sendSerial(tspl, false)) return "serial";
+  if (usbSupported() && await sendUSB(tspl, false)) return "usb";
+  if (prompt && usbSupported() && await sendUSB(tspl, true)) return "usb";
+  if (prompt && serialSupported() && await sendSerial(tspl, true)) return "serial";
+  throw new Error("Connect a compatible TSC printer on this device first, or choose Browser in label printer settings.");
 }
 
 /* Convenience: build a label straight from a product + the encrypted code. */

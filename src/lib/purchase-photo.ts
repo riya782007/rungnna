@@ -1,10 +1,21 @@
-import { db, uid, type Product, type Purchase } from "./db";
+import { db, uid, setSetting, type Product, type Purchase } from "./db";
 import { blankProduct, findByKey, saveProduct } from "./products";
 import { newPurchase, lineOf, finalizePurchase } from "./stockin";
 import { moneyInput } from "./pos";
 import { ownerOnly } from "./scope";
+import { getRule, priceFromCost, type PricingRule } from "./pricing";
 
 export type PhotoRow = { item: string; style: string; color: string; unit: string; hsn: string; qty: string; cost: string; rate: string };
+export function pricePhotoRows(rows: PhotoRow[], rule: PricingRule): PhotoRow[] {
+  return rows.map(r => {
+    if (r.rate.trim() || !r.cost.trim() || !/^(PCS|PAIR|SET)$/i.test(r.unit.trim())) return r;
+    try {
+      const cost = moneyInput(r.cost);
+      if (cost <= 0) return r;
+      return { ...r, rate: (priceFromCost(cost, rule, 1, r.unit).rate / 100).toFixed(2) };
+    } catch { return r; }
+  });
+}
 export function validatePhotoRows(rows: PhotoRow[]) {
   if (!rows.length || rows.length > 300) throw new Error("Review 1–300 purchase lines");
   return rows.map((r, i) => {
@@ -24,6 +35,7 @@ export function validatePhotoRows(rows: PhotoRow[]) {
 export async function savePhotoPurchase(rows: PhotoRow[], input: { by: string; rack: string; supplierId: string; billNo: string; photoId?: string; note: string; invoiceTotal?: string }): Promise<Purchase> {
   ownerOnly();
   const checked = validatePhotoRows(rows);
+  if (checked.reduce((n, r) => n + r.qty, 0) > 5000) throw new Error("Purchase exceeds the 5000-label batch limit. Split it before saving.");
   const invoice_total = input.invoiceTotal?.trim() ? moneyInput(input.invoiceTotal) : undefined;
   if (invoice_total !== undefined && invoice_total <= 0) throw new Error("Check supplier invoice total");
   return db.transaction("rw", [db.products, db.purchases, db.parties, db.movements, db.stock, db.outbox, db.settings, db.config, db.locations, db.stores], async () => {
@@ -32,6 +44,7 @@ export async function savePhotoPurchase(rows: PhotoRow[], input: { by: string; r
     if (!input.billNo.trim()) throw new Error("Enter supplier bill number");
     if (await db.purchases.filter(p => !p.deleted && p.status === "final" && p.supplier_id === supplier.id && p.supplier_bill.trim().toUpperCase() === input.billNo.trim().toUpperCase()).count()) throw new Error("This supplier bill is already saved");
     const purchase = { ...newPurchase(input.by, input.rack), supplier_id: supplier.id, supplier_name: supplier.name, supplier_bill: input.billNo.trim(), photo_id: input.photoId, note: input.note, ...(invoice_total !== undefined ? { invoice_total } : {}) };
+    const rule = await getRule();
     const seen = new Set<string>();
     for (const row of checked) {
       const key = [row.style.trim().toUpperCase(), row.color.trim().toUpperCase()].join("|");
@@ -39,10 +52,13 @@ export async function savePhotoPurchase(rows: PhotoRow[], input: { by: string; r
       seen.add(key);
       const old = await findByKey({ model: row.style, style: row.style, color: row.color, vendor_id: supplier.id });
       if (old && old.type !== row.unit.toUpperCase()) throw new Error("Unit differs from the existing article. Review before saving.");
-      const p: Product = old ? { ...old, cost: row.cost } : { ...blankProduct(input.by), item: row.item, style: row.style, model: row.style, color: row.color, type: row.unit, hsn: row.hsn, rate: row.rate, cost: row.cost, vendor_id: supplier.id, vendor_name: supplier.name, pack: 1 };
+      const code = priceFromCost(row.cost, rule, old?.pack || 1, row.unit).cost_code;
+      const p: Product = old ? { ...old, item: row.item, hsn: row.hsn || old.hsn, cost: row.cost, rate: row.rate, price_locked: 1, cost_code: code } : { ...blankProduct(input.by), item: row.item, style: row.style, model: row.style, color: row.color, type: row.unit, hsn: row.hsn, rate: row.rate, cost: row.cost, cost_code: code, price_locked: 1, vendor_id: supplier.id, vendor_name: supplier.name, pack: 1 };
       const saved = await saveProduct(p);
       purchase.items.push({ ...lineOf(saved, !old), id: uid(), qty: row.qty, pkts: 0, pack: 1, cost: row.cost });
     }
-    return finalizePurchase(purchase);
+    const saved = await finalizePurchase(purchase);
+    await setSetting("purchase_photo_draft", null);
+    return saved;
   });
 }

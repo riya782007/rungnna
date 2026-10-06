@@ -2,7 +2,8 @@ import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { db, now } from "../src/lib/db";
 import { newParty, newBill, DEFAULT_SHOP, totals } from "../src/lib/billing";
-import { savePhotoPurchase, validatePhotoRows, type PhotoRow } from "../src/lib/purchase-photo";
+import { savePhotoPurchase, validatePhotoRows, pricePhotoRows, type PhotoRow } from "../src/lib/purchase-photo";
+import { DEFAULT_RULE } from "../src/lib/pricing";
 import { MAIN_STORE, setScope } from "../src/lib/scope";
 import { supplierLedger } from "../src/lib/suppliers";
 
@@ -14,6 +15,21 @@ beforeEach(async () => {
   await db.locations.put({ id: "rack", floor: "1", rack: "1", box: "", kind: "rack", code: "F1-R01", name: "", updated_at: now() });
 });
 describe("reviewed photo purchases", () => {
+  it("calculates missing selling rates without changing printed rates or guessing packaging", () => {
+    expect(pricePhotoRows([{ ...row, rate: "" }], DEFAULT_RULE)[0].rate).toBe("65.00");
+    for (const patch of [{ rate: "100" }, { rate: "", cost: "unclear" }, { rate: "", unit: "DOZEN" }]) {
+      const r = { ...row, ...patch }; expect(pricePhotoRows([r], DEFAULT_RULE)[0]).toEqual(r);
+    }
+  });
+  it("uses reviewed rates and names for existing articles, with deterministic cost codes", async () => {
+    await savePhotoPurchase([row], input);
+    await savePhotoPurchase([{ ...row, rate: "115" }], { ...input, billNo: "SUP-2" });
+    expect((await db.products.toArray())[0]).toMatchObject({ rate: 11500, item: "BALI", cost_code: "OAX1PAIR", price_locked: 1 });
+  });
+  it("rejects oversized label batches before committing inventory", async () => {
+    await expect(savePhotoPurchase([{ ...row, qty: "5001" }], input)).rejects.toThrow("5000");
+    expect(await db.purchases.count()).toBe(0); expect(await db.products.count()).toBe(0);
+  });
   it("keeps tax/freight in supplier payable, not per-item inventory cost", async () => {
     const p = await savePhotoPurchase([row], { ...input, invoiceTotal: "120.36" });
     expect(p.total_cost).toBe(10200); expect(p.invoice_total).toBe(12036);

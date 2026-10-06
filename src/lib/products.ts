@@ -46,6 +46,12 @@ async function scannedDetails(p: Product, parsed: Parsed, rules: Pattern[]): Pro
   return withItemInfo(next, await itemInfoFor(next.item_code)) || next;
 }
 
+// Packet quantity belongs to this sticker; do not rewrite the master pack size.
+function scannedPacket(p: Product, parsed: Parsed): Product {
+  const pack = Number(parsed.qty);
+  return ["shop label", "rungnna"].includes(parsed.how) && Number.isSafeInteger(pack) && pack > 0 && pack <= 1000000 ? { ...p, pack } : p;
+}
+
 // All scan consumers get the same named product; lookup never creates inventory.
 export async function findByScan(raw: string, parsed?: Parsed): Promise<Product | undefined> {
   if (!raw.trim()) return undefined;
@@ -55,7 +61,8 @@ export async function findByScan(raw: string, parsed?: Parsed): Promise<Product 
     if (!found) return undefined;
     const p = await scannedDetails(found, x, rules);
     if (!["code", "unknown"].includes(x.how) && x.raw && !p.barcodes.includes(x.raw)) p.barcodes = [...p.barcodes, x.raw];
-    return JSON.stringify(p) !== JSON.stringify(found) ? saveProduct(p) : p;
+    const saved = JSON.stringify(p) !== JSON.stringify(found) ? await saveProduct(p) : p;
+    return scannedPacket(saved, x);
   });
 }
 
@@ -69,7 +76,8 @@ export async function resolveProductScan(raw: string, by: string): Promise<{ pro
     const source = found || fromParsed(parsed, by);
     const p = await scannedDetails(source, parsed, rules);
     if (parsed.raw && !p.barcodes.includes(parsed.raw)) p.barcodes = [...p.barcodes, parsed.raw];
-    return { product: !found || JSON.stringify(p) !== JSON.stringify(found) ? await saveProduct(p) : p, created: !found };
+    const saved = !found || JSON.stringify(p) !== JSON.stringify(found) ? await saveProduct(p) : p;
+    return { product: scannedPacket(saved, parsed), created: !found };
   });
 }
 

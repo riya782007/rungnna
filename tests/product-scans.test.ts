@@ -4,6 +4,9 @@ import { db } from "../src/lib/db";
 import { blankProduct, findByScan, label, nameItemCode } from "../src/lib/products";
 import { resolveScan, lineOf } from "../src/lib/stockin";
 import { resolveBillingScan } from "../src/lib/billing-products";
+import { ownPayload } from "../src/lib/parse";
+import { productForLabel } from "../src/lib/purchase-labels";
+import { lineFrom } from "../src/lib/billing";
 import { MAIN_STORE, setScope } from "../src/lib/scope";
 
 const legacy = "5186~100~1~212~~K5209/~KXZKLN";
@@ -11,6 +14,17 @@ const tag = "E2000017221101441890ABCD";
 beforeEach(async () => { await Promise.all(db.tables.map(t => t.clear())); setScope(MAIN_STORE, "owner"); });
 
 describe("consistent named products across scanners", () => {
+  it.each(["shop", "rungnna"] as const)("uses a %s sticker's quantity in billing and stock without changing the master packet", async format => {
+    const p = { ...blankProduct("o"), item: "BALI", type: "PAIR", style: "K5209", item_code: "5186", pack: 12, rate: 10000 };
+    await db.products.put(p);
+    const raw = ownPayload(productForLabel(p, 1), format);
+    const billing = (await resolveBillingScan(raw, "o"))!;
+    const stock = (await resolveScan(raw, "o")).product!;
+    expect(lineFrom(billing, 1).qty).toBe(1); expect(lineOf(stock).qty).toBe(1);
+    expect((await findByScan(raw))?.pack).toBe(1);
+    expect((await db.products.get(p.id))?.pack).toBe(12);
+    expect(await db.products.count()).toBe(1);
+  });
   it("repairs stock-in's exact barcode match even when its stored item code is missing", async () => {
     const p = { ...blankProduct("o"), barcodes: [legacy], rate: 12300 };
     await db.products.put(p);
