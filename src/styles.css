@@ -353,6 +353,7 @@ tr.click{cursor:pointer}tr.click:hover td{background:var(--bg)}
 .label-advanced{grid-column:1/-1}
 .purchase-import{border:1px solid var(--line);padding:12px;margin-bottom:16px;border-radius:4px}
 .purchase-import summary,.label-counter summary{cursor:pointer;font-weight:600;padding:6px 0}
+.purchase-import[open]~.pos-mbar{display:none}
 .purchase-photo{padding-top:12px}
 .daily-tasks{border-block:1px solid var(--line);padding:12px 0;margin:14px 0}
 .task-line{padding:8px 0;border-bottom:1px solid var(--line)}

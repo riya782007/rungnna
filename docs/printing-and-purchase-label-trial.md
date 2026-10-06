@@ -72,10 +72,14 @@ provider quota availability.
 
 ## Verification
 
-- 216 tests across 32 files passed; TypeScript and production build passed.
+- 219 tests across 32 files passed after merging the newer main-branch receipt fix;
+  TypeScript and production build passed.
 - Browser-rendered 80/58 mm receipt samples show box-wise named products and no
   horizontal overflow. Sample page height is fitted, not an empty A4 sheet.
 - The 50 x 20 mm sticker preview shows BALI, article, colour, rate and 1 PAIR.
+- Purchase review was checked on desktop and a phone-sized viewport. The separate
+  scanner-save toolbar is hidden while purchase entry is open to avoid covering
+  the review fields or presenting the wrong save action.
 - Print preparation was triggered in an isolated local account. Browser automation
   could not inspect the system print dialog; no physical output/cutter was verified.
 - No new migration is required. The earlier purchase invoice_total migration is
