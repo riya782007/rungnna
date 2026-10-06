@@ -2,7 +2,7 @@ import { selectedBox, mergeBoxLine, type BillingDraft } from "../lib/billingBox"
 import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Calculator, Plus } from "lucide-react";
-import { validatePosLines } from "../lib/pos";
+import { repeatedPosLine, validatePosLines } from "../lib/pos";
 import type { CalcTarget } from "../components/PosTools";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, type Bill, type BillLine, type Party, type Payment, type Product } from "../lib/db";
@@ -35,7 +35,7 @@ const PosCalculator = lazy(() => import("../components/PosTools").then(m => ({ d
 
 export default function Billing({ args }: { args: string[] }) {
   const { me } = useApp();
-  const [manual, setManual] = useState(false), [calculator, setCalculator] = useState(false), [saving, setSaving] = useState(false);
+  const [entryFocus, setEntryFocus] = useState(0), [calculator, setCalculator] = useState(false), [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [shop, setShop] = useState<Shop>(DEFAULT_SHOP);
   const [b, setB] = useState<Bill | null>(null);
@@ -44,13 +44,19 @@ export default function Billing({ args }: { args: string[] }) {
   const boxCountRef = useRef(0);
   useEffect(() => { boxCountRef.current = b?.box_count || 0; }, [b?.id]);
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
+  const linesPane = useRef<HTMLDivElement>(null);
   const pendingScan = useRef<string | null>(null);
   const [lastScanId, setLastScanId] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
-  function showLine(id: string) {
+  function showLine(id: string, revealPage = false) {
     const row = rowRefs.current.get(id);
     if (!row) return;
-    row.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "auto" });
+    const pane = linesPane.current;
+    if (pane && pane.scrollHeight > pane.clientHeight) {
+      const r = row.getBoundingClientRect(), p = pane.getBoundingClientRect();
+      if (r.bottom > p.bottom) pane.scrollTop += r.bottom - p.bottom;
+      else if (r.top < p.top + 40) pane.scrollTop -= p.top + 40 - r.top;
+    } else if (revealPage) row.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "auto" });
     row.classList.remove("flash");
     void row.offsetWidth; // restart the highlight when the same item is scanned again
     row.classList.add("flash");
@@ -137,6 +143,9 @@ export default function Billing({ args }: { args: string[] }) {
 
   function addProduct(p: Product, pkts = 1, pieces = 0, rate = 0) {
     if (savingRef.current) return;
+    const repeated = b?.items.some(l => l.product_id === p.id && l.box_no === boxRef.current);
+    beep(repeated ? "repeat" : true);
+    if (repeated) toast((!pieces && !rate ? "Repeated item: quantity increased · " : "Repeated item: added as a separate line · ") + label(p));
     setB(x => {
       if (!x) return x;
       const same = x.items.find(l => l.product_id === p.id && l.box_no === boxRef.current);
@@ -195,7 +204,7 @@ export default function Billing({ args }: { args: string[] }) {
       const sold = soldBill(tp, tag);
       if (sold) toast(`This tag was already sold on ${sold} — check the piece`, true);
       const fp = await fillFromItemCode(tp);
-      beep(true); addProduct(fp);
+      addProduct(fp);
       setB(x => x && { ...x, rfid_tags: [...(x.rfid_tags || []), tag] });
       return "Added · " + label(fp);
     }
@@ -205,9 +214,7 @@ export default function Billing({ args }: { args: string[] }) {
       if (hits.length === 1) p = await fillFromItemCode(hits[0]);
     }
     if (!p) { beep(false); toast("Not found — scan the label or record it in Scan & record", true); return "Not found"; }
-    const repeated = b?.items.some(l => l.product_id === p!.id && l.box_no === boxRef.current);
-    beep(repeated ? "repeat" : true); addProduct(p); setQ("");
-    if (repeated) toast("Repeated item: quantity increased · " + label(p));
+    addProduct(p); setQ("");
     return "Added · " + label(p);
   }
   const onCodeRef = useRef(onCode); onCodeRef.current = onCode;
@@ -224,7 +231,12 @@ export default function Billing({ args }: { args: string[] }) {
     return () => { dead = true; off(); };
   }, [pairId]);
   const [sheet, setSheet] = useState(false);
-  const small = typeof matchMedia !== "undefined" && matchMedia("(max-width: 860px)").matches;
+  const [small, setSmall] = useState(() => typeof matchMedia !== "undefined" && matchMedia("(max-width: 860px)").matches);
+  useEffect(() => {
+    const media = matchMedia("(max-width: 860px)"), change = () => setSmall(media.matches);
+    change(); media.addEventListener("change", change);
+    return () => media.removeEventListener("change", change);
+  }, []);
 
   const suggestions = useMemo(() => {
     const w = q.trim().toUpperCase().split(/\s+/).filter(Boolean);
@@ -307,7 +319,7 @@ export default function Billing({ args }: { args: string[] }) {
       if (k === "F5") setCalculator(true);
       if (k === "F6") doSave(false);
       if (k === "F7") scanRef.current?.focus();
-      if (k === "F8") setManual(true);
+      if (k === "F8") setEntryFocus(n => n + 1);
       if (k === "F9") doSave(true);
       if (k === "F10") doSave(false, true);
       if (k === "F11") setBoxSummary(x => !x);
@@ -321,16 +333,30 @@ export default function Billing({ args }: { args: string[] }) {
   const boxes = [...new Set([...t.items.map(l => l.box_no), box])].sort((a, z) => a - z);
   const balance = due(t);
   const lastScan = t.items.find(l => l.id === lastScanId);
-  const itemEditor = manual && <Suspense fallback={<div role="status">Loading items…</div>}><ManualItems inline products={products} box={box} level={b.price_level || "wholesale"} canRates={can(me, "rates")} onClose={() => { setManual(false); scanRef.current?.focus(); }}
+  const itemEditor = <Suspense fallback={<div className="pos-entry-loading" role="status">Loading items…</div>}><ManualItems key={b.id} inline persistent focusRequest={entryFocus} products={products} box={box} level={b.price_level || "wholesale"} canRates={can(me, "rates")} onClose={() => {}}
     onProduct={(p, count, pieces, rate) => {
       const line = fixLine({ ...lineFrom(p, box, pieces ? 0 : count, b.price_level || "wholesale"), ...(pieces ? { qty: count, pkts: 0 } : {}), rate });
+      if (savingRef.current) throw new Error("Wait for the bill to finish saving");
+      const repeated = repeatedPosLine(b.items, line);
+      beep(repeated ? "repeat" : true);
+      if (repeated) {
+        const merged = !mergeBoxLine([...b.items, line], line.id).some(l => l.id === line.id);
+        toast((merged ? "Repeated item: quantity increased · " : "Repeated item: added as a separate line · ") + line.item);
+      }
       setB(x => {
         if (!x) return x;
         const items = mergeBoxLine([...x.items, line], line.id);
-        pendingScan.current = items.find(l => l.product_id === line.product_id && l.box_no === line.box_no && l.rate === line.rate && l.disc === line.disc)?.id || line.id;
+        pendingScan.current = items.some(l => l.id === line.id) ? line.id
+          : items.find(l => l.qty !== x.items.find(old => old.id === l.id)?.qty)?.id || line.id;
         return { ...x, items };
       });
-    }} onCustom={line => { pendingScan.current = line.id; setB(x => x && { ...x, items: [...x.items, line] }); }} /></Suspense>;
+    }} onCustom={line => {
+      if (savingRef.current) throw new Error("Wait for the bill to finish saving");
+      const repeated = repeatedPosLine(b.items, line);
+      beep(repeated ? "repeat" : true);
+      if (repeated) toast("Repeated custom item: added as a separate line · " + line.item);
+      pendingScan.current = line.id; setB(x => x && { ...x, items: [...x.items, line] });
+    }} /></Suspense>;
 
   return (
     <div className="pos">
@@ -362,8 +388,8 @@ export default function Billing({ args }: { args: string[] }) {
       </div>
 
       <div className="pos-main">
-        <div className="stack" style={{ minWidth: 0 }}>
-          <div className="card pad stack" style={{ gap: 8 }}>
+        <div className="stack pos-workspace" style={{ minWidth: 0 }}>
+          <div className="pos-entry stack" style={{ gap: 8 }}>
             <div className="row scanrow">
               <div className="wedge grow" style={{ position: "relative" }}>
                 <Icon n="scan" size={20} />
@@ -379,21 +405,21 @@ export default function Billing({ args }: { args: string[] }) {
               <button className={"btn " + (cam || sheet ? "p" : "g")} onClick={() => (small ? setSheet(true) : setCam(!cam))} title="Scan with the camera"><Icon n="scan" size={20} />Scan</button>
               {!small && <button className={"btn " + (peers ? "p" : "")} onClick={() => setPairOpen(true)} title="Use a phone as the scanner"><Icon n="sell" size={18} />{peers ? "Phone linked" : "Phone as scanner"}</button>}
               <MicButton onAudio={a => doVoice(a)} busy={aiBusy} label="🎙 Speak order" />
-              <button className="btn" disabled={saving} onClick={() => setManual(true)}><Plus size={18} />Add item</button>
+              <button className="btn" aria-pressed="true" aria-expanded="true" aria-controls="pos-item-entry" disabled={saving} onClick={() => setEntryFocus(n => n + 1)}><Plus size={18} />Add item</button>
               <button className="btn" disabled={saving} title="POS calculator" aria-label="POS calculator" onClick={() => setCalculator(true)}><Calculator size={20} /></button>
             </div>
-            {lastScan && <div className="lastscan" role="status" aria-live="polite">
-              <span><b>Last added:</b> {lastScan.item || lastScan.style || lastScan.code} · Box {lastScan.box_no} · {lastScan.qty} {lastScan.type || "PCS"}</span>
-              <button className="chip" onClick={() => showLine(lastScan.id)}>Show line</button>
-            </div>}
+            <div className={"lastscan" + (lastScan ? " has-item" : "")} role="status" aria-live="polite" aria-atomic="true">
+              <span>{lastScan ? <><b>Added: {lastScan.item || lastScan.style || lastScan.code}</b><span className="xs">{[lastScan.style, lastScan.color, `Box ${lastScan.box_no}`, `${lastScan.qty} ${lastScan.type || "PCS"} × ${rupees(lastScan.rate)}`, rupees(lastScan.amount)].filter(Boolean).join(" · ")}</span></> : <span className="mut">{t.items.length} bill lines · {t.total_qty} units</span>}</span>
+              {lastScan && <button className="btn sm" onClick={() => showLine(lastScan.id, true)}>Show line</button>}
+            </div>
             {cam && !small && <div style={{ maxWidth: 560 }}><CameraScanner onCode={c => { onCode(c); }} /></div>}
             {itemEditor}
           </div>
 
           <NameItemCodes codes={unnamed} onNamed={(code, name, unit) => setB(x => x && { ...x, items: x.items.map(l =>
             (l.item === "ITEM " + code || (!l.item && l.product_id && pmap.get(l.product_id)?.item_code === code)) ? { ...l, item: name, type: unit } : l) })} />
-          <div className="card tw">
-            <table className="pos-t">
+          <div className="tw pos-lines" ref={linesPane} role="region" aria-label="Bill items" tabIndex={0}>
+            <table className="pos-t" aria-label="Bill items">
               <thead><tr><th>#</th><th>Box</th><th>Item · Style · Colour</th><th className="r">Pkt</th><th className="r">Qty</th><th className="r">Rate ₹</th><th className="r">Disc</th><th className="r">Amount</th><th /></tr></thead>
               <tbody>
                 {t.items.map((l, i) => (
@@ -411,11 +437,11 @@ export default function Billing({ args }: { args: string[] }) {
                     <td className="r mono b" data-l="Amount">{(l.amount / 100).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
                     <td data-l=""><button className="x" aria-label="Remove line" onClick={() => dropLine(l.id)}>✕</button></td>
                   </tr>))}
-                {!t.items.length && <tr><td colSpan={9} className="mut" style={{ padding: 28, textAlign: "center" }}>Scan a label, type a style, or tap Speak order and say it.<br /><span className="xs">e.g. “do packet K5208 white, ek darjan jhumki gold”</span></td></tr>}
+                {!t.items.length && <tr><td colSpan={9} className="mut" style={{ padding: 28, textAlign: "center" }}>No items yet</td></tr>}
               </tbody>
             </table>
           </div>
-          <div className="card pad grid g2">
+          <div className="pos-notes grid g2">
             <label className="f">Remarks<input className="in" value={b.remarks} onChange={e => set({ remarks: e.target.value })} placeholder="Transport, marka, instructions…" /></label>
             <div className="f"><span>Photo of packed goods</span><PhotoButton value={b.photo_id} onChange={v => set({ photo_id: v })} label="Parcel photo" /></div>
           </div>

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Calculator, Delete, RotateCcw } from "lucide-react";
 import { Modal } from "./common";
 import { type BillLine, type Product } from "../lib/db";
@@ -7,16 +7,19 @@ import { calculate } from "../lib/calculator";
 import { priceFor } from "../lib/billing";
 import { fillFromItemCode } from "../lib/products";
 import { rupees } from "../lib/format";
+import { beep } from "../lib/app";
 
-export function ManualItems({ products, box, level, canRates, onProduct, onCustom, onClose, inline = false }: {
+export function ManualItems({ products, box, level, canRates, onProduct, onCustom, onClose, inline = false, persistent = false, focusRequest = 0 }: {
   products: Product[]; box: number; level: "wholesale" | "retail" | "dealer"; canRates: boolean;
   onProduct: (p: Product, count: number, pieces: boolean, rate: number) => void;
-  onCustom: (l: BillLine) => void; onClose: () => void; inline?: boolean;
+  onCustom: (l: BillLine) => void; onClose: () => void; inline?: boolean; persistent?: boolean; focusRequest?: number;
 }) {
   const [mode, setMode] = useState("custom"), [q, setQ] = useState(""), [chosen, setChosen] = useState<Product | null>(null);
   const [qty, setQty] = useState("1"), [pieces, setPieces] = useState(false), [rate, setRate] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false);
   const [item, setItem] = useState(""), [style, setStyle] = useState(""), [color, setColor] = useState(""), [unit, setUnit] = useState("PCS"), [hsn, setHsn] = useState("");
   const search = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (focusRequest) { setMode("custom"); setChosen(null); if (mode !== "custom") setRate(""); setError(""); } }, [focusRequest]);
+  useEffect(() => { if (focusRequest && mode === "custom") search.current?.focus({ preventScroll: true }); }, [focusRequest, mode]);
   const hits = useMemo(() => { const words = q.trim().toUpperCase().split(/\s+/); return products.filter(p => words.every(w => [p.item, p.item_code, p.code, p.style, p.color].join(" ").toUpperCase().includes(w))).slice(0, 30); }, [q, products]);
   const select = async (p: Product) => { setBusy(true); setError(""); try { const named = await fillFromItemCode(p); setChosen(named); setRate(String(priceFor(named, level) / 100)); setQty("1"); } catch (e: any) { setError(e.message); } finally { setBusy(false); } };
   const submit = (next: boolean) => {
@@ -27,23 +30,24 @@ export function ManualItems({ products, box, level, canRates, onProduct, onCusto
         const count = Number(qty); if (!Number.isSafeInteger(count) || count <= 0 || count > 1000000) throw new Error("Enter a positive whole quantity");
         onProduct(chosen, count, pieces, canRates || !priceFor(chosen, level) ? moneyInput(rate) : priceFor(chosen, level));
       }
-      if (!next) return onClose();
-      setChosen(null); setQ(""); setItem(""); setRate(""); setQty("1"); setStyle(""); setColor(""); setError(""); search.current?.focus();
-    } catch (e: any) { setError(e.message); }
+      if (!next && !persistent) return onClose();
+      setChosen(null); setQ(""); setItem(""); setRate(""); setQty("1"); setStyle(""); setColor(""); setHsn(""); setPieces(false); setError(""); search.current?.focus({ preventScroll: true });
+    } catch (e: any) { beep(false); setError(e.message); }
   };
   const content = <div className="stack pos-tools">
-    <div className="seg" role="group" aria-label="Item source"><button aria-pressed={mode === "catalog"} onClick={() => { setMode("catalog"); setError(""); }}>Stock item</button><button aria-pressed={mode === "custom"} onClick={() => { setMode("custom"); setRate(""); setError(""); }}>Custom item</button></div>
-    {mode === "catalog" ? <><label className="f">Search products<input className="in" autoFocus ref={search} value={q} onChange={e => { setQ(e.target.value); setChosen(null); }} placeholder="Name, item number, style or colour" /></label>
+    <div className="seg" role="group" aria-label="Item source"><button aria-pressed={mode === "catalog"} onClick={() => { setMode("catalog"); setError(""); }}>Stock item</button><button aria-pressed={mode === "custom"} onClick={() => { setMode("custom"); setChosen(null); setRate(""); setError(""); }}>Custom item</button></div>
+    {mode === "catalog" && <><label className="f">Search products<input className="in" autoFocus={!persistent} ref={search} value={q} onChange={e => { setQ(e.target.value); setChosen(null); }} placeholder="Name, item number, style or colour" /></label>
       {!chosen ? <div className="pos-picklist">{hits.map(p => <button className="pos-pick" key={p.id} disabled={busy} onClick={() => select(p)}><span><b>{p.item || "Item " + (p.item_code || p.code)}</b><span className="mut sm">{p.style} · {p.color}</span></span><b className="mono">{rupees(priceFor(p, level))}</b></button>)}{!hits.length && <div className="mut">No matching products</div>}</div> : <div className="note"><b>{chosen.item || "Item " + chosen.item_code}</b><div>{chosen.style} · {chosen.color} · {chosen.type}</div></div>}
-    </> : <div className="grid g2"><label className="f">Product name<input ref={search} autoFocus className="in" value={item} onChange={e => setItem(e.target.value)} /></label><label className="f">Unit<select className="in" value={unit} onChange={e => setUnit(e.target.value)}>{["PCS", "PAIR", "SET"].map(u => <option key={u}>{u}</option>)}</select></label><label className="f">Style<input className="in" value={style} onChange={e => setStyle(e.target.value)} /></label><label className="f">Colour<input className="in" value={color} onChange={e => setColor(e.target.value)} /></label><label className="f">HSN<input className="in" inputMode="numeric" value={hsn} onChange={e => setHsn(e.target.value)} /></label><span className="pill">Custom · no stock movement</span></div>}
-    {(chosen || mode === "custom") && <form onSubmit={e => { e.preventDefault(); submit(false); }} className="stack">
-      {chosen && (chosen.pack || 1) > 1 && <div className="seg" role="group" aria-label="Quantity mode"><button type="button" aria-pressed={!pieces} onClick={() => setPieces(false)}>Packets ×{chosen.pack}</button><button type="button" aria-pressed={pieces} onClick={() => setPieces(true)}>Loose {chosen.type}</button></div>}
-      <div className="grid g2"><label className="f">Quantity<input className="in" type="number" min={1} step={1} value={qty} onChange={e => setQty(e.target.value)} /></label><label className="f">Rate ₹ / {chosen?.type || unit}<input className="in" inputMode="decimal" value={rate} disabled={!!chosen && !canRates && !!priceFor(chosen, level)} onChange={e => setRate(e.target.value)} /></label></div>
-      <div className="row"><button className="btn p" disabled={busy}><Plus size={16} />Add to bill</button><button type="button" className="btn" disabled={busy} onClick={() => submit(true)}>Add & next</button></div>
+    </>}
+    {(chosen || mode === "custom") && <form onSubmit={e => { e.preventDefault(); submit(false); }} className="pos-entry-fields">
+      {mode === "custom" && <><label className="f pos-entry-name">Product name<input ref={search} autoFocus={!persistent} className="in" value={item} onChange={e => setItem(e.target.value)} /></label><label className="f">Unit<select className="in" value={unit} onChange={e => setUnit(e.target.value)}>{["PCS", "PAIR", "SET"].map(u => <option key={u}>{u}</option>)}</select></label><label className="f">Style<input className="in" value={style} onChange={e => setStyle(e.target.value)} /></label><label className="f">Colour<input className="in" value={color} onChange={e => setColor(e.target.value)} /></label><label className="f">HSN<input className="in" inputMode="numeric" value={hsn} onChange={e => setHsn(e.target.value)} /></label></>}
+      {mode === "catalog" && chosen && (chosen.pack || 1) > 1 && <div className="seg pos-entry-wide" role="group" aria-label="Quantity mode"><button type="button" aria-pressed={!pieces} onClick={() => setPieces(false)}>Packets ×{chosen.pack}</button><button type="button" aria-pressed={pieces} onClick={() => setPieces(true)}>Loose {chosen.type}</button></div>}
+      <label className="f">Quantity<input className="in" type="number" min={1} step={1} value={qty} onChange={e => setQty(e.target.value)} /></label><label className="f">Rate ₹ / {mode === "catalog" ? chosen?.type : unit}<input className="in" inputMode="decimal" value={rate} disabled={mode === "catalog" && !!chosen && !canRates && !!priceFor(chosen, level)} onChange={e => setRate(e.target.value)} /></label>
+      <div className="row pos-entry-actions"><button className="btn p" disabled={busy}><Plus size={16} />Add to bill</button>{!persistent && <button type="button" className="btn" disabled={busy} onClick={() => submit(true)}>Add & next</button>}{mode === "custom" && <span className="xs mut">No stock movement</span>}</div>
     </form>}
     {error && <div role="alert" className="note warn">{error}</div>}
   </div>;
-  return inline ? <section className="pos-inline" aria-label="Add item"><div className="row"><b className="grow">ITEM</b><button className="x" aria-label="Close item entry" onClick={onClose}>×</button></div>{content}</section> : <Modal title="Add items manually" onClose={onClose}>{content}</Modal>;
+  return inline ? <section className="pos-inline" id="pos-item-entry" aria-label="Add item">{!persistent && <div className="row"><b className="grow">ITEM</b><button className="x" aria-label="Close item entry" onClick={onClose}>×</button></div>}{content}</section> : <Modal title="Add items manually" onClose={onClose}>{content}</Modal>;
 }
 
 export type CalcTarget = "none" | "rate" | "packing" | "discount";

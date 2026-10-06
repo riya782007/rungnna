@@ -21,3 +21,10 @@ export function validatePosLines(lines: BillLine[]) {
     if (!Number.isSafeInteger(l.rate) || l.rate < 0 || !Number.isSafeInteger(l.amount) || l.amount < 0) throw new Error("Invalid amount for " + l.item);
   }
 }
+
+export function repeatedPosLine(lines: BillLine[], added: BillLine): boolean {
+  const norm = (s: string) => (s || "").trim().toUpperCase();
+  return lines.some(l => l.box_no === added.box_no && l.rate === added.rate && l.disc === added.disc &&
+    (added.product_id ? l.product_id === added.product_id : !l.product_id &&
+      norm(l.item) === norm(added.item) && norm(l.style) === norm(added.style) && norm(l.color) === norm(added.color) && l.type === added.type && l.hsn === added.hsn));
+}
