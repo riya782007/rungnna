@@ -13,7 +13,7 @@ export function ManualItems({ products, box, level, canRates, onProduct, onCusto
   onProduct: (p: Product, count: number, pieces: boolean, rate: number) => void;
   onCustom: (l: BillLine) => void; onClose: () => void; inline?: boolean;
 }) {
-  const [mode, setMode] = useState("catalog"), [q, setQ] = useState(""), [chosen, setChosen] = useState<Product | null>(null);
+  const [mode, setMode] = useState("custom"), [q, setQ] = useState(""), [chosen, setChosen] = useState<Product | null>(null);
   const [qty, setQty] = useState("1"), [pieces, setPieces] = useState(false), [rate, setRate] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false);
   const [item, setItem] = useState(""), [style, setStyle] = useState(""), [color, setColor] = useState(""), [unit, setUnit] = useState("PCS"), [hsn, setHsn] = useState("");
   const search = useRef<HTMLInputElement>(null);
