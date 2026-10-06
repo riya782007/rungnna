@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { usePrintJob } from "../lib/printing";
 import { createPortal } from "react-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, getSetting, setSetting, recordMovement, type Product } from "../lib/db";
@@ -8,6 +9,8 @@ import { blankProduct, saveProduct, findByScan, distinct, DEFAULT_ITEMS, DEFAULT
 import { Head, LocationSelect, DeadToggle } from "../components/common";
 import { WedgeInput } from "../components/Scanner";
 import { useApp, toast } from "../lib/app";
+import { can } from "../lib/roles";
+import { inStore } from "../lib/scope";
 import { toPaise } from "../lib/format";
 import { getRule, priceFromCost, type PricingRule } from "../lib/pricing";
 import { buildTSPL, labelFromProduct, printTSPL, directPrintSupported, connectSerial, serialSupported } from "../lib/tsc";
@@ -47,7 +50,9 @@ export default function Labels({ args }: { args: string[] }) {
   const [cfg, setCfg] = useState<LabelCfg>(DEFAULT_CFG);
   const [form, setForm] = useState<Product>(() => blankProduct(""));
   const [qty, setQty] = useState("1");
-  const [copies, setCopies] = useState("24");
+  const [copies, setCopies] = useState("1");
+  const queueLock = useRef(false);
+  const [queueBusy, setQueueBusy] = useState(false);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [addStock, setAddStock] = useState(false);
   const [loc, setLoc] = useState("");
@@ -73,12 +78,31 @@ export default function Labels({ args }: { args: string[] }) {
     const { rate, cost_code } = priceFromCost(paise, r, pack, form.type || "PCS");
     setForm(f => ({ ...f, cost: paise, rate: f.price_locked ? f.rate : rate, cost_code }));
   };
-  useEffect(() => { if (args[0]) db.products.get(args[0]).then(p => { if (p) { setForm({ ...p }); setQty(String(p.pack || 1)); } }); }, [args[0]]);
+  useEffect(() => {
+    if (args[0] === "purchase" && args[1]) {
+      (async () => {
+        const purchase = await db.purchases.get(args[1]);
+        if (!purchase || purchase.deleted || !inStore(purchase)) return;
+        const queue: Job[] = [];
+        for (const line of purchase.items) { const p = await db.products.get(line.product_id); if (p && !p.deleted) queue.push({ p, qtyOnLabel: line.pack || 1, copies: Math.ceil(line.qty / Math.max(1, line.pack)) }); }
+        if (queue.reduce((n, j) => n + j.copies, 0) > 5000) { toast("Purchase has over 5000 labels. Prepare smaller batches from the item form.", true); return; }
+        setJobs(queue);
+      })();
+    } else if (args[0]) db.products.get(args[0]).then(p => { if (p) { setForm({ ...p }); setQty(String(p.pack || 1)); } });
+  }, [args[0], args[1]]);
   const upd = (patch: Partial<LabelCfg>) => { const c = { ...cfg, ...patch }; setCfg(c); setSetting("label_cfg", c); };
   const set = (k: keyof Product, v: any) => setForm(f => ({ ...f, [k]: v }));
 
-  const addJob = async () => {
+  const addJob = async (print = false) => {
+    if (queueLock.current) return;
     if (!form.item && !form.style) { toast("Fill ITEM or STYLE first", true); return; }
+    if (addStock && !loc) return toast("Choose the rack the new stock goes to", true);
+    const n = Number(copies), packet = Number(qty);
+    if (!Number.isSafeInteger(n) || n < 1 || n > 5000 || !Number.isSafeInteger(packet) || packet < 1 || packet > 1000000) return toast("Check packet quantity and print quantity (1–5000)", true);
+    if (jobs.reduce((sum, j) => sum + j.copies, 0) + n > 5000) return toast("Print this queue before adding more than 5000 labels", true);
+    queueLock.current = true; setQueueBusy(true);
+    try {
+    const saved = await db.transaction("rw", [db.products, db.config, db.settings, db.stock, db.locations, db.movements, db.outbox], async () => {
     // make sure the product exists so a scan of the new QR always finds it
     const existing = form.style ? await findByScan(form.code, { raw: form.code, how: "x", tokens: [], style: form.style, color: form.color, item: form.item }) : undefined;
     const pack = Math.max(1, parseInt(qty) || 1);
@@ -90,20 +114,26 @@ export default function Labels({ args }: { args: string[] }) {
           model: form.model || existing.model, vendor_id: form.vendor_id || existing.vendor_id, vendor_name: form.vendor_name || existing.vendor_name }
       : { ...form, pack, item_code, created_by: form.created_by || me?.id || "" };
     const saved = await saveProduct(p);
-    const n = Math.max(1, parseInt(copies) || 1);
     if (addStock) {
       if (!loc) { toast("Choose the rack the new stock goes to", true); return; }
       await recordMovement({ product_id: saved.id, kind: "intake", qty: n * Math.max(1, parseInt(qty) || 1), from_loc: null, to_loc: loc, person_type: "employee", person_name: me?.name || "", by_staff: me?.id || "", note: "labelled at print" });
     }
+    return saved;
+    });
+    if (!saved) return;
     setJobs(j => [...j, { p: saved, qtyOnLabel: Math.max(1, parseInt(qty) || 1), copies: n }]);
+    if (print) setPrinting(true);
     toast(`${n} labels queued · ${label(saved)}`);
     setForm(blankProduct(me?.id || "")); setQty("1"); setCost("");
+    } catch (e: any) { toast(e.message || "Could not prepare labels", true); }
+    finally { queueLock.current = false; setQueueBusy(false); }
   };
 
-  const flat = useMemo(() => jobs.flatMap(j => Array.from({ length: j.copies }, () => j)), [jobs]);
+  const flat = useMemo(() => jobs.flatMap(j => Array.from({ length: Math.max(0, Math.min(5000, j.copies)) }, () => j)).slice(0, 5000), [jobs]);
   const total = flat.length;
 
-  const doPrint = () => { setPrinting(true); setTimeout(() => { window.print(); setPrinting(false); }, 150); };
+  usePrintJob(printing, () => setPrinting(false));
+  const doPrint = () => { if (total) setPrinting(true); };
 
   /* Direct-to-TSC: send TSPL for every queued label straight to the printer.
      Falls back to the on-screen print sheet if the browser can't reach the printer. */
@@ -130,7 +160,7 @@ export default function Labels({ args }: { args: string[] }) {
   };
 
   return (
-    <div>
+    <div className="label-counter">
       <Head eyebrow="Barcode print" title="QR labels" sub="Same fields as the old BARCODE PRINT screen. Every label carries its own details inside the QR, so it scans even on a phone with no internet.">
         {directPrintSupported() && <button className="btn dk" disabled={!total} onClick={doPrintTSC} title="Send straight to the TSC label printer">Print to TSC {total || ""}</button>}
         <button className="btn g" disabled={!total} onClick={doPrint}>Print {total || ""} labels</button>
@@ -151,15 +181,17 @@ export default function Labels({ args }: { args: string[] }) {
                   <select className="in" value={form.type} onChange={e => set("type", e.target.value)}>{DEFAULT_TYPES.map(t => <option key={t}>{t}</option>)}</select></label>
                 <label className="f">STYLE<input className="in mono" value={form.style} onChange={e => set("style", e.target.value.toUpperCase())} placeholder="K5209/59SH" /></label>
                 <label className="f">COLOR<input className="in mono" value={form.color} onChange={e => set("color", e.target.value.toUpperCase())} placeholder="K/GBN" /></label>
+                <label className="f">TK<input className="in mono" value={form.tk} onChange={e => set("tk", e.target.value.toUpperCase())} /></label>
+                <details className="label-advanced"><summary>More details</summary><div className="grid g2">
                 <label className="f">MODEL / ARTICLE No.<input className="in mono" value={form.model || ""} onChange={e => set("model", e.target.value.toUpperCase() || undefined)} placeholder="vendor's article no" /></label>
                 <label className="f">VENDOR
                   <select className="in" value={form.vendor_id || ""} onChange={e => { const v = vendors.find(x => x.id === e.target.value); set("vendor_id", e.target.value || undefined); set("vendor_name", v?.name || undefined); }}>
                     <option value="">—</option>{vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>
-                <div style={{ gridColumn: "1/-1" }}><DeadToggle value={form.tk} onChange={v => set("tk", v)} /></div>
                 <label className="f">ITEM CODE (old software)<input className="in mono" inputMode="numeric" value={form.item_code || ""} placeholder="auto" onChange={e => set("item_code", e.target.value.replace(/\D/g, "") || undefined)} /></label>
-                <label className="f">COST ₹ (owner) — sets rate &amp; code automatically
-                  <input className="in mono" inputMode="decimal" value={cost} placeholder="enter cost" onChange={e => applyCost(e.target.value)} /></label>
-                <label className="f">RATE ₹ {form.cost_code && <span className="xs mut">code {form.cost_code}</span>}
+                {can(me, "rates") && <label className="f">COST ₹
+                  <input className="in mono" inputMode="decimal" value={cost} placeholder="enter cost" onChange={e => applyCost(e.target.value)} /></label>}
+                </div></details>
+                <label className="f">RATE ₹ {can(me, "rates") && form.cost_code && <span className="xs mut">code {form.cost_code}</span>}
                   <input className="in hi mono" inputMode="decimal" value={form.rate ? String(form.rate / 100) : ""} onChange={e => { set("rate", toPaise(e.target.value)); set("price_locked", 1); }} /></label>
                 <label className="f">QTY (pieces per packet — prints as ₹RATE X QTY PCS)<input className="in mono" inputMode="numeric" value={qty} onChange={e => setQty(e.target.value.replace(/\D/g, ""))} /></label>
                 <label className="f">PRINT QTY (labels)<input className="in mono" inputMode="numeric" value={copies} onChange={e => setCopies(e.target.value.replace(/\D/g, ""))}
@@ -167,7 +199,7 @@ export default function Labels({ args }: { args: string[] }) {
               </div>
               <label className="row sm"><input type="checkbox" checked={addStock} onChange={e => setAddStock(e.target.checked)} /> These are new packets — also add them to stock</label>
               {addStock && <LocationSelect value={loc} onChange={setLoc} label="Into rack" buckets={false} />}
-              <button className="btn p big" onClick={addJob}>Add to print queue ↵</button>
+              <div className="row"><button className="btn p" disabled={queueBusy} onClick={() => addJob(true)}>Print barcode</button><button className="btn" disabled={queueBusy} onClick={() => addJob()}>Add to queue</button></div>
             </div>
           </div>
           {jobs.length > 0 && (
@@ -185,9 +217,10 @@ export default function Labels({ args }: { args: string[] }) {
             </div>
           )}
         </div>
-        <LabelSettings cfg={cfg} upd={upd} sample={jobs[0]?.p || { ...form, code: form.code }} qty={parseInt(qty) || 1} />
+        <div className="stack"><div className="labelprev"><LabelView cfg={cfg} p={jobs[0]?.p || form} qtyOnLabel={parseInt(qty) || 1} /></div><details><summary>Printer settings</summary><LabelSettings cfg={cfg} upd={upd} sample={jobs[0]?.p || { ...form, code: form.code }} qty={parseInt(qty) || 1} /></details></div>
       </div>
       {printing && createPortal(<PrintSheet cfg={cfg} jobs={flat} />, document.getElementById("printroot")!)}
+      {printing && <button className="btn print-notice" onClick={() => setPrinting(false)}>Close print</button>}
     </div>
   );
 }
@@ -282,7 +315,7 @@ function PrintSheet({ cfg, jobs }: { cfg: LabelCfg; jobs: Job[] }) {
     return (<>
       <style>{`@page{size:${pageW}mm ${cfg.h + cfg.gapY}mm;margin:0}`}</style>
       {rows.map((r, i) => (
-        <div key={i} style={{ display: "flex", gap: cfg.gapX + "mm", width: pageW + "mm", height: cfg.h + "mm", pageBreakAfter: "always", breakAfter: "page", transform: `translate(${cfg.offX}mm,${cfg.offY}mm)` }}>
+        <div key={i} style={{ display: "flex", gap: cfg.gapX + "mm", width: pageW + "mm", height: cfg.h + "mm", pageBreakAfter: i === rows.length - 1 ? "auto" : "always", breakAfter: i === rows.length - 1 ? "auto" : "page", transform: `translate(${cfg.offX}mm,${cfg.offY}mm)` }}>
           {r.map((j, k) => <LabelView key={k} cfg={cfg} p={j.p} qtyOnLabel={j.qtyOnLabel} />)}
         </div>))}
     </>);
@@ -292,7 +325,7 @@ function PrintSheet({ cfg, jobs }: { cfg: LabelCfg; jobs: Job[] }) {
   return (<>
     <style>{`@page{size:${cfg.sheetW}mm ${cfg.sheetH}mm;margin:0}`}</style>
     {pages.map((pg, i) => (
-      <div key={i} style={{ width: cfg.sheetW + "mm", height: cfg.sheetH + "mm", position: "relative", pageBreakAfter: "always", breakAfter: "page", overflow: "hidden" }}>
+      <div key={i} style={{ width: cfg.sheetW + "mm", height: cfg.sheetH + "mm", position: "relative", pageBreakAfter: i === pages.length - 1 ? "auto" : "always", breakAfter: i === pages.length - 1 ? "auto" : "page", overflow: "hidden" }}>
         {pg.map((j, k) => {
           const c = k % cfg.cols, r = Math.floor(k / cfg.cols);
           return <div key={k} style={{ position: "absolute", left: cfg.left + cfg.offX + c * (cfg.w + cfg.gapX) + "mm", top: cfg.top + cfg.offY + r * (cfg.h + cfg.gapY) + "mm" }}>

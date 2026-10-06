@@ -14,6 +14,7 @@ import { Head, PhotoButton, Thumb } from "../components/common";
 import { Icon } from "../components/Icon";
 import { VoiceNotes } from "../components/Voice";
 import { usePrivate, isEstimate } from "../lib/privacy";
+import { usePrintJob } from "../lib/printing";
 
 /* Customers: who buys, what they owe, one tap to collect or remind. */
 export default function Customers({ args }: { args: string[] }) {
@@ -23,7 +24,7 @@ export default function Customers({ args }: { args: string[] }) {
 function PartyList() {
   const [q, setQ] = useState("");
   const [onlyDue, setOnlyDue] = useState(false);
-  const parties = useLiveQuery(() => db.parties.filter(p => !p.deleted).toArray(), [], []);
+  const parties = useLiveQuery(() => db.parties.filter(p => !p.deleted && p.kind !== "supplier").toArray(), [], []);
   const stamp = useLiveQuery(async () => (await db.bills.count()) + ":" + (await db.receipts.count()) + ":" + (await db.bills.orderBy("updated_at").last())?.updated_at, [], "");
   const [bal, setBal] = useState<Map<string, number>>(new Map());
   const priv = usePrivate();
@@ -45,11 +46,11 @@ function PartyList() {
         {list.map(p => { const b = bal.get(p.id) || 0; return (
           <a key={p.id} href={"#/customers/" + p.id}>
             <Thumb photo_id={p.photo_id} url={p.photo_url} text={p.name} size={40} />
-            <span className="grow"><b className="sm">{p.name}</b><div className="xs mut">{[p.phone, p.city].filter(Boolean).join(" · ") || p.tier}</div></span>
+            <span className="grow"><b className="sm">{p.name}</b><div className="xs mut">{p.city || p.tier}</div></span>
             {b > 0 ? <b className="mono" style={{ color: "var(--bad)" }}>{rupees(b)}</b> : b < 0 ? <span className="pill ok">advance {rupees(-b)}</span> : <span className="xs mut">clear</span>}
             <Icon n="chev" size={16} />
           </a>); })}
-        {!list.length && <div className="empty"><b>No customers yet</b>They're added from the bill screen (F3) or with Add.</div>}
+        {!list.length && <div className="empty"><b>No customers yet</b>They're added from Client name on a bill or with Add.</div>}
       </div>
     </div>
   );
@@ -73,7 +74,7 @@ function PartyView({ id }: { id: string }) {
   useEffect(() => { if (p0) setP({ ...p0 }); }, [p0?.updated_at]);
   useEffect(() => { if (p0) ledger(p0).then(setLed); }, [p0?.updated_at, bills, rc, priv]);
   useEffect(() => { getShop().then(setShop); }, []);
-  useEffect(() => { if (!printing) return; const t = setTimeout(() => { window.print(); setPrinting(false); }, 200); return () => clearTimeout(t); }, [printing]);
+  usePrintJob(printing, () => setPrinting(false));
   if (!p || !p0) return <div className="skel" style={{ height: 200 }} />;
   const set = (k: keyof Party, v: any) => setP({ ...p, [k]: v });
   const bal = led?.balance || 0;
@@ -133,7 +134,7 @@ function PartyView({ id }: { id: string }) {
 
       {tab === "details" && <div className="split">
         <div className="card pad stack">
-          <div className="row"><Thumb photo_id={p.photo_id} url={p.photo_url} text={p.name} size={72} /><PhotoButton value={p.photo_id} onChange={v => set("photo_id", v)} label="Photo" /></div>
+          <div className="row"><Thumb photo_id={p.photo_id} url={p.photo_url} text={p.name} size={72} /><PhotoButton webcam value={p.photo_id} onChange={v => set("photo_id", v)} label="Photo" /></div>
           <div className="grid g2">
             <label className="f">Name<input className="in" value={p.name} onChange={e => set("name", e.target.value.toUpperCase())} /></label>
             <label className="f">Mobile / WhatsApp<input className="in mono" inputMode="tel" value={p.phone} onChange={e => set("phone", e.target.value.replace(/[^\d+]/g, ""))} /></label>

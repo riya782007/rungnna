@@ -73,7 +73,7 @@ export function totals(b: Bill, shopState = ""): Bill {
   const items = b.items.map(fixLine);
   const gross = items.reduce((a, l) => a + l.amount, 0);
   const total_qty = items.reduce((a, l) => a + l.qty, 0);
-  const box_count = new Set(items.map(l => l.box_no)).size;
+  const box_count = Math.max(b.box_count || 0, new Set(items.map(l => l.box_no)).size);
   // a discount can never exceed the goods on the bill, so NET can't go negative
   const discount = Math.min(gross, Math.max(0, b.discount_pct ? Math.round(gross * b.discount_pct / 100) : b.discount));
   // a credit note against a tax invoice reverses its GST; estimates, challans and their returns carry none

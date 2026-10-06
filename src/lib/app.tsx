@@ -6,7 +6,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 
 /* ---------- tiny hash router (works offline, no server rewrites needed) ---------- */
 export function useRoute(): [string, string[]] {
-  const read = () => (location.hash.replace(/^#\/?/, "") || "home").split("/");
+  const read = () => (location.hash.replace(/^#\/?/, "") || "bill").split("/");
   const [r, setR] = useState(read());
   useEffect(() => { const f = () => setR(read()); addEventListener("hashchange", f); return () => removeEventListener("hashchange", f); }, []);
   return [r[0], r.slice(1)];
@@ -30,11 +30,12 @@ export function Toasts() {
 
 /* ---------- beep + vibrate on scan (the shop floor is noisy; hands are full) ---------- */
 let ac: AudioContext | null = null;
-export function beep(ok = true) {
+export function beep(ok: boolean | "repeat" | "saved" = true) {
   try {
     ac = ac || new AudioContext();
     const o = ac.createOscillator(), g = ac.createGain();
-    o.frequency.value = ok ? 1250 : 320; g.gain.value = 0.08;
+    void ac.resume();
+    o.frequency.value = ok === "repeat" ? 750 : ok === "saved" ? 1650 : ok ? 1250 : 320; g.gain.value = 0.08;
     o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + (ok ? 0.09 : 0.25));
   } catch { /* no audio */ }
   try { navigator.vibrate?.(ok ? 40 : [60, 40, 60]); } catch { /* no vibrate */ }

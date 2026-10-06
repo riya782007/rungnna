@@ -329,6 +329,33 @@ tr.click{cursor:pointer}tr.click:hover td{background:var(--bg)}
 
 
 #printroot{display:none}
+.pos :is(input,select,textarea):focus,.label-counter :is(input,select):focus{background:#fff36a!important;color:#111;outline:2px solid #847600;outline-offset:0}
+.pos-inline{border-top:1px solid var(--line);padding-top:8px}
+.pos-inline .pos-picklist{max-height:160px;overflow:auto}
+.pos-inline .pos-tools{gap:8px}
+.pos-inline .pos-tools>.grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+.label-counter{max-width:1120px;margin:auto}
+.label-advanced{grid-column:1/-1}
+.purchase-import{border:1px solid var(--line);padding:12px;margin-bottom:16px;border-radius:4px}
+.purchase-import summary,.label-counter summary{cursor:pointer;font-weight:600;padding:6px 0}
+.purchase-photo{padding-top:12px}
+.daily-tasks{border-block:1px solid var(--line);padding:12px 0;margin:14px 0}
+.task-line{padding:8px 0;border-bottom:1px solid var(--line)}
+.quick-operations{gap:6px}
+.print-notice{position:fixed;bottom:80px;right:12px;z-index:90;padding:10px;background:#fff;border:1px solid var(--line);display:flex;gap:12px;align-items:center}
+.customer-camera{width:100%;aspect-ratio:4/3;object-fit:contain;background:#111;max-height:50vh}
+@media(min-width:861px){
+  .compact-menu.shell{grid-template-columns:64px minmax(0,1fr)}
+  .compact-menu .rail{padding:10px 6px}
+  .compact-menu .rail :is(.grow,.t,kbd,.brand>div,.store-switch,.railfoot,.nav>span){display:none}
+  .compact-menu :is(.nav,.newbill,.railsearch){justify-content:center;padding:12px 6px}
+  .pos .card{border-radius:3px;box-shadow:none}
+  .pos-main{gap:8px}
+  .pos-t th,.pos-t td{padding:5px;border-right:1px solid var(--line)}
+  .pos-t .cell{border-radius:0}
+  .pos-inline .pos-tools{display:grid;grid-template-columns:minmax(160px,1fr) minmax(160px,1fr);align-items:start}
+}
+@media(max-width:860px){.menu-toggle{display:none}.pos-inline .pos-tools>.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media print{
   #root,.toast,.modal{display:none!important}
   html,body{background:#fff;margin:0}

@@ -8,10 +8,10 @@ import { priceFor } from "../lib/billing";
 import { fillFromItemCode } from "../lib/products";
 import { rupees } from "../lib/format";
 
-export function ManualItems({ products, box, level, canRates, onProduct, onCustom, onClose }: {
+export function ManualItems({ products, box, level, canRates, onProduct, onCustom, onClose, inline = false }: {
   products: Product[]; box: number; level: "wholesale" | "retail" | "dealer"; canRates: boolean;
   onProduct: (p: Product, count: number, pieces: boolean, rate: number) => void;
-  onCustom: (l: BillLine) => void; onClose: () => void;
+  onCustom: (l: BillLine) => void; onClose: () => void; inline?: boolean;
 }) {
   const [mode, setMode] = useState("catalog"), [q, setQ] = useState(""), [chosen, setChosen] = useState<Product | null>(null);
   const [qty, setQty] = useState("1"), [pieces, setPieces] = useState(false), [rate, setRate] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false);
@@ -31,7 +31,7 @@ export function ManualItems({ products, box, level, canRates, onProduct, onCusto
       setChosen(null); setQ(""); setItem(""); setRate(""); setQty("1"); setStyle(""); setColor(""); setError(""); search.current?.focus();
     } catch (e: any) { setError(e.message); }
   };
-  return <Modal title="Add items manually" onClose={onClose}><div className="stack pos-tools">
+  const content = <div className="stack pos-tools">
     <div className="seg" role="group" aria-label="Item source"><button aria-pressed={mode === "catalog"} onClick={() => { setMode("catalog"); setError(""); }}>Stock item</button><button aria-pressed={mode === "custom"} onClick={() => { setMode("custom"); setRate(""); setError(""); }}>Custom item</button></div>
     {mode === "catalog" ? <><label className="f">Search products<input className="in" autoFocus ref={search} value={q} onChange={e => { setQ(e.target.value); setChosen(null); }} placeholder="Name, item number, style or colour" /></label>
       {!chosen ? <div className="pos-picklist">{hits.map(p => <button className="pos-pick" key={p.id} disabled={busy} onClick={() => select(p)}><span><b>{p.item || "Item " + (p.item_code || p.code)}</b><span className="mut sm">{p.style} · {p.color}</span></span><b className="mono">{rupees(priceFor(p, level))}</b></button>)}{!hits.length && <div className="mut">No matching products</div>}</div> : <div className="note"><b>{chosen.item || "Item " + chosen.item_code}</b><div>{chosen.style} · {chosen.color} · {chosen.type}</div></div>}
@@ -42,7 +42,8 @@ export function ManualItems({ products, box, level, canRates, onProduct, onCusto
       <div className="row"><button className="btn p" disabled={busy}><Plus size={16} />Add to bill</button><button type="button" className="btn" disabled={busy} onClick={() => submit(true)}>Add & next</button></div>
     </form>}
     {error && <div role="alert" className="note warn">{error}</div>}
-  </div></Modal>;
+  </div>;
+  return inline ? <section className="pos-inline" aria-label="Add item"><div className="row"><b className="grow">ITEM</b><button className="x" aria-label="Close item entry" onClick={onClose}>×</button></div>{content}</section> : <Modal title="Add items manually" onClose={onClose}>{content}</Modal>;
 }
 
 export type CalcTarget = "none" | "rate" | "packing" | "discount";

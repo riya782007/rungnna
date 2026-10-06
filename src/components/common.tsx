@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, type Location, type Product } from "../lib/db";
 import { photoSrc, savePhoto } from "../lib/image";
 import { Icon } from "./Icon";
 import { inStore } from "../lib/scope";
+const CustomerCamera = lazy(() => import("./CustomerCamera"));
 
 export { LOC_PREFIX } from "../lib/rackLabel";
 
@@ -43,20 +44,23 @@ export function Thumb({ photo_id, url, text, size = 48 }: { photo_id?: string; u
 }
 
 /* Opens the phone's back camera directly; compresses to <100 KB before saving. */
-export function PhotoButton({ value, onChange, label = "Photo" }: { value?: string; onChange: (photo_id: string | undefined) => void; label?: string }) {
+export function PhotoButton({ value, onChange, label = "Photo", webcam = false }: { value?: string; onChange: (photo_id: string | undefined) => void; label?: string; webcam?: boolean }) {
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [camera, setCamera] = useState(false);
   return (
     <div className="row">
       {value && <Thumb photo_id={value} size={56} />}
-      <input ref={ref} type="file" accept="image/*" capture="environment" hidden
+      <input ref={ref} type="file" accept="image/*" capture={webcam ? undefined : "environment"} hidden
         onChange={async e => {
           const f = e.target.files?.[0]; if (!f) return;
           setBusy(true); try { onChange(await savePhoto(f)); } finally { setBusy(false); e.target.value = ""; }
         }} />
       <button type="button" className="btn sm" onClick={() => ref.current?.click()} disabled={busy}>
-        {busy ? "Saving…" : value ? "Retake " + label.toLowerCase() : <><Icon n="camera" size={17} />{label}</>}
+        {busy ? "Saving…" : webcam ? "Upload photo" : value ? "Retake " + label.toLowerCase() : <><Icon n="camera" size={17} />{label}</>}
       </button>
+      {webcam && <button type="button" className="btn sm" onClick={() => setCamera(true)} disabled={busy}><Icon n="camera" size={17} />Take photo</button>}
+      {camera && <Suspense fallback={<div role="status">Opening camera…</div>}><CustomerCamera onPhoto={onChange} onClose={() => setCamera(false)} /></Suspense>}
       {value && <button type="button" className="btn sm bad" onClick={() => onChange(undefined)}>Remove</button>}
     </div>
   );

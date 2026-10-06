@@ -36,7 +36,7 @@ function SupplierList() {
     <div className="list">{list.map(p => {
       const a = age.get(p.id), b = bal.get(p.id) || 0;
       return <a key={p.id} href={"#/suppliers/" + p.id}>
-        <span className="grow"><b className="sm">{p.name}</b><div className="xs mut">{[p.phone, p.city].filter(Boolean).join(" · ") || "Supplier"}</div></span>
+        <span className="grow"><b className="sm">{p.name}</b><div className="xs mut">{p.city || "Supplier"}</div></span>
         <span className="xs mut">0-30 {rupees(a?.d0_30 || 0)} · 31-60 {rupees(a?.d31_60 || 0)} · 60+ {rupees(a?.d60 || 0)}</span>
         <b className="mono" style={{ color: b > 0 ? "var(--bad)" : undefined }}>{rupees(Math.abs(b))}</b><Icon n="chev" size={16} />
       </a>;

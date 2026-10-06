@@ -12,6 +12,8 @@ import { WhoAreYou } from "./pages/Settings";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "./lib/db";
 import { OwnerGate } from "./components/OwnerSecurity";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { getSetting, setSetting } from "./lib/db";
 
 /* Pages load on first visit (fast start); the service worker keeps every piece for offline use. */
 const Billing = lazy(() => import("./pages/Billing"));
@@ -71,6 +73,8 @@ function Shell() {
   const stores = useLiveQuery(() => db.stores.filter(s => !s.deleted && !!s.active).toArray(), [], []);
   const [route, args] = useRoute();
   const [pal, setPal] = useState(false);
+  const [compact, setCompact] = useState(true);
+  useEffect(() => { getSetting("compact_menu", true).then(setCompact); }, []);
   const [, setLangTick] = useState("");
   const [scrolled, setScrolled] = useState(false);
   const sec = sectionOf(route);
@@ -127,15 +131,15 @@ function Shell() {
   }
 
   return (
-    <div className="shell">
+    <div className={"shell" + (compact ? " compact-menu" : "")}>
       <aside className="rail">
         <div className="brand"><span className="mark">R</span><div><b>Rungnna</b><span>Jewellery &amp; Co</span></div></div>
         {can(me, "bill") && <a href="#/bill" className="newbill"><Icon n="plus" size={18} /><span className="t">{t("New bill")}</span><kbd style={{ background: "rgba(255,255,255,.15)", color: "#fff" }}>F2</kbd></a>}
         <button className="railsearch" onClick={() => setPal(true)}><Icon n="search" size={17} /><span className="grow">Search</span><kbd>Ctrl K</kbd></button>
-        {visible.map(s => <a key={s.key} href={hrefOf(s)} className={"nav" + (sec === s.key ? " on" : "")}><Icon n={s.icon} /><span className="grow">{t(s.label)}</span></a>)}
+        {visible.map(s => <a key={s.key} href={hrefOf(s)} title={t(s.label)} aria-label={t(s.label)} className={"nav" + (sec === s.key ? " on" : "")}><Icon n={s.icon} /><span className="grow">{t(s.label)}</span></a>)}
         {me.role === "owner" && <label className="f store-switch">Store<select className="in" value={store} onChange={e => switchStore(e.target.value)}>{stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>}
-        <a className="nav" href="#/stores"><Icon n="stock" /><span>Transfers{me.role === "owner" ? " & stores" : ""}</span></a>
-        {me.role === "owner" && <a className="nav" href="#/bank"><Icon n="sales" /><span>Bank reconciliation</span></a>}
+        <a className="nav" href="#/stores" title="Transfers and stores" aria-label="Transfers and stores"><Icon n="stock" /><span>Transfers{me.role === "owner" ? " & stores" : ""}</span></a>
+        {me.role === "owner" && <a className="nav" href="#/bank" title="Bank reconciliation" aria-label="Bank reconciliation"><Icon n="sales" /><span>Bank reconciliation</span></a>}
         <div className="railfoot">
           <Status />
           <button className="me" onClick={() => setMe(null)} title="Switch person">
@@ -146,6 +150,7 @@ function Shell() {
       </aside>
       <div className="main">
         <div className="top">
+          <button className="iconbtn menu-toggle" title={compact ? "Show menu" : "Hide menu"} aria-label={compact ? "Show menu" : "Hide menu"} onClick={() => { setCompact(!compact); setSetting("compact_menu", !compact); }}>{compact ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button>
           <span className="brandm"><span className="mark">R</span>{cur.label === "Home" ? "Rungnna" : t(cur.label)}</span>
           <span className="grow" />
           {me.role === "owner" && <select aria-label="Store" className="in mobile-store" value={store} onChange={e => switchStore(e.target.value)}>{stores.map(s => <option key={s.id} value={s.id}>{s.code}</option>)}</select>}

@@ -6,6 +6,7 @@ import { db, put, uid, now, getSetting, setSetting, type Location } from "../lib
 import { Head, useLocations, locName, Thumb, Modal, Switch } from "../components/common";
 import { qrSvg } from "../lib/qr";
 import { toast, go } from "../lib/app";
+import { usePrintJob } from "../lib/printing";
 import { label } from "../lib/products";
 import {
   DEFAULT_RACK_CFG, RACK_PRESETS, FONTS, TEMPLATE_VARS, SHEETS, normalizeCfg, varsFor, renderTemplate, payloadFor,
@@ -36,9 +37,11 @@ function RackList({ args }: { args: string[] }) {
   const qtyAt = useMemo(() => { const m = new Map<string, number>(); cells.forEach(c => m.set(c.loc_id, (m.get(c.loc_id) || 0) + c.qty)); return m; }, [cells]);
 
   const create = async () => {
-    const a = parseInt(from) || 1, b = parseInt(to) || a, nb = parseInt(boxes) || 0;
+    const a = Number(from), b = Number(to), nb = Number(boxes);
+    if (![a, b, nb].every(Number.isSafeInteger) || a < 1 || b < a || nb < 0) return toast("Enter a valid rack range and whole box count", true);
     if (b - a > 60 || nb > 40) { toast("That is a lot of racks — create them in smaller groups", true); return; }
     let made = 0;
+    await db.transaction("rw", [db.locations, db.outbox], async () => {
     for (let r = a; r <= b; r++) {
       const list = nb ? Array.from({ length: nb }, (_, i) => String(i + 1)) : [""];
       for (const bx of list) {
@@ -48,6 +51,7 @@ function RackList({ args }: { args: string[] }) {
         made++;
       }
     }
+    });
     toast(made ? `${made} locations created` : "They already exist");
   };
 
@@ -203,13 +207,7 @@ function RackStudio({ floor }: { floor?: string }) {
 
   /* print */
   const [printing, setPrinting] = useState(false);
-  useEffect(() => {
-    if (!printing) return;
-    const done = () => setPrinting(false);
-    addEventListener("afterprint", done);
-    const t = setTimeout(() => window.print(), 250);
-    return () => { clearTimeout(t); removeEventListener("afterprint", done); };
-  }, [printing]);
+  usePrintJob(printing, () => setPrinting(false));
   const print = () => {
     if (!items.length) return toast("Pick at least one rack", true);
     if (overflow) toast(overflow, true);
