@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { usePrintJob } from "../lib/printing";
 import { createPortal } from "react-dom";
 import type { Bill } from "../lib/db";
 import { due, docName, type Shop } from "../lib/billing";
@@ -34,10 +34,10 @@ export function InvoiceSheet({ b, shop, format }: { b: Bill; shop: Shop; format:
   const title = format === "packing" ? "PACKING SLIP" : docName(b).toUpperCase();
   const boxes = [...new Set(b.items.map(l => l.box_no))].sort((a, z) => a - z);
   const thermal = format === "80mm" || format === "58mm";
-  const page = thermal ? `${format.slice(0, 2)}mm auto` : format === "a4" ? "A4" : "A5";
+  const page = thermal ? "auto" : format === "a4" ? "A4" : "A5";
   return (
     <div className={"inv " + (thermal ? "thermal " : "") + (format === "58mm" ? "narrow" : "")}>
-      <style>{`@page{size:${page};margin:${thermal ? "2mm" : "8mm"}}`}</style>
+      <style data-thermal-width={thermal ? format.slice(0, 2) : undefined}>{`@page{size:${page};margin:${thermal ? "2mm" : "8mm"}}`}</style>
       <div className="inv-head">
         <div><div className="inv-shop">{shop.name}</div><div className="inv-sub">{shop.tagline}</div>
           <div className="inv-sub">{[shop.address, shop.phone].filter(Boolean).join(" · ")}</div>
@@ -95,6 +95,6 @@ export function InvoiceSheet({ b, shop, format }: { b: Bill; shop: Shop; format:
 }
 
 export function PrintBill({ b, shop, format, onDone }: { b: Bill; shop: Shop; format: PrintFormat; onDone: () => void }) {
-  useEffect(() => { const t = setTimeout(() => { window.print(); onDone(); }, 200); return () => clearTimeout(t); }, []);
-  return createPortal(<InvoiceSheet b={b} shop={shop} format={format} />, document.getElementById("printroot")!);
+  usePrintJob(true, onDone, b.id + format);
+  return <>{createPortal(<InvoiceSheet b={b} shop={shop} format={format} />, document.getElementById("printroot")!)}<div className="print-notice" role="status">Print prepared · {b.no}<button className="btn sm" onClick={onDone}>Close print</button></div></>;
 }

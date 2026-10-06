@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { usePrintJob } from "../lib/printing";
 import { createPortal } from "react-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, getSetting, setSetting, type Bill } from "../lib/db";
@@ -31,7 +32,7 @@ export function EndOfDay({ onClose }: { onClose: () => void }) {
   const receipts = useLiveQuery(() => db.receipts.where("at").between(start, end).filter(inStore).toArray(), [start, end], []);
   const vouchers = useLiveQuery(() => db.vouchers.where("at").between(start, end).filter(inStore).toArray(), [start, end], []);
   const r = useMemo(() => eodReport(bills, receipts, day, toPaise(opening), open, vouchers), [bills, receipts, vouchers, day, opening, open]);
-  useEffect(() => { if (!printing) return; const t = setTimeout(() => { window.print(); setPrinting(false); }, 200); return () => clearTimeout(t); }, [printing]);
+  usePrintJob(printing, () => setPrinting(false));
   const isToday = day === localDay(new Date().toISOString());
   const nice = new Date(day + "T00:00").toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
 
