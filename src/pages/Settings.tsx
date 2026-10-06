@@ -114,7 +114,7 @@ const ROLES: Staff["role"][] = ["owner", "manager", "cashier", "salesman", "help
 function PrintingSettings() {
   const [width, setWidth] = useState("80mm");
   useEffect(() => { getSetting("thermal_width", "80mm").then(setWidth); }, []);
-  return <section className="stack"><h3>Printing</h3><label className="f">Thermal paper width<select className="in" value={width} onChange={async e => { const value = e.target.value; setWidth(value); await db.transaction("rw", db.settings, async () => { await setSetting("thermal_width", value); await setSetting("print_fmt", value); }); toast("Printer preference saved"); }}><option value="58mm">58 mm</option><option value="80mm">80 mm</option></select></label><a className="btn" href="#/labels">Label printer settings</a></section>;
+  return <section className="stack"><h3>Printing</h3><label className="f">Thermal paper width<select className="in" value={width} onChange={async e => { const value = e.target.value; setWidth(value); await db.transaction("rw", db.settings, async () => { await setSetting("thermal_width", value); await setSetting("print_fmt", value); }); toast("Printer preference saved"); }}><option value="58mm">58 mm</option><option value="80mm">80 mm</option></select></label><span className="sm">Receipt size: fitted to each bill · Cut: Windows printer driver</span><a className="btn" href="#/labels">Label printer settings</a></section>;
 }
 function GstSettings() {
   const [status, setStatus] = useState("Download JSON only");

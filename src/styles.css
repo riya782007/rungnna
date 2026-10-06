@@ -309,6 +309,16 @@ tr.click{cursor:pointer}tr.click:hover td{background:var(--bg)}
 .inv.thermal{width:72mm;font-size:10px}
 .inv.thermal .inv-head,.inv.thermal .inv-meta,.inv.thermal .inv-foot,.inv.thermal .inv-terms{flex-direction:column}
 .inv.thermal .inv-title{text-align:left}.inv.thermal .inv-sum{width:100%}
+.inv.thermal .inv-t{table-layout:fixed}
+.inv.thermal .inv-t th,.inv.thermal .inv-t td{overflow-wrap:anywhere;white-space:normal;padding:2px}
+.inv.thermal .inv-t th:first-child{width:5%}
+.inv.thermal .inv-t th:nth-child(3){width:39%}
+.inv.thermal .inv-t th:nth-child(4){width:12%}
+.inv.thermal .inv-t th:nth-child(5){width:10%}
+.inv.thermal .inv-t th:nth-child(6){width:16%}
+.inv.thermal .inv-t th:nth-child(7){width:18%}
+.inv.thermal .receipt-box>td{display:table-cell!important;border:0;border-block:1px dashed #999;font-weight:700;padding:4px 2px}
+.inv.thermal .inv-terms span{white-space:normal;padding-top:0}
 .inv.thermal .inv-t th:nth-child(2),.inv.thermal .inv-t td:nth-child(2){display:none}
 .inv.narrow{width:54mm;max-width:100%;font-size:9px}
 .inv.narrow .inv-shop{font-size:13px;overflow-wrap:anywhere}

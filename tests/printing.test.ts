@@ -3,8 +3,16 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { InvoiceSheet } from "../src/components/Invoice";
 import { newBill, DEFAULT_SHOP } from "../src/lib/billing";
+import { manualLine } from "../src/lib/pos";
 import { preparePrint, thermalPage } from "../src/lib/printing";
 describe("thermal invoices", () => {
+  it("prints product names, units and the old counter's per-box quantities", () => {
+    const b = { ...newBill("o", DEFAULT_SHOP), items: [manualLine({ item: "BALI", style: "K5209", color: "G", unit: "PAIR", hsn: "7117", qty: "4", rate: "100", box: 1 })] };
+    for (const format of ["80mm", "58mm"] as const) {
+      const html = renderToStaticMarkup(createElement(InvoiceSheet, { b, shop: DEFAULT_SHOP, format }));
+      expect(html).toContain("BALI"); expect(html).toContain("PAIR"); expect(html).toContain("Box No.:"); expect(html).toContain("Box qty:"); expect(html).toContain("400.00");
+    }
+  });
   it("waits for fonts, decoded images and two painted frames", async () => {
     const events: string[] = [];
     const doc = { fonts: { ready: Promise.resolve().then(() => events.push("fonts")) }, getElementById: () => null, querySelectorAll: () => [{ decode: async () => { events.push("image"); } }] } as unknown as Document;

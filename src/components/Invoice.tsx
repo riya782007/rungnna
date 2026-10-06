@@ -4,6 +4,7 @@ import type { Bill } from "../lib/db";
 import { due, docName, type Shop } from "../lib/billing";
 import { rupees } from "../lib/format";
 import { qrSvg } from "../lib/qr";
+import { toast } from "../lib/app";
 
 export type PrintFormat = "a5" | "a4" | "80mm" | "58mm" | "packing";
 
@@ -55,9 +56,10 @@ export function InvoiceSheet({ b, shop, format }: { b: Bill; shop: Shop; format:
         <div><b>Party:</b> {b.party_name || "Cash"}{b.party_phone ? " · " + b.party_phone : ""}{b.party_gstin ? <><br /><b>GSTIN:</b> {b.party_gstin}</> : null}{b.party_state ? <><br /><b>State:</b> {b.party_state}</> : null}</div>
       </div>
       <table className="inv-t">
-        <thead><tr><th>#</th><th>Box</th><th>Item / Style / Colour</th><th className="r">Pkt</th><th className="r">Pcs</th>{prices && <><th className="r">Rate</th><th className="r">Amount</th></>}</tr></thead>
+        <thead><tr><th>#</th><th>Box</th><th>Item / Style / Colour</th><th className="r">Pkt</th><th className="r">Qty</th>{prices && <><th className="r">Rate</th><th className="r">Amount</th></>}</tr></thead>
         <tbody>
-          {b.items.map((l, i) => (
+          {thermal ? boxes.map(box => <ReceiptBox key={box} b={b} box={box} prices={prices} narrow={format === "58mm"} />) :
+          b.items.map((l, i) => (
             <tr key={l.id}><td>{i + 1}</td><td>{l.box_no}</td>
               <td><b>{l.item}</b> {l.style} <span className="inv-c">{l.color} · {l.type}</span>{l.disc ? <span className="inv-c"> · disc {l.disc}</span> : null}</td>
               <td className="r">{l.pkts ? `${l.pkts}×${l.pack}` : ""}</td><td className="r">{l.qty}</td>
@@ -66,7 +68,7 @@ export function InvoiceSheet({ b, shop, format }: { b: Bill; shop: Shop; format:
       </table>
       <div className="inv-foot">
         <div className="inv-left">
-          <div><b>Total pieces:</b> {b.total_qty} · <b>Boxes:</b> {b.box_count}</div>
+          <div><b>Total quantity:</b> {b.total_qty} · <b>Boxes:</b> {b.box_count}</div>
           {format === "packing" && <div className="inv-boxes">{boxes.map(x => <span key={x}>Box {x}: {b.items.filter(l => l.box_no === x).reduce((a, l) => a + l.qty, 0)} pcs</span>)}</div>}
           {prices && <div className="inv-words">{b.bill_type === "return" ? "Credit: " : ""}{inWords(b.net)}</div>}
           {b.bill_type === "challan" && <div className="inv-sub">Goods sent on approval / for delivery. Not a tax invoice — the invoice follows.</div>}
@@ -95,6 +97,14 @@ export function InvoiceSheet({ b, shop, format }: { b: Bill; shop: Shop; format:
 }
 
 export function PrintBill({ b, shop, format, onDone }: { b: Bill; shop: Shop; format: PrintFormat; onDone: () => void }) {
-  usePrintJob(true, onDone, b.id + format);
+  usePrintJob(true, onDone, b.id + format, message => toast(message, true));
   return <>{createPortal(<InvoiceSheet b={b} shop={shop} format={format} />, document.getElementById("printroot")!)}<div className="print-notice" role="status">Print prepared · {b.no}<button className="btn sm" onClick={onDone}>Close print</button></div></>;
+}
+
+function ReceiptBox({ b, box, prices, narrow }: { b: Bill; box: number; prices: boolean; narrow: boolean }) {
+  const lines = b.items.filter(l => l.box_no === box);
+  const columns = prices ? narrow ? 4 : 6 : narrow ? 2 : 4;
+  return <><tr className="receipt-box"><td colSpan={columns}>Box No.: {box}</td></tr>
+    {lines.map(l => <tr key={l.id}><td>{b.items.indexOf(l) + 1}</td><td>{box}</td><td><b>{l.item}</b><div className="inv-c">{[l.style, l.color, l.type].filter(Boolean).join(" · ")}{l.disc ? ` · disc ${l.disc}` : ""}</div></td><td className="r">{l.pkts ? `${l.pkts}×${l.pack}` : ""}</td><td className="r">{l.qty}</td>{prices && <><td className="r">{(l.rate / 100).toFixed(2)}</td><td className="r">{(l.amount / 100).toFixed(2)}</td></>}</tr>)}
+    <tr className="receipt-box"><td colSpan={columns}>Box qty: {lines.reduce((n, l) => n + l.qty, 0)}</td></tr></>;
 }

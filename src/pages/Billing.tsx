@@ -96,7 +96,7 @@ export default function Billing({ args }: { args: string[] }) {
   useEffect(() => {
     (async () => {
       const s = await getShop(); setShop(s);
-      setFmt(await getSetting<PrintFormat>("print_fmt", "a5"));
+      setFmt(await getSetting<PrintFormat>("print_fmt", "80mm"));
       if (args[0]) { const x = await db.bills.get(args[0]); if (x && inStore(x)) { setBox(selectedBox(x)); setB(x); return; } }
       const d = await getSetting<BillingDraft | null>("draft_bill", null);
       const restored = d && d.status === "hold" && !d.no && (d.bill_type !== "estimate" || isOpen()) ? d : null;
