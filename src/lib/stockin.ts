@@ -39,9 +39,13 @@ export async function resolveScan(raw: string, by: string): Promise<{ product?: 
 
 /* Save: one intake movement per line into the chosen rack, remember the cost, number the stock-in. */
 export async function finalizePurchase(p0: Purchase): Promise<Purchase> {
+  return db.transaction("rw", [db.purchases, db.movements, db.outbox, db.stock, db.products, db.settings, db.config, db.locations, db.stores], async () => {
+  const existing = await db.purchases.get(p0.id);
+  if (existing?.status === "final") return existing;
   await assertStoreRow(p0); await assertLocation(p0.loc_id);
   await assertUnlocked(now());
   const p = sum(p0);
+  if (!p.items.length || p.items.some(l => !Number.isSafeInteger(l.qty) || l.qty <= 0 || !Number.isSafeInteger(l.cost) || l.cost < 0)) throw new Error("Check purchase quantities and costs");
   const cc = await counterCode(); const key = `seq_PI_${fy()}_${cc}`;
   const n = (await getSetting<number>(key, 0)) + 1; await setSetting(key, n);
   const done: Purchase = { ...p, no: `PI/${fy()}/${cc}-${String(n).padStart(4, "0")}`, status: "final", at: now() };
@@ -60,4 +64,5 @@ export async function finalizePurchase(p0: Purchase): Promise<Purchase> {
     }
   });
   return done;
+  });
 }

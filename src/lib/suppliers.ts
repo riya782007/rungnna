@@ -10,7 +10,7 @@ import { assertUnlocked } from "./finance";
 
 export type SupplierEntry = { at: string; kind: "opening" | "bill" | "payment" | "debit_note" | "journal"; ref: string; id?: string; debit: number; credit: number; balance: number; note?: string };
 
-const payablePurchase = (p: Purchase) => inStore(p) && p.status === "final" && !p.deleted && !!(p.supplier_id || p.supplier_name) && p.total_cost > 0;
+const payablePurchase = (p: Purchase) => inStore(p) && p.status === "final" && !p.deleted && !!(p.supplier_id || p.supplier_name) && (p.invoice_total ?? p.total_cost) > 0;
 const supplierPayment = (v: Voucher, id: string) => inStore(v) && !v.deleted && v.type === "payment" && v.party_kind === "supplier" && v.party_id === id;
 
 export async function supplierLedger(party: Party): Promise<{ entries: SupplierEntry[]; balance: number }> {
@@ -21,7 +21,7 @@ export async function supplierLedger(party: Party): Promise<{ entries: SupplierE
   ]);
   const raw: Omit<SupplierEntry, "balance">[] = [];
   if (party.opening_balance) raw.push({ at: "0000", kind: "opening", ref: "Opening balance", debit: Math.max(0, party.opening_balance), credit: Math.max(0, -party.opening_balance) });
-  purchases.forEach(p => raw.push({ at: p.at, kind: "bill", ref: p.no + (p.supplier_bill ? " · " + p.supplier_bill : ""), id: p.id, debit: p.total_cost, credit: 0, note: `${p.total_qty} pcs` }));
+  purchases.forEach(p => raw.push({ at: p.at, kind: "bill", ref: p.no + (p.supplier_bill ? " · " + p.supplier_bill : ""), id: p.id, debit: p.invoice_total ?? p.total_cost, credit: 0, note: `${p.total_qty} pcs` }));
   returns.forEach(r => raw.push({ at: r.at, kind: "debit_note", ref: r.no, id: r.id, debit: 0, credit: r.total_cost, note: `${r.total_qty} pcs returned` }));
   vouchers.forEach(v => raw.push({ at: v.at, kind: v.type === "journal" ? "journal" : "payment", ref: v.no + " · " + v.mode.toUpperCase(), id: v.id, debit: 0, credit: v.amount, note: v.note }));
   raw.sort((a, z) => (a.at < z.at ? -1 : a.at > z.at ? 1 : a.kind === "bill" ? -1 : 1));

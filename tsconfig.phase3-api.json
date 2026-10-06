@@ -1,4 +1,4 @@
 {
   "extends": "./tsconfig.json",
-  "include": ["api/gst.ts", "api/_gst-provider.ts"]
+  "include": ["api/gst.ts", "api/_gst-provider.ts", "api/purchase-photo.ts", "api/_pages.ts", "api/page.ts"]
 }

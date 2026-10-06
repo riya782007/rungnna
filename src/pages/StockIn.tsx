@@ -1,5 +1,5 @@
 import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, type Purchase, type PurchaseLine, type Product } from "../lib/db";
 import { newPurchase, sum, lineOf, resolveScan, finalizePurchase, lineQty } from "../lib/stockin";
@@ -15,6 +15,7 @@ import { Head, LocationSelect, PhotoButton, Modal, LOC_PREFIX, useLocations } fr
 import { parseRackScan } from "../lib/rackLabel";
 import { Icon } from "../components/Icon";
 import { NameItemCodes, unnamedCodes } from "../components/NameItemCodes";
+const PurchasePhoto = lazy(() => import("../components/PurchasePhoto"));
 
 /* Stock in: stand at a rack, scan packet after packet, save once.
    Every scan is +1 packet. Labels the system hasn't seen become products on the spot.
@@ -111,6 +112,7 @@ function StockInSession() {
   return (
     <div style={{ paddingBottom: 80 }}>
       <Head title="Stock in" sub="Stand at the rack, scan every packet, save once. New labels become products by themselves." />
+      {me?.role === "owner" && <details className="purchase-import"><summary>Purchase bill photos / manual purchase entry</summary><Suspense fallback={<div role="status">Loading purchase entry…</div>}><PurchasePhoto by={me.id} /></Suspense></details>}
       <div className="split">
         <div className="stack">
           <div className="card pad stack">
@@ -217,6 +219,7 @@ function StockInView({ id }: { id: string }) {
     <div>
       <Head title={p.no} sub={`${when(p.at)} · into ${locs.find(l => l.id === p.loc_id)?.code || "—"}${p.supplier_name ? " · from " + p.supplier_name : ""}${p.supplier_bill ? " · bill " + p.supplier_bill : ""}`}>
         <button className="btn p" onClick={() => go("stockin")}><Icon n="plus" size={18} />New stock in</button>
+        <button className="btn" onClick={() => go("labels/purchase/" + p.id)}><Icon n="print" size={18} />Print all labels</button>
       </Head>
       <div className="hero three">
         <div><span className="k">Pieces in</span><b>{p.total_qty.toLocaleString("en-IN")}</b><span className="xs">{p.items.length} lines</span></div>

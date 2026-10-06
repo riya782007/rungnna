@@ -133,6 +133,7 @@ export interface Bill extends Row {
 /* Stock coming in: from a supplier bill, or just a counting session into a rack. */
 export interface PurchaseLine { id: string; product_id: string; code: string; item: string; style: string; color: string; pack: number; pkts: number; qty: number; cost: number; rate: number; isNew?: boolean }
 export interface Purchase extends Row {
+  invoice_total?: number; // supplier payable, including reviewed tax/freight/discount
   no: string; status: "draft" | "final"; supplier_id?: string; supplier_name: string; supplier_bill: string; loc_id: string;
   items: PurchaseLine[]; total_qty: number; total_cost: number; note: string; photo_id?: string; photo_url?: string;
   rfid_tags?: string[];    // RFID tags read in this stock-in — each counts once
