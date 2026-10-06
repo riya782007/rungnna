@@ -45,6 +45,7 @@ export async function reportData(r: Range) {
   const groupedBills = (key: (b: Bill) => string) => { const m = new Map<string, ReportRow>(); for (const b of saleBills) { const k = key(b) || "Unspecified", row = m.get(k) || { name: k, qty: 0, sales: 0 }; row.qty = Number(row.qty) + b.total_qty; row.sales = Number(row.sales) + b.net; m.set(k, row); } return [...m.values()]; };
   const byDay = groupedBills(b => localDay(b.at));
   const byMonth = groupedBills(b => localDay(b.at).slice(0, 7));
+  const byHour = groupedBills(b => new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", hourCycle: "h23" }).format(new Date(b.at)) + ":00").sort((a, b) => String(a.name).localeCompare(String(b.name)));
   const byItem = by((_b, l, p) => [l?.item || p?.item, l?.style || p?.style].filter(Boolean).join(" · "), (_b, l) => l?.amount || 0);
   const byParty = groupedBills(b => b.party_name || "Walk-in");
   const byArea = groupedBills(b => {
@@ -86,7 +87,7 @@ export async function reportData(r: Range) {
     }
     return m;
   }, new Map<string, ReportRow>());
-  return { byDay, byMonth, byItem, byParty, byArea, bySalesman, valuation, dead, pl, gstr: [...gstr.values()], supplierReturns: returnsRows, dues: saleBills.reduce((a, b) => a + Math.max(0, due(b)), 0) };
+  return { byDay, byMonth, byHour, byItem, byParty, byArea, bySalesman, valuation, dead, pl, gstr: [...gstr.values()], supplierReturns: returnsRows, dues: saleBills.reduce((a, b) => a + Math.max(0, due(b)), 0) };
 }
 
 export function csv(rows: ReportRow[]) {

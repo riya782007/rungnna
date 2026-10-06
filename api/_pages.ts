@@ -16,7 +16,7 @@ export type PubProduct = {
   category: string; pack?: number | null; mrp: number; image_url?: string | null; content?: ListingContent | null; updated_at: string; available: number;
 };
 export type Shop = { name?: string | null; tagline?: string | null; phone?: string | null; whatsapp?: string | null; address?: string | null; state?: string | null };
-export type Catalogue = { slug: string; title: string; note?: string | null; audience: "retail" | "trade"; product_ids: string[]; updated_at: string };
+export type Catalogue = { slug: string; title: string; note?: string | null; audience: "retail" | "trade" | "preview"; product_ids: string[]; updated_at: string };
 export type TradeRate = { id: string; rate: number; pack?: number | null };
 
 export const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
@@ -43,7 +43,7 @@ ${h.keywords?.length ? `<meta name="keywords" content="${esc(h.keywords.join(", 
 ${h.image ? `<meta property="og:image" content="${esc(h.image)}"><meta name="twitter:image" content="${esc(h.image)}">` : ""}
 <meta name="twitter:card" content="${h.image ? "summary_large_image" : "summary"}"><meta name="theme-color" content="#241B2E">
 <link rel="icon" href="/icon.svg">${h.extra || ""}<style>${CSS}</style></head><body>
-<header class="top"><a class="brand" href="${base}/shop"><span class="mark">R</span><span>${esc(name)}<small>${esc(shop.tagline || "Fashion & imitation jewellery · Sadar Bazar, Delhi")}</small></span></a>
+<header class="top"><a class="brand" href="${opts.nav === "none" ? esc(h.canonical) : base + "/shop"}"><span class="mark">R</span><span>${esc(name)}<small>${esc(shop.tagline || "Fashion & imitation jewellery · Sadar Bazar, Delhi")}</small></span></a>
 ${opts.nav === "none" ? "" : `<nav><a href="${base}/shop"${opts.nav === "shop" ? ' aria-current="page"' : ""}>Shop</a><a href="${base}/trade"${opts.nav === "trade" ? ' aria-current="page"' : ""}>Trade portal</a>${wa ? `<a class="wa" href="${esc(wa)}" rel="noopener">WhatsApp</a>` : ""}</nav>`}</header>
 <main>${body}</main>
 <footer><b>${esc(name)}</b>${shop.address ? `<span>${esc(shop.address)}</span>` : ""}${shop.phone ? `<span>${esc(shop.phone)}</span>` : ""}<span>Retail &amp; wholesale imitation jewellery · Sadar Bazar, Delhi</span></footer>
@@ -146,6 +146,10 @@ export function renderCatalogue(cat: Catalogue, list: PubProduct[], rates: Trade
   if (cat.audience === "trade") return renderTrade(list, rates, shop, base, { key, title: cat.title, note: cat.note, canonical });
   const name = shopName(shop);
   const wa = waLink(shop, `Hi ${name}, I saw your catalogue "${cat.title}" — ${canonical}`);
+  if (cat.audience === "preview") {
+    const body = `<section class="hero"><h1>${esc(cat.title)}</h1>${cat.note ? `<p>${esc(cat.note)}</p>` : ""}${wa ? `<a class="btn" href="${esc(wa)}" rel="noopener">Enquire on WhatsApp</a>` : ""}</section><div class="grid">${list.map(p => `<article class="card">${p.image_url ? `<img src="${esc(p.image_url)}" alt="${esc(titleOf(p))}" loading="lazy">` : ""}<h2>${esc(titleOf(p))}</h2><p>${esc(p.style)} · ${esc(p.color)}</p><p>${esc(p.code)}</p></article>`).join("")}</div>`;
+    return page({ title: `${cat.title} | ${name}`, description: cat.note || cat.title, canonical, image: list.find(p => p.image_url)?.image_url, robots: "noindex,nofollow" }, shop, body, base, { nav: "none" });
+  }
   const body = `<section class="hero"><h1>${esc(cat.title)}</h1>${cat.note ? `<p>${esc(cat.note)}</p>` : ""}<p class="mut">${list.length} designs</p>${wa ? `<a class="btn" href="${esc(wa)}" rel="noopener">Enquire on WhatsApp</a>` : ""}</section>
 <div class="grid">${list.map(p => card(p, base, retailPrice(p), stockBadge(p))).join("") || `<p class="mut">This catalogue is empty.</p>`}</div>`;
   return page({ title: `${cat.title} | ${name}`, description: cat.note || `${list.length} imitation jewellery designs from ${name}`, canonical, image: list.find(p => p.image_url)?.image_url, robots: "noindex,follow" }, shop, body, base, { nav: "shop" });

@@ -12,6 +12,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 const tabs = [
   ["byDay", "Sales by day"],
   ["byMonth", "Sales by month"],
+  ["byHour", "Sales by hour"],
   ["byItem", "Item-wise"],
   ["byParty", "Party-wise"],
   ["byArea", "Area / city"],

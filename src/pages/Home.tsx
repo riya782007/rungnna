@@ -12,6 +12,7 @@ import { label, isDead } from "../lib/products";
 import { due, isSale } from "../lib/billing";
 import { usePrivate, isEstimate } from "../lib/privacy";
 import { EndOfDay } from "../components/EndOfDay";
+import DailyTasks from "../components/DailyTasks";
 
 type Period = "today" | "week" | "month";
 const PERIODS: [Period, string][] = [["today", "Today"], ["week", "This week"], ["month", "This month"]];
@@ -163,6 +164,8 @@ export default function Home() {
         </div>
       </div>
 
+      <div className="row quick-operations"><a className="btn" href="#/bill">Billing</a><a className="btn" href="#/customers">Customers</a>{me?.role === "owner" && <><a className="btn" href="#/suppliers">Suppliers</a><a className="btn" href="#/vouchers">Daily expenses</a><a className="btn" href="#/reports">Analytics</a></>}<a className="btn" href="#/catalogue">Photo catalogue</a><a className="btn" href="#/stockin">Purchase bills</a></div>
+      <DailyTasks />
       {/* KPI tiles */}
       {money && (
         <div className="kpis">

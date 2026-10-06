@@ -48,7 +48,7 @@ export const humanAttempt = (a: Attempt) => {
 /* ---------------- trade portal + catalogues (synced config rows) ---------------- */
 
 export type TradePortal = { token: string; enabled: boolean; created_at: string };
-export type CatalogueRow = { slug: string; title: string; note: string; audience: "retail" | "trade"; product_ids: string[]; key?: string; active: boolean; created_at: string };
+export type CatalogueRow = { slug: string; title: string; note: string; audience: "retail" | "trade" | "preview"; product_ids: string[]; key?: string; active: boolean; created_at: string };
 
 export function randomKey(n = 24): string {
   const a = new Uint8Array(n); crypto.getRandomValues(a);

@@ -54,6 +54,12 @@ const shop = { name: "Rungnna Jewellery & Co", whatsapp: "9811122233" };
 const B = "https://rungnna.example";
 
 describe("public pages", () => {
+  it("photo catalogues omit prices, order totals and links to priced product pages", () => {
+    const h = renderCatalogue({ slug: "photos", title: "Photos", audience: "preview", product_ids: [prod().id], updated_at: "" }, [prod()], [{ id: prod().id, rate: 18000 }], shop, B);
+    expect(h).toContain("noindex,nofollow"); expect(h).toContain("Enquire on WhatsApp");
+    expect(h).not.toContain("₹499"); expect(h).not.toContain("₹180"); expect(h).not.toContain('"price"');
+    expect(h).not.toContain(`href="${B}/p/`); expect(h).not.toContain(`href="${B}/shop"`);
+  });
   it("product page is SEO-complete", () => {
     const h = renderProduct(prod(), shop, B);
     expect(h).toContain('<link rel="canonical" href="https://rungnna.example/p/kundan-jhumki-rab12x4">');

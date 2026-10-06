@@ -142,6 +142,7 @@ function CatalogueEditor({ value, live, taken, onClose, onSaved }: { value: Cata
         <div className="seg" role="group" aria-label="Who is it for">
           <button aria-pressed={c.audience === "retail"} onClick={() => setC({ ...c, audience: "retail" })}>Retail (MRP)</button>
           <button aria-pressed={c.audience === "trade"} onClick={() => setC({ ...c, audience: "trade" })}>Trade (wholesale rates)</button>
+          <button aria-pressed={c.audience === "preview"} onClick={() => setC({ ...c, audience: "preview" })}>Photos (no prices)</button>
         </div>
         {c.audience === "trade" && <div className="xs mut">Trade catalogues get their own private key in the link. Delete the catalogue to stop that link working.</div>}
         {!isNew && <Switch on={c.active} onChange={v => setC({ ...c, active: v })} label="Link active" hint="Pause to stop the link working without deleting" />}
