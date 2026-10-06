@@ -8,13 +8,12 @@ export async function patterns(): Promise<Pattern[]> { return getSetting<Pattern
 
 /* Find the product a scanned label belongs to. Exact raw match first, then our code,
    then the decoded style+colour (so a re-printed old label still finds the same product). */
-export async function findByScan(raw: string, parsed?: Parsed): Promise<Product | undefined> {
+async function findStoredScan(raw: string, x: Parsed): Promise<Product | undefined> {
   const r = isRfidTag(raw) ? normTag(raw) : raw.trim();   // RFID tags are stored in one canonical form
-  let p = await db.products.where("barcodes").equals(r).first();
+  let p = await db.products.where("barcodes").equals(r).filter(q => !q.deleted).first();
   if (p && !p.deleted) return p;
   p = await db.products.where("code").equals(r).first();
   if (p && !p.deleted) return p;
-  const x = parsed || parseLabel(r, await patterns());
   if (x.code) {
     p = await db.products.where("code").equals(x.code).first();
     if (p && !p.deleted) return p;
@@ -25,6 +24,53 @@ export async function findByScan(raw: string, parsed?: Parsed): Promise<Product 
     if (hit) return hit;
   }
   return undefined;
+}
+
+export const hasProductName = (name?: string) => !!name?.trim() && !/^ITEM\s+\d+$/i.test(name.trim());
+
+// An opaque barcode/RFID can still use the recognized label saved on its product.
+async function scannedDetails(p: Product, parsed: Parsed, rules: Pattern[]): Promise<Product> {
+  let next = { ...p };
+  for (const raw of new Set([parsed.raw, p.raw_scan, ...p.barcodes])) {
+    if (!raw || isRfidTag(raw)) continue;
+    const x = raw === parsed.raw ? parsed : parseLabel(raw, rules);
+    if (["code", "unknown"].includes(x.how) || (next.item_code && x.icode && next.item_code !== x.icode)) continue;
+    const decoded = fromParsed(x, p.created_by);
+    if (!hasProductName(next.item) && hasProductName(decoded.item)) next.item = decoded.item;
+    for (const key of ["style", "color", "item_code", "ref"] as const) if (!next[key] && decoded[key]) next[key] = decoded[key];
+    if (x.type && (!next.type || next.type === "PCS")) next.type = decoded.type;
+    if (!next.pack && decoded.pack) next.pack = decoded.pack;
+    if (!next.rate && decoded.rate) next.rate = decoded.rate;
+    if (!next.mrp && decoded.mrp) next.mrp = decoded.mrp;
+  }
+  return withItemInfo(next, await itemInfoFor(next.item_code)) || next;
+}
+
+// All scan consumers get the same named product; lookup never creates inventory.
+export async function findByScan(raw: string, parsed?: Parsed): Promise<Product | undefined> {
+  if (!raw.trim()) return undefined;
+  const rules = parsed ? [] : await patterns(), x = parsed || parseLabel(raw, rules);
+  return db.transaction("rw", [db.products, db.config, db.outbox], async () => {
+    const found = await findStoredScan(raw, x);
+    if (!found) return undefined;
+    const p = await scannedDetails(found, x, rules);
+    if (!["code", "unknown"].includes(x.how) && x.raw && !p.barcodes.includes(x.raw)) p.barcodes = [...p.barcodes, x.raw];
+    return JSON.stringify(p) !== JSON.stringify(found) ? saveProduct(p) : p;
+  });
+}
+
+// Billing and stock-in may create a product from a recognized detailed label.
+export async function resolveProductScan(raw: string, by: string): Promise<{ product?: Product; created?: boolean }> {
+  if (!raw.trim()) return {};
+  const rules = await patterns(), parsed = parseLabel(raw, rules);
+  return db.transaction("rw", [db.products, db.config, db.outbox], async () => {
+    const found = await findStoredScan(raw, parsed);
+    if (!found && (["code", "unknown"].includes(parsed.how) || !(parsed.style || parsed.item))) return {};
+    const source = found || fromParsed(parsed, by);
+    const p = await scannedDetails(source, parsed, rules);
+    if (parsed.raw && !p.barcodes.includes(parsed.raw)) p.barcodes = [...p.barcodes, parsed.raw];
+    return { product: !found || JSON.stringify(p) !== JSON.stringify(found) ? await saveProduct(p) : p, created: !found };
+  });
 }
 
 /* The product master is keyed on [Model/Article + Vendor] (with style/colour as the
@@ -182,7 +228,7 @@ export const isDead = (p: Pick<Product, "tk">) => !!(p.tk && p.tk.trim());
 export const DEAD_MARK = "TK";
 
 export const label = (p: Pick<Product, "item" | "style" | "color">) =>
-  [p.item, p.style, p.color].filter(Boolean).join(" · ") || "Unnamed product";
+  [hasProductName(p.item) ? p.item : "Name needed" + (/^ITEM\s+\d+$/i.test(p.item?.trim() || "") ? " (" + p.item.trim() + ")" : ""), p.style, p.color].filter(Boolean).join(" · ");
 
 /* distinct values for the ITEM / TYPE drop-downs, learned from what the shop already has */
 export async function distinct(field: "item" | "type" | "color" | "category") {

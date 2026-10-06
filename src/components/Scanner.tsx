@@ -1,5 +1,6 @@
 import { Icon } from "./Icon";
 import { useEffect, useRef, useState } from "react";
+import { findByScan, label } from "../lib/products";
 import { getSetting, setSetting } from "../lib/db";
 import { isRfidTag } from "../lib/rfid";
 
@@ -187,7 +188,7 @@ export async function detectAll(src: CanvasImageSource): Promise<Detected[]> {
   }
 }
 
-export function CameraScanner({ onCode, paused = false, gap = 2500, tall = false }: { onCode: (text: string, format: string) => void; paused?: boolean; gap?: number; tall?: boolean }) {
+export function CameraScanner({ onCode, paused = false, gap = 2500, tall = false }: { onCode: (text: string, format: string) => void | Promise<unknown>; paused?: boolean; gap?: number; tall?: boolean }) {
   const video = useRef<HTMLVideoElement>(null);
   const flash = useRef<HTMLDivElement>(null);
   const [err, setErr] = useState("");
@@ -212,6 +213,8 @@ export function CameraScanner({ onCode, paused = false, gap = 2500, tall = false
   const seen = useRef({ t: "", at: 0 });
   const pausedRef = useRef(paused); pausedRef.current = paused;
   const cb = useRef(onCode); cb.current = onCode;
+  const captionId = useRef(0);
+  useEffect(() => () => { captionId.current++; }, []);
 
   /* A sticker counts once while it stays in view. It counts again only after it has left the picture
      (next packet, same label) — so resting the phone on one packet can never inflate the count. */
@@ -222,7 +225,14 @@ export function CameraScanner({ onCode, paused = false, gap = 2500, tall = false
     last.current = { t: text, at: t };
     setLastText(text);
     flash.current?.classList.remove("go"); void flash.current?.offsetWidth; flash.current?.classList.add("go");
-    cb.current(text, format);
+    const id = ++captionId.current;
+    void (async () => {
+      try {
+        await cb.current(text, format);
+        const p = await findByScan(text);
+        if (p && id === captionId.current) setLastText(label(p));
+      } catch (e: any) { if (id === captionId.current) setErr(e.message || "Could not process this scan"); }
+    })();
   };
 
   const stop = () => { stream.current?.getTracks().forEach(t => t.stop()); stream.current = null; setOn(false); };
@@ -316,7 +326,7 @@ export function CameraScanner({ onCode, paused = false, gap = 2500, tall = false
         <div className="guide" />
         <div className="flash" ref={flash} />
         <span className="tag">{on ? (paused ? "Paused" : "Point at the sticker") : "Camera off"}</span>
-        {lastText && <span className="lastread">✓ {lastText.length > 34 ? lastText.slice(0, 34) + "…" : lastText}</span>}
+        {lastText && <span className="lastread" title={lastText}>✓ {lastText}</span>}
       </div>
       {status && <div className="xs mut">{status}</div>}
       {err && <div className="note warn sm">{err}</div>}

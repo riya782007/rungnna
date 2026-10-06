@@ -4,7 +4,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, type Purchase, type PurchaseLine, type Product } from "../lib/db";
 import { newPurchase, sum, lineOf, resolveScan, finalizePurchase, lineQty } from "../lib/stockin";
 import { newParty } from "../lib/billing";
-import { fillFromItemCode, findByScan } from "../lib/products";
+import { fillFromItemCode, findByScan, hasProductName } from "../lib/products";
 import { useApp, toast, beep, go } from "../lib/app";
 import { can } from "../lib/roles";
 import { rupees, toPaise, when } from "../lib/format";
@@ -136,7 +136,7 @@ function StockInSession() {
             {t.items.map(l => (
               <div key={l.id} className="li" style={{ background: flash === l.product_id ? "var(--gold-l)" : undefined, transition: "background .4s" }}>
                 <span className="grow" style={{ minWidth: 0 }}>
-                  <b className="sm">{l.item || "—"}</b> <span className="mono sm">{l.style}</span> <span className="mut sm">{l.color}</span>
+                  <b className="sm">{hasProductName(l.item) ? l.item : "Name needed"}</b> <span className="mono sm">{l.style}</span> <span className="mut sm">{l.color}</span>
                   {l.isNew && <span className="pill gold" style={{ marginLeft: 6 }}>new</span>}
                   <div className="xs mut">{l.rate ? "sells " + rupees(l.rate) : "no rate yet"}{l.pack > 1 ? ` · ${l.pack} pcs / packet` : ""}</div>
                 </span>
@@ -213,6 +213,8 @@ function StockInView({ id }: { id: string }) {
   const { me } = useApp();
   const p = useLiveQuery(() => db.purchases.get(id), [id]);
   const locs = useLocations();
+  const products = useLiveQuery(() => db.products.filter(p => !p.deleted && hasProductName(p.item)).toArray(), [], []);
+  const names = new Map(products.map(p => [p.id, p.item]));
   if (!p || !inStore(p)) return <div className="skel" style={{ height: 200 }} />;
   const created = p.items.filter(l => l.isNew);
   return (
@@ -228,7 +230,7 @@ function StockInView({ id }: { id: string }) {
       </div>
       <div className="list">{p.items.map(l => (
         <div key={l.id} className="li">
-          <a className="grow" href={"#/product/" + l.product_id} style={{ textDecoration: "none" }}><b className="sm">{l.item}</b> <span className="mono sm">{l.style}</span> <span className="mut sm">{l.color}</span>{l.isNew && <span className="pill gold" style={{ marginLeft: 6 }}>new</span>}
+          <a className="grow" href={"#/product/" + l.product_id} style={{ textDecoration: "none" }}><b className="sm">{hasProductName(l.item) ? l.item : names.get(l.product_id) || "Name needed"}</b> <span className="mono sm">{l.style}</span> <span className="mut sm">{l.color}</span>{l.isNew && <span className="pill gold" style={{ marginLeft: 6 }}>new</span>}
             <div className="xs mut">{l.pack > 1 ? `${l.pkts} pkt × ${l.pack}` : `${l.qty} pcs`}</div></a>
           <b className="mono">{l.qty}</b>
           {l.isNew && <a className="btn sm" href={"#/labels/" + l.product_id}><Icon n="print" size={15} />Label</a>}

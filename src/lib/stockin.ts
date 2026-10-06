@@ -1,6 +1,5 @@
 import { db, put, uid, now, deviceId, getSetting, setSetting, type Movement, type Product, type Purchase, type PurchaseLine } from "./db";
-import { findByScan, fromParsed, saveProduct, patterns, itemInfoFor, withItemInfo, fillFromItemCode } from "./products";
-import { parseLabel } from "./parse";
+import { resolveProductScan } from "./products";
 import { fy, counterCode } from "./billing";
 import { setTagsSold } from "./rfid";
 import { assertUnlocked } from "./finance";
@@ -23,18 +22,7 @@ export function lineOf(p: Product, isNew = false): PurchaseLine {
 
 /* A scan during stock-in: known product → +1 packet; the shop's own label → product created on the spot. */
 export async function resolveScan(raw: string, by: string): Promise<{ product?: Product; created?: boolean }> {
-  const r = raw.trim(); if (!r) return {};
-  const parsed = parseLabel(r, await patterns());
-  let product = await findByScan(r, parsed);
-  if (product) return { product: await fillFromItemCode(product) };
-  if (parsed.style || parsed.code || parsed.icode) {
-    let np = fromParsed(parsed, by);
-    np = withItemInfo(np, await itemInfoFor(np.item_code)) || np;
-    if (!np.style && !np.item) return {};
-    product = await saveProduct(np);
-    return { product, created: true };
-  }
-  return {};
+  return resolveProductScan(raw, by);
 }
 
 /* Save: one intake movement per line into the chosen rack, remember the cost, number the stock-in. */

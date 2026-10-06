@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, getSetting, setSetting, type StockCell } from "../lib/db";
-import { label } from "../lib/products";
+import { findByScan, label } from "../lib/products";
 import { countReport, isRfidTag, normTag, TagSet } from "../lib/rfid";
 import { parseRackScan } from "../lib/rackLabel";
 import { useScannerGun, WedgeInput } from "../components/Scanner";
@@ -33,7 +33,7 @@ export default function RfidCount() {
   const expected = useMemo(() => new Map(cells.filter(c => c.qty > 0).map(c => [c.product_id, c.qty])), [cells]);
   const rep = useMemo(() => countReport(expected, reads, products), [expected, reads, products]);
 
-  function onCode(raw: string) {
+  async function onCode(raw: string) {
     const r = raw.trim(); if (!r) return;
     const rack = parseRackScan(r, locs);
     if (rack || r.startsWith(LOC_PREFIX)) {
@@ -42,7 +42,9 @@ export default function RfidCount() {
     }
     if (!isRfidTag(r)) { beep(false); toast("Not an RFID tag — this page counts tags only", true); return; }
     if (!seen.current.add(r)) return;          // same tag again: counted once
-    setReads(x => [...x, normTag(r)]);
+    const session = seen.current;
+    try { await findByScan(r); if (seen.current === session) setReads(x => [...x, normTag(r)]); }
+    catch { session.delete(r); if (seen.current === session) { beep(false); toast("Could not resolve tag. Scan it again.", true); } }
   }
   function restart() { seen.current = new TagSet(); setReads([]); }
   useScannerGun(c => onCode(c), { enabled: !link });
@@ -62,7 +64,7 @@ export default function RfidCount() {
             <div className="row"><button className="btn sm" onClick={() => (reads.length < 5 || confirm("Clear the tags read so far?")) && restart()} disabled={!reads.length}>Start again</button><span className="xs mut">{reads.length} distinct tag{reads.length === 1 ? "" : "s"} read</span></div>
           </div>
 
-          {loc && <div className="card tw"><table>
+          <div className="card tw"><table>
             <thead><tr><th>Product</th><th className="r">Expected</th><th className="r">Found</th><th className="r">Missing</th></tr></thead>
             <tbody>
               {rep.rows.map(r => {
@@ -70,7 +72,7 @@ export default function RfidCount() {
                 return (
                   <tr key={r.product_id} style={miss ? { color: "var(--bad)" } : undefined}>
                     <td><a href={"#/product/" + r.product_id} style={{ color: "inherit" }}><b className="sm">{p ? label(p) : r.product_id}</b></a>
-                      {!r.expected && r.found > 0 && <span className="pill warn" style={{ marginLeft: 6 }}>not booked in this rack</span>}
+                      {loc && !r.expected && r.found > 0 && <span className="pill warn" style={{ marginLeft: 6 }}>not booked in this rack</span>}
                       {!r.tagged && r.expected > 0 && <span className="pill" style={{ marginLeft: 6 }}>no tags linked</span>}
                       {r.sold.map(s => <div key={s.tag} className="xs"><span className="pill bad">sold</span> <span className="mono">{s.tag}</span> on {s.bill}</div>)}</td>
                     <td className="r mono">{r.expected}</td>
@@ -80,7 +82,7 @@ export default function RfidCount() {
               })}
               {!rep.rows.length && <tr><td colSpan={4} className="mut" style={{ padding: 24, textAlign: "center" }}>Nothing booked in this rack yet, and no tags read.</td></tr>}
             </tbody>
-          </table></div>}
+          </table></div>
         </div>
 
         <aside className="stack">
