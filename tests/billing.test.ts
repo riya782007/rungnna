@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { isInterState, stateCode, gstinState } from "../src/lib/states";
 import { totals, lineAmount, fixLine, fy, type Shop } from "../src/lib/billing";
 import { inWords } from "../src/components/Invoice";
 import type { Bill, BillLine } from "../src/lib/db";
@@ -20,6 +21,21 @@ describe("billing maths", () => {
     expect(t.net % 100).toBe(0); expect(t.net).toBe(89000); expect(t.adjust).toBe(8);
   });
   it("other state → IGST", () => { const t = totals(bill({ items: [line({})], party_state: "Rajasthan" }), "Delhi"); expect(t.igst).toBe(t.gst); expect(t.cgst).toBe(0); });
+  it("state spelling does not matter: 'delhi ', 'NCT of Delhi' and a 07 GSTIN are all Delhi → CGST+SGST", () => {
+    for (const ps of ["delhi ", "NCT of Delhi", "07-Delhi", "DL"]) { const t = totals(bill({ items: [line({})], party_state: ps }), "Delhi"); expect(t.igst).toBe(0); expect(t.cgst + t.sgst).toBe(t.gst); }
+  });
+  it("GSTIN prefix beats a wrong typed state, and the shop GSTIN beats a blank shop state", () => {
+    const g = "08AAAAA0000A1Z5";   // Rajasthan
+    const t = totals(bill({ items: [line({})], party_state: "Delhi", party_gstin: g }), "Delhi", "07BBBBB1111B1Z5");
+    expect(t.igst).toBe(t.gst); expect(t.cgst).toBe(0);
+    const u = totals(bill({ items: [line({})], party_state: "", party_gstin: "07CCCCC2222C1Z5" }), "", "07BBBBB1111B1Z5");
+    expect(u.igst).toBe(0); expect(u.cgst + u.sgst).toBe(u.gst);
+  });
+  it("unknown or blank state on either side stays intra-state; unknown names fall back to exact-name compare", () => {
+    expect(isInterState({ state: "" }, "Rajasthan")).toBe(false); expect(isInterState({ state: "Delhi" }, "")).toBe(false);
+    expect(isInterState({ state: "Nowhereland" }, "Elsewhere")).toBe(true); expect(isInterState({ state: "Nowhereland" }, "nowhereland")).toBe(false);
+    expect(stateCode("Jammu & Kashmir")).toBe("01"); expect(gstinState("not a gstin")).toBe(""); expect(gstinState("99AAAAA0000A1Z5")).toBe("");
+  });
   it("GST inclusive keeps the total", () => { const t = totals(bill({ items: [line({ pkts: 1, rate: 10300 })], gst_mode: "inclusive" }), ""); expect(t.gross).toBe(123600); expect(t.net).toBe(123600); expect(t.gst).toBe(3600); });
   it("estimate has no GST; discount %, packing, payments", () => {
     const t = totals(bill({ bill_type: "estimate", items: [line({})], discount_pct: 10, packing: 5000, payments: [{ mode: "cash", amount: 50000 }, { mode: "credit", amount: 0 }] }), "");

@@ -111,7 +111,7 @@ function MergeDialog({ sources, onClose, onDone }: { sources: Bill[]; onClose: (
   useEffect(() => { getShop().then(setShop); }, []);
   const lines = useMemo(() => mergeLines(sources), [sources]);
   const preview = useMemo(() => totals({ ...sources[0], items: lines, bill_type: type, gst_rate: shop.gst_rate, gst_mode: shop.gst_mode, discount_pct: 0,
-    discount: sources.reduce((a, s) => a + totals(s, shop.state).discount, 0), packing: sources.reduce((a, s) => a + s.packing, 0) }, shop.state), [sources, lines, type, shop]);
+    discount: sources.reduce((a, s) => a + totals(s, shop.state, shop.gstin).discount, 0), packing: sources.reduce((a, s) => a + s.packing, 0) }, shop.state, shop.gstin), [sources, lines, type, shop]);
   const already = lines.filter(l => l.stock_done).reduce((a, l) => a + l.qty, 0);
   const challans = sources.every(s => s.bill_type === "challan");
   const run = async () => {
@@ -274,7 +274,7 @@ function ReturnDialog({ b, cns, shop, onClose }: { b: Bill; cns: Bill[]; shop: S
   const [refund, setRefund] = useState<"" | Payment["mode"]>("");
   const [busy, setBusy] = useState(false);
   const picks = b.items.map(l => ({ line_id: l.id, qty: parseInt(qty[l.id] || "") || 0 })).filter(p => p.qty > 0);
-  const cn = useMemo(() => totals(buildReturn(b, picks, left, shop, me?.id || ""), shop.state), [JSON.stringify(picks), left, shop]);
+  const cn = useMemo(() => totals(buildReturn(b, picks, left, shop, me?.id || ""), shop.state, shop.gstin), [JSON.stringify(picks), left, shop]);
   const owed = Math.max(0, due(b));
   return (
     <Modal title={`Sales return · ${b.no}`} onClose={onClose}>
@@ -296,7 +296,7 @@ function ReturnDialog({ b, cns, shop, onClose }: { b: Bill; cns: Bill[]; shop: S
           setBusy(true);
           try {
             const draft = buildReturn(b, picks, left, shop, me?.id || "");
-            const done = await saveReturn(draft, b, shop, refund ? { mode: refund, amount: totals(draft, shop.state).net } : undefined);
+            const done = await saveReturn(draft, b, shop, refund ? { mode: refund, amount: totals(draft, shop.state, shop.gstin).net } : undefined);
             toast(`Credit note ${done.no} · ${rupees(done.net)}`); onClose(); go("bills/" + done.id);
           } catch (e: any) { toast(e.message, true); setBusy(false); }
         }}>{busy ? "Saving…" : "Save credit note"}</button>

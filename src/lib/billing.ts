@@ -6,6 +6,7 @@ import { assertUnlocked } from "./finance";
 import { currentStore, inStore, assertStoreRow, storeLocations } from "./stores";
 import { fillBillNames } from "./billing-products";
 import { validatePosLines } from "./pos";
+import { isInterState } from "./states";
 
 /* ---------------- shop profile (synced to every device) ---------------- */
 export interface Shop {
@@ -69,7 +70,7 @@ export function fixLine(l: BillLine): BillLine {
   const x = { ...l, qty };
   return { ...x, amount: lineAmount(x) };
 }
-export function totals(b: Bill, shopState = ""): Bill {
+export function totals(b: Bill, shopState = "", shopGstin = ""): Bill {
   const items = b.items.map(fixLine);
   const gross = items.reduce((a, l) => a + l.amount, 0);
   const total_qty = items.reduce((a, l) => a + l.qty, 0);
@@ -83,7 +84,7 @@ export function totals(b: Bill, shopState = ""): Bill {
     if (b.gst_mode === "inclusive") { const ex = Math.round(base * 100 / (100 + rate)); gst = base - ex; base = ex; }
     else gst = Math.round(base * rate / 100);
   }
-  const inter = !!(shopState && b.party_state && shopState.trim().toLowerCase() !== b.party_state.trim().toLowerCase());
+  const inter = isInterState({ state: shopState, gstin: shopGstin }, b.party_state, b.party_gstin);
   const igst = inter ? gst : 0, cgst = inter ? 0 : Math.floor(gst / 2), sgst = inter ? 0 : gst - Math.floor(gst / 2);
   const raw = base + gst;
   const net = Math.round(raw / 100) * 100;
@@ -132,7 +133,7 @@ export async function finalize(b: Bill, shopState: string, customerName = "", af
   b = await fillBillNames(b);
   if (b.items.some(l => !l.item?.trim() || /^ITEM\s+\d+$/i.test(l.item.trim()))) throw new Error("Every bill item needs a product name");
   if (b.compliance?.irn || b.compliance?.ewb) throw new Error("Registered documents cannot be edited; use a credit note");
-  const t = totals(b, shopState);
+  const t = totals(b, shopState, (await getShop()).gstin);
   validatePosLines(t.items);
   const before0 = await db.bills.get(b.id);
   if (before0?.at) await assertUnlocked(before0.at);

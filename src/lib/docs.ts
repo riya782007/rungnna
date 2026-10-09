@@ -55,7 +55,7 @@ export function mergeLines(sources: Bill[]): BillLine[] {
 /* The new invoice (still unsaved): customer from the first source, lines combined, every payment and advance carried over. */
 export function buildMerged(sources: Bill[], type: BillType, shop: Shop, by: string): Bill {
   const first = [...sources].sort((a, z) => a.at.localeCompare(z.at))[0];
-  const tot = sources.map(s => totals(s, shop.state));
+  const tot = sources.map(s => totals(s, shop.state, shop.gstin));
   const b = newBill(by, shop, type);
   return {
     ...b,
@@ -110,13 +110,13 @@ export async function splitBill(b0: Bill, lineIds: string[], shop: Shop, by: str
   const tagsMoving = (b.rfid_tags || []).filter(t => tagSet.has(t) && !staying.some(l => l.product_id && pieces.find(p => p?.id === l.product_id)?.barcodes.includes(t)));
 
   if (b.status === "hold") {
-    const split = totals({ ...base, items: moving.map(l => ({ ...l })), rfid_tags: tagsMoving }, shop.state);
-    const original = totals({ ...b, items: staying, rfid_tags: (b.rfid_tags || []).filter(t => !tagsMoving.includes(t)) }, shop.state);
+    const split = totals({ ...base, items: moving.map(l => ({ ...l })), rfid_tags: tagsMoving }, shop.state, shop.gstin);
+    const original = totals({ ...b, items: staying, rfid_tags: (b.rfid_tags || []).filter(t => !tagsMoving.includes(t)) }, shop.state, shop.gstin);
     await db.transaction("rw", [db.bills, db.outbox], async () => { await put("bills", split); await put("bills", original); });
     return { original, split };
   }
 
-  const original = totals({ ...b, items: staying, rfid_tags: (b.rfid_tags || []).filter(t => !tagsMoving.includes(t)) }, shop.state);
+  const original = totals({ ...b, items: staying, rfid_tags: (b.rfid_tags || []).filter(t => !tagsMoving.includes(t)) }, shop.state, shop.gstin);
   const draft: Bill = { ...base, items: moving.map(l => ({ ...l, stock_done: 1 as const })), rfid_tags: tagsMoving };
   const split = await finalize(draft, shop.state, b.party_name, async saved => {
     await put("bills", original);

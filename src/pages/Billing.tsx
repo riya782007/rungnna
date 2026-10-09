@@ -111,12 +111,12 @@ export default function Billing({ args }: { args: string[] }) {
   })(); }, [b?.bill_type]);
   useEffect(() => { b?.party_id ? partyDue(b.party_id).then(setDue0) : setDue0(0); }, [b?.party_id, priv]);
 
-  const t = useMemo(() => (b ? totals(withBillNames(b, products, readItemMap(itemNames?.value)), shop.state) : null), [b, shop.state, products, itemNames]);
+  const t = useMemo(() => (b ? totals(withBillNames(b, products, readItemMap(itemNames?.value)), shop.state, shop.gstin) : null), [b, shop.state, products, itemNames]);
   const [askCode, setAskCode] = useState(false);
   useEffect(() => {
     if (priv || !b || b.bill_type !== "estimate") return;
     // locked while an estimate was open: park it out of sight, continue with a GST invoice
-    (async () => { if (b.items.length) await holdBill(totals(b, shop.state)); await setSetting("draft_bill", null); setB(newBill(me?.id || "", shop, "gst")); setBox(1); })();
+    (async () => { if (b.items.length) await holdBill(totals(b, shop.state, shop.gstin)); await setSetting("draft_bill", null); setB(newBill(me?.id || "", shop, "gst")); setBox(1); })();
   }, [priv]);
   const press = useRef<any>(0);
   const hintProps = {
@@ -283,7 +283,7 @@ export default function Billing({ args }: { args: string[] }) {
   async function doHold() {
     if (savingRef.current) return;
     if (!b?.items.length) return toast("Nothing to hold", true);
-    await holdBill(totals(b, shop.state)); await setSetting("draft_bill", null);
+    await holdBill(totals(b, shop.state, shop.gstin)); await setSetting("draft_bill", null);
     toast("Bill on hold — F4 to bring it back"); setB(newBill(me?.id || "", shop, b.bill_type)); setBox(1);
   }
   async function doVoice(audio?: Blob, text?: string) {
