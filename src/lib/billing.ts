@@ -31,7 +31,8 @@ export function fy(d = new Date()) {
 }
 export async function counterCode(): Promise<string> {
   let c = await getSetting<string>("counter_code", "");
-  if (!c) { c = "C" + deviceId().slice(-2); await setSetting("counter_code", c); }
+  // 3 random chars: ~47k codes, so two counters rarely get the same one
+  if (!c) { c = "C" + deviceId().slice(-3); await setSetting("counter_code", c); }
   const store = await db.stores.get(currentStore());
   return store && store.code !== "MAIN" ? store.code + c : c;
 }
@@ -50,11 +51,22 @@ export const docShort = (b: Pick<Bill, "bill_type">) =>
 async function nextNo(t: BillType, src?: BillType) {
   const series = seriesOf(t, src), f = fy(), cc = await counterCode();
   const key = `seq_${series}_${f}_${cc}`;
-  const n = (await getSetting<number>(key, 0)) + 1;
+  let n = (await getSetting<number>(key, 0)) + 1, no = "";
+  // never hand out a number that already exists on this device (lost counter after clearing browser data, a copied counter code…)
+  for (;; n++) {
+    no = `${series}/${f.slice(0, 2)}${cc}${String(n).padStart(4, "0")}`;
+    if (!(await db.bills.where("no").equals(no).count())) break;
+  }
   await setSetting(key, n);
-  const no = `${series}/${f.slice(0, 2)}${cc}${String(n).padStart(4, "0")}`;
   if (["gst", "challan"].includes(t) && no.length > 16) throw new Error("Shorten the counter code in Settings (government limit: 16 characters)");
   return { no, series: `${series}/${f}/${cc}` };
+}
+
+/** Document numbers used by more than one saved document (e.g. two counters with the same code before they synced). */
+export async function duplicateNumbers(): Promise<{ no: string; ids: string[] }[]> {
+  const seen = new Map<string, string[]>();
+  for (const b of await db.bills.toArray()) if (b.no && !b.deleted) seen.set(b.no, [...(seen.get(b.no) || []), b.id]);
+  return [...seen].filter(([, ids]) => ids.length > 1).map(([no, ids]) => ({ no, ids }));
 }
 
 /* ---------------- maths (all paise) ---------------- */

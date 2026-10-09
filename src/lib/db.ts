@@ -276,12 +276,13 @@ export const uid = () =>
 
 export const now = () => new Date().toISOString();
 
+const memDevice = "D" + Math.random().toString(36).slice(2, 7).toUpperCase();   // only used if localStorage is blocked
 export function deviceId(): string {
   try {
     let d = localStorage.getItem("rj_device");
     if (!d) { d = "D" + Math.random().toString(36).slice(2, 7).toUpperCase(); localStorage.setItem("rj_device", d); }
     return d;
-  } catch { return "D-NOSTORE"; }
+  } catch { return memDevice; }
 }
 
 /* ---- write helpers: every write lands locally first, then queues for the cloud ---- */

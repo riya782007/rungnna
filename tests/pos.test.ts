@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { db } from "../src/lib/db";
 import { resolveBillingScan } from "../src/lib/billing-products";
-import { DEFAULT_SHOP, newBill, lineFrom, finalize, totals } from "../src/lib/billing";
+import { DEFAULT_SHOP, newBill, lineFrom, finalize, totals, duplicateNumbers } from "../src/lib/billing";
 import { manualLine, moneyInput, validatePosLines } from "../src/lib/pos";
 import { calculate } from "../src/lib/calculator";
 import { mergeBoxLine } from "../src/lib/billingBox";
@@ -58,6 +58,18 @@ describe("manual POS", () => {
     expect(await db.bills.count()).toBe(0); expect(await db.outbox.count()).toBe(0);
     expect((await db.settings.toArray()).filter(s => s.key.startsWith("seq_"))).toHaveLength(0);
     const saved = await finalize(b, ""); expect(saved.no).toMatch(/0001$/);
+  });
+});
+describe("invoice numbers", () => {
+  const input = { item: "BALI", style: "K5209", color: "GOLD", unit: "PAIR", hsn: "7117", qty: "3", rate: "100.50", box: 2 };
+  it("skips a number that already exists (counter lost or code shared) and flags real duplicates", async () => {
+    const mk = () => ({ ...newBill("o", DEFAULT_SHOP), items: [manualLine(input)] });
+    const first = await finalize(mk(), "");
+    await db.settings.filter(s => s.key.startsWith("seq_")).delete();        // simulate cleared site data: counter back to zero
+    const second = await finalize(mk(), "");
+    expect(second.no).not.toBe(first.no); expect(await duplicateNumbers()).toEqual([]);
+    await db.bills.put({ ...second, id: "dup" });                           // two documents sharing a number (e.g. after a sync)
+    expect((await duplicateNumbers())[0].no).toBe(second.no);
   });
 });
 describe("POS calculator", () => {
