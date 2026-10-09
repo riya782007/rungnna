@@ -31,6 +31,7 @@ export interface Product extends Row {
   collection?: string;
   material?: string;
   hsn?: string;
+  gst_rate?: number;       // % — only if this product is taxed differently from the shop rate (blank = shop rate)
   wholesale_rate?: number; // paise
   retail_rate?: number;    // paise
   /* --- product-master keying & pricing (spec: SKU/Model + Vendor) --- */
@@ -99,6 +100,8 @@ export interface Receipt extends Row {
 
 export interface BillLine {
   hsn?: string;
+  gst_rate?: number;       // % override for this line; unset = the bill's rate
+  taxable?: number; tax?: number;  // set by totals() only when the bill mixes GST rates (paise)
   id: string; product_id?: string; code: string; item: string; type: string; style: string; color: string;
   box_no: number; pack: number; pkts: number; qty: number; rate: number; disc: string; amount: number;
   stock_done?: 1;          // these pieces already left the racks on another document (merged / challan / split)

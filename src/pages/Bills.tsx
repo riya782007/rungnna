@@ -4,7 +4,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, type Bill, type BillType, type Payment } from "../lib/db";
 import { GstBill } from "../components/GstBill";
 import { inStore } from "../lib/scope";
-import { due, getShop, voidBill, convertToGst, shareBill, billText, waLink, deleteEstimates, totals, isSale, docName, docShort, DEFAULT_SHOP, type Shop } from "../lib/billing";
+import { due, getShop, voidBill, convertToGst, shareBill, billText, waLink, deleteEstimates, totals, gstLabel, isSale, docName, docShort, DEFAULT_SHOP, type Shop } from "../lib/billing";
 import { canMerge, mergeable, mergeBills, mergeLines, splitBill, splittable, returnable, returnableBill, buildReturn, saveReturn } from "../lib/docs";
 import { usePrivate, visibleBill, lockNow, isEstimate } from "../lib/privacy";
 import { Icon } from "../components/Icon";
@@ -129,7 +129,7 @@ function MergeDialog({ sources, onClose, onDone }: { sources: Bill[]; onClose: (
         </div>
         <div className="row between sm"><span>{lines.length} lines (combined from {sources.reduce((a, s) => a + s.items.length, 0)})</span><b className="mono">{preview.total_qty} pcs</b></div>
         {preview.discount ? <div className="row between sm"><span>Discount carried over</span><span className="mono">−{rupees(preview.discount)}</span></div> : null}
-        {preview.gst ? <div className="row between sm"><span>GST {shop.gst_rate}%</span><span className="mono">{rupees(preview.gst)}</span></div> : null}
+        {preview.gst ? <div className="row between sm"><span>GST{gstLabel(preview)}</span><span className="mono">{rupees(preview.gst)}</span></div> : null}
         <div className="net"><span>NET</span><b>{rupees(preview.net)}</b></div>
         {preview.paid || sources.some(s => s.advance) ? <div className="xs mut">Payments and advances on the sources move to the new invoice.</div> : null}
         <div className="note sm">{already ? `${already} pieces already left the racks with the sources — they won't be taken off again. ` : ""}

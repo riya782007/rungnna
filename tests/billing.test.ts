@@ -36,6 +36,24 @@ describe("billing maths", () => {
     expect(isInterState({ state: "Nowhereland" }, "Elsewhere")).toBe(true); expect(isInterState({ state: "Nowhereland" }, "nowhereland")).toBe(false);
     expect(stateCode("Jammu & Kashmir")).toBe("01"); expect(gstinState("not a gstin")).toBe(""); expect(gstinState("99AAAAA0000A1Z5")).toBe("");
   });
+  it("a line with its own GST rate is taxed at that rate; totals still add up and CGST+SGST/IGST follow it", () => {
+    const items = [line({ id: "a" }), line({ id: "b", gst_rate: 12 })];
+    const t = totals(bill({ items }), "Delhi");
+    const a = t.items[0], b2 = t.items[1];
+    expect(a.tax! + b2.tax!).toBe(t.gst); expect(a.taxable! + b2.taxable!).toBe(t.gross);
+    expect(Math.round(a.taxable! * 0.03)).toBe(a.tax); expect(Math.round(b2.taxable! * 0.12)).toBe(b2.tax);
+    expect(t.cgst + t.sgst).toBe(t.gst); expect(t.net % 100).toBe(0);
+    const i = totals(bill({ items, party_state: "Rajasthan" }), "Delhi"); expect(i.igst).toBe(i.gst); expect(i.cgst).toBe(0);
+  });
+  it("mixed rates in inclusive mode keep the shown total", () => {
+    const t = totals(bill({ items: [line({ pkts: 1, rate: 10300, id: "a" }), line({ pkts: 1, rate: 11200, gst_rate: 12, id: "b" })], gst_mode: "inclusive" }), "");
+    expect(t.gross).toBe(t.items.reduce((n, l) => n + l.taxable! + l.tax!, 0));
+  });
+  it("lines with no override (or the same rate as the bill) behave exactly as before", () => {
+    const base = totals(bill({ items: [line({})] }), "");
+    const same = totals(bill({ items: [line({ gst_rate: 3 })] }), "");
+    expect(same.gst).toBe(base.gst); expect(same.net).toBe(base.net); expect(same.items[0].tax).toBeUndefined();
+  });
   it("GST inclusive keeps the total", () => { const t = totals(bill({ items: [line({ pkts: 1, rate: 10300 })], gst_mode: "inclusive" }), ""); expect(t.gross).toBe(123600); expect(t.net).toBe(123600); expect(t.gst).toBe(3600); });
   it("estimate has no GST; discount %, packing, payments", () => {
     const t = totals(bill({ bill_type: "estimate", items: [line({})], discount_pct: 10, packing: 5000, payments: [{ mode: "cash", amount: 50000 }, { mode: "credit", amount: 0 }] }), "");

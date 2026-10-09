@@ -9,7 +9,7 @@ import { db, put, getSetting, setSetting, type Bill, type BillLine, type Party, 
 import { findByScan, fillFromItemCode, label, readItemMap } from "../lib/products";
 import { NameItemCodes, unnamedCodes } from "../components/NameItemCodes";
 import { isRfidTag, normTag, soldBill, TagSet, Recent } from "../lib/rfid";
-import { newBill, lineFrom, totals, fixLine, finalize, holdBill, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
+import { newBill, lineFrom, totals, gstLabel, fixLine, finalize, holdBill, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
 import { voiceBill } from "../lib/ai";
 import { useApp, toast, beep, go } from "../lib/app";
 import { can } from "../lib/roles";
@@ -458,7 +458,7 @@ export default function Billing({ args }: { args: string[] }) {
               <input className="cell r" style={{ width: 48 }} placeholder="%" value={b.discount_pct || ""} onChange={e => set({ discount_pct: parseFloat(e.target.value) || 0 })} />
               <input className="cell r" style={{ width: 72 }} placeholder="₹" disabled={!!b.discount_pct} value={b.discount_pct ? (t.discount / 100).toFixed(0) : b.discount ? b.discount / 100 : ""} onChange={e => set({ discount: toPaise(e.target.value) })} /></span></div>
           <div className="sumrow"><span>Packing</span><input className="cell r" style={{ width: 80 }} value={b.packing ? b.packing / 100 : ""} onChange={e => set({ packing: toPaise(e.target.value) })} /></div>
-          {b.bill_type === "gst" && <div className="sumrow"><span>GST {b.gst_rate}% <button className="linkbtn" onClick={() => set({ gst_mode: b.gst_mode === "exclusive" ? "inclusive" : "exclusive" })}>{b.gst_mode === "exclusive" ? "added" : "included"}</button></span><b className="mono">{rupees(t.gst)}</b></div>}
+          {b.bill_type === "gst" && <div className="sumrow"><span>GST{gstLabel(t)} <button className="linkbtn" onClick={() => set({ gst_mode: b.gst_mode === "exclusive" ? "inclusive" : "exclusive" })}>{b.gst_mode === "exclusive" ? "added" : "included"}</button></span><b className="mono">{rupees(t.gst)}</b></div>}
           {t.igst ? <div className="xs mut" style={{ textAlign: "right" }}>IGST (other state)</div> : t.gst ? <div className="xs mut" style={{ textAlign: "right" }}>CGST {rupees(t.cgst)} + SGST {rupees(t.sgst)}</div> : null}
           {t.adjust ? <div className="sumrow"><span>Round off</span><span className="mono">{rupees(t.adjust)}</span></div> : null}
           <div className="net"><span>{b.bill_type === "challan" ? "VALUE" : "NET"}</span><b>{rupees(t.net)}</b></div>

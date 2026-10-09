@@ -70,6 +70,16 @@ export function fixLine(l: BillLine): BillLine {
   const x = { ...l, qty };
   return { ...x, amount: lineAmount(x) };
 }
+/** Split integer paise by weights so the parts always add back to the total. */
+export function allocate(total: number, weights: number[]) {
+  const sum = weights.reduce((a, n) => a + n, 0);
+  const out = weights.map(n => (sum ? Math.floor(total * n / sum) : 0));
+  let left = total - out.reduce((a, n) => a + n, 0);
+  for (let i = 0; left > 0 && i < out.length; i++, left--) out[i]++;
+  return out;
+}
+/** " 3%" for a single-rate bill; "" (just "GST") when lines carry different rates. */
+export const gstLabel = (b: Bill) => (b.items.some(l => l.tax != null) ? "" : ` ${b.gst_rate}%`);
 export function totals(b: Bill, shopState = "", shopGstin = ""): Bill {
   const items = b.items.map(fixLine);
   const gross = items.reduce((a, l) => a + l.amount, 0);
@@ -79,17 +89,32 @@ export function totals(b: Bill, shopState = "", shopGstin = ""): Bill {
   const discount = Math.min(gross, Math.max(0, b.discount_pct ? Math.round(gross * b.discount_pct / 100) : b.discount));
   // a credit note against a tax invoice reverses its GST; estimates, challans and their returns carry none
   const rate = b.bill_type === "gst" || (b.bill_type === "return" && b.src_type === "gst") ? b.gst_rate : 0;
-  let base = gross - discount + b.packing, gst = 0;
-  if (rate) {
-    if (b.gst_mode === "inclusive") { const ex = Math.round(base * 100 / (100 + rate)); gst = base - ex; base = ex; }
-    else gst = Math.round(base * rate / 100);
+  let base = gross - discount + b.packing, gst = 0, lines = items;
+  // lines taxed at a different rate than the bill (e.g. a 12% item on a 3% bill) are taxed line by line
+  const mixed = !!rate && items.some(l => l.gst_rate != null && l.gst_rate !== rate);
+  if (mixed) {
+    const shares = allocate(base, items.map(l => l.amount));
+    base = 0;
+    lines = items.map((l, i) => {
+      const r = l.gst_rate ?? rate, s = shares[i];
+      let ex = s, tax: number;
+      if (b.gst_mode === "inclusive") { ex = Math.round(s * 100 / (100 + r)); tax = s - ex; } else tax = Math.round(s * r / 100);
+      base += ex; gst += tax;
+      return { ...l, taxable: ex, tax };
+    });
+  } else {
+    lines = items.map(l => { const { taxable, tax, ...rest } = l; return rest; });
+    if (rate) {
+      if (b.gst_mode === "inclusive") { const ex = Math.round(base * 100 / (100 + rate)); gst = base - ex; base = ex; }
+      else gst = Math.round(base * rate / 100);
+    }
   }
   const inter = isInterState({ state: shopState, gstin: shopGstin }, b.party_state, b.party_gstin);
   const igst = inter ? gst : 0, cgst = inter ? 0 : Math.floor(gst / 2), sgst = inter ? 0 : gst - Math.floor(gst / 2);
   const raw = base + gst;
   const net = Math.round(raw / 100) * 100;
   const paid = b.bill_type === "challan" ? 0 : b.payments.filter(p => p.mode !== "credit").reduce((a, p) => a + p.amount, 0);
-  return { ...b, items, gross, total_qty, box_count, discount, gst, cgst, sgst, igst, adjust: net - raw, net, paid };
+  return { ...b, items: lines, gross, total_qty, box_count, discount, gst, cgst, sgst, igst, adjust: net - raw, net, paid };
 }
 export const due = (b: Pick<Bill, "net" | "advance" | "paid"> & { bill_type?: BillType }) =>
   b.bill_type === "challan" ? 0 : b.net - b.advance - b.paid;   // a challan asks for no money
@@ -111,7 +136,7 @@ export function priceFor(p: Product, level: Party["tier"] | Bill["price_level"] 
 }
 export function lineFrom(p: Product, box = 1, pkts = 1, level: Party["tier"] | Bill["price_level"] = "wholesale"): BillLine {
   const pack = p.pack && p.pack > 1 ? p.pack : 1;
-  return fixLine({ id: uid(), hsn: p.hsn, product_id: p.id, code: p.code, item: p.item || (p.item_code ? "ITEM " + p.item_code : ""), type: p.type, style: p.style, color: p.color,
+  return fixLine({ id: uid(), hsn: p.hsn, ...(p.gst_rate != null ? { gst_rate: p.gst_rate } : {}), product_id: p.id, code: p.code, item: p.item || (p.item_code ? "ITEM " + p.item_code : ""), type: p.type, style: p.style, color: p.color,
     box_no: box, pack, pkts: pack > 1 ? pkts : 0, qty: pack > 1 ? pkts * pack : pkts, rate: priceFor(p, level), disc: "", amount: 0 });
 }
 
@@ -244,7 +269,7 @@ export function billText(b: Bill, shop: Shop) {
   L.push("", `Pieces: ${b.total_qty} · Boxes: ${b.box_count}`);
   if (b.discount) L.push(`Discount: -${rupees(b.discount)}`);
   if (b.packing) L.push(`Packing: ${rupees(b.packing)}`);
-  if (b.gst) L.push(`GST ${b.gst_rate}%: ${rupees(b.gst)}`);
+  if (b.gst) L.push(`GST${gstLabel(b)}: ${rupees(b.gst)}`);
   L.push(b.bill_type === "return" ? `*Credit: ${rupees(b.net)}*` : b.bill_type === "challan" ? `*Value: ${rupees(b.net)}* (no payment due on a challan)` : `*Total: ${rupees(b.net)}*`);
   const d = isSale(b) ? due(b) : 0; if (d > 0) L.push(`Balance due: ${rupees(d)}`);
   if (shop.upi && d > 0) L.push(`Pay by UPI: upi://pay?pa=${encodeURIComponent(shop.upi)}&pn=${encodeURIComponent(shop.name)}&am=${(d / 100).toFixed(2)}&cu=INR`);
@@ -291,7 +316,7 @@ export async function billImage(b: Bill, shop: Shop): Promise<Blob> {
   row(`Pieces ${b.total_qty} · Boxes ${b.box_count}`, rupees(b.gross));
   if (b.discount) row("Discount", "-" + rupees(b.discount));
   if (b.packing) row("Packing", rupees(b.packing));
-  if (b.gst) row(`GST ${b.gst_rate}%`, rupees(b.gst));
+  if (b.gst) row(`GST${gstLabel(b)}`, rupees(b.gst));
   row(b.bill_type === "return" ? "CREDIT" : b.bill_type === "challan" ? "VALUE" : "TOTAL", rupees(b.net), true);
   const d = isSale(b) ? due(b) : 0; if (d > 0) row("Balance due", rupees(d), true);
   g.fillStyle = "#A07E2E"; g.font = "italic 16px Georgia"; g.fillText("Thank you for shopping with us", pad, y += 44);

@@ -129,6 +129,7 @@ function ProductDetail({ id }: { id: string }) {
             <label className="f">Vendor design code<input className="in mono" value={p.vendor_design_code || ""} onChange={e => set("vendor_design_code", e.target.value.toUpperCase() || undefined)} /></label>
             <label className="f">Collection<input className="in" value={p.collection || ""} onChange={e => set("collection", e.target.value || undefined)} /></label>
             <label className="f">Material<input className="in" value={p.material || ""} onChange={e => set("material", e.target.value || undefined)} /></label>
+            <label className="f">GST % (blank = shop rate)<input className="in mono" inputMode="decimal" value={p.gst_rate ?? ""} onChange={e => { const v = e.target.value.replace(/[^\d.]/g, ""); set("gst_rate", v === "" || isNaN(Number(v)) ? undefined : Math.min(40, Number(v))); }} /></label>
             <label className="f">HSN<input className="in mono" value={p.hsn || ""} onChange={e => set("hsn", e.target.value.replace(/\D/g, "") || undefined)} /></label>
           </div>
           <label className="f">Notes<textarea className="in" rows={2} value={p.notes} onChange={e => set("notes", e.target.value)} /></label>
