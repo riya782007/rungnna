@@ -72,6 +72,18 @@ describe("invoice numbers", () => {
     expect((await duplicateNumbers())[0].no).toBe(second.no);
   });
 });
+describe("overselling", () => {
+  it("still lets the sale through but flags the pieces that were not in stock", async () => {
+    const p = (await resolveBillingScan(photographedQr, "o"))!;
+    const have = (await db.stock.where("product_id").equals(p.id).toArray()).reduce((n, c) => n + c.qty, 0);
+    const b = { ...newBill("o", DEFAULT_SHOP), items: [{ ...lineFrom(p), qty: have + 3, pkts: have + 3, pack: 1 }] };
+    const done = await finalize(b, "");
+    expect(done.oversold).toEqual([expect.objectContaining({ product_id: p.id, qty: 3 })]);
+    expect((await db.bills.get(done.id))!.oversold?.[0].qty).toBe(3);
+    const ok = await finalize({ ...newBill("o", DEFAULT_SHOP), items: [manualLine({ item: "X", style: "", color: "", unit: "PCS", hsn: "", qty: "1", rate: "5", box: 1 })] }, "");
+    expect(ok.oversold).toBeUndefined();
+  });
+});
 describe("POS calculator", () => {
   it("uses decimal arithmetic, precedence and parentheses", () => { expect(calculate("0.1+0.2")).toBe("0.3"); expect(calculate("100+50×2")).toBe("200"); expect(calculate("(100+50)÷3")).toBe("50"); expect(calculate("100×10/100")).toBe("10"); });
   it("handles zero and negative intermediate results", () => { expect(calculate("100-100")).toBe("0"); expect(calculate("50-100")).toBe("-50"); });

@@ -175,7 +175,8 @@ export async function finalize(b: Bill, shopState: string, customerName = "", af
   const before0 = await db.bills.get(b.id);
   if (before0?.at) await assertUnlocked(before0.at);
   const num = t.no ? { no: t.no, series: t.series } : await nextNo(t.bill_type, t.src_type);
-  const bill: Bill = { ...t, ...num, status: "final", at: t.status === "hold" ? now() : t.at };
+  const bill: Bill = { ...t, ...num, status: "final", oversold: undefined, at: t.status === "hold" ? now() : t.at };
+  const oversold: { product_id: string; item: string; qty: number }[] = [];
   const bucket = new Set((await db.locations.filter(l => l.kind === "bucket").toArray()).map(l => l.id));
   const racks = new Set((await storeLocations()).map(l => l.id));
   await db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock, db.products], async () => {
@@ -194,7 +195,7 @@ export async function finalize(b: Bill, shopState: string, customerName = "", af
         .filter(c => c.qty > 0 && racks.has(c.loc_id) && !bucket.has(c.loc_id)).sort((a, z) => z.qty - a.qty);
       const parts: { loc: string | null; q: number }[] = [];
       for (const c of cells) { if (!left) break; const q = Math.min(left, c.qty); parts.push({ loc: c.loc_id, q }); left -= q; }
-      if (left) parts.push({ loc: null, q: left });          // sold more than was recorded: still logged
+      if (left) { parts.push({ loc: null, q: left }); oversold.push({ product_id: l.product_id, item: [l.item, l.style, l.color].filter(Boolean).join(" "), qty: left }); }   // sold more than was recorded: still logged, and flagged on the bill
       for (const x of parts) {
         const m: Movement = { id: uid(), product_id: l.product_id, kind: "sale", qty: x.q, from_loc: x.loc, to_loc: null,
           person_type: "customer", person_name: customerName || bill.party_name, by_staff: bill.by_staff, note: bill.no,
@@ -203,6 +204,7 @@ export async function finalize(b: Bill, shopState: string, customerName = "", af
         if (x.loc) await bumpStock(l.product_id, x.loc, -x.q);
       }
     }
+    if (oversold.length) { bill.oversold = oversold; await put("bills", bill); }
   });
   return bill;
   });

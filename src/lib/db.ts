@@ -115,6 +115,7 @@ export type BillStatus = "hold" | "final" | "void" | "converted" | "merged";
 export interface Bill extends Row {
   transport?: Transport;
   compliance?: Compliance;
+  oversold?: { product_id: string; item: string; qty: number }[];   // pieces sold beyond the recorded rack stock — recount these
   no: string; series: string; bill_type: BillType; status: BillStatus;
   party_id?: string; party_name: string; party_phone: string; party_gstin: string; party_state: string;
   price_level?: "wholesale" | "retail" | "dealer";

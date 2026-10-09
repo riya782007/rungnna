@@ -272,6 +272,7 @@ export default function Billing({ args }: { args: string[] }) {
     const done = await finalize(t, shop.state, b.party_name);
     beep("saved");
     toast(`Saved ${done.no} · ${rupees(done.net)}`);
+    if (done.oversold?.length) toast("Stock short — recount: " + done.oversold.map(o => `${o.item} (${o.qty} more than recorded)`).join(", "), true);
     await setSetting("draft_bill", null);
     if (print) setPrinting({ bill: done, fmt });
     if (share) await shareBill(done, shop);
