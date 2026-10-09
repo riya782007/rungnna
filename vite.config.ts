@@ -18,9 +18,9 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "prompt",
-      includeAssets: ["icon.svg", "zxing_reader.wasm"],
+      includeAssets: ["icon.svg", "zxing_reader.wasm", "fonts/*.ttf"],
       workbox: {
-        globPatterns: ["**/*.{js,css,html,svg,png,wasm,woff2}"],
+        globPatterns: ["**/*.{js,css,html,svg,png,wasm,woff2,ttf}"],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         navigateFallback: "/index.html",
         // public web pages are server-rendered; never let the installed app swallow them

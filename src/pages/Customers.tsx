@@ -5,7 +5,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, type Party, type Payment } from "../lib/db";
 import { newParty, waLink, normPhone, getShop, DEFAULT_SHOP, type Shop } from "../lib/billing";
 import { ledger, receive, balances, statementRange, rangeText, statementPdf, localDay, type Entry } from "../lib/ledger";
-import { sharePdf, downloadPdf } from "../lib/pdf";
+import { sharePdf, downloadPdf, loadPdfFonts } from "../lib/pdf";
 import { Modal } from "../components/common";
 import { isSale } from "../lib/billing";
 import { go, toast, useApp } from "../lib/app";
@@ -176,6 +176,7 @@ function ShareStatement({ party, entries, shop, onClose }: { party: Party; entri
   const fyStart = localDay(new Date(d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1, 3, 1).toISOString());
   const first = entries.find(e => e.kind !== "opening");
   const allStart = first ? localDay(first.at) : monthStart;
+  useEffect(() => { loadPdfFonts(); }, []);
   const [from, setFrom] = useState(fyStart);
   const [to, setTo] = useState(today);
   const presets: [string, string, string][] = [["This month", monthStart, today], ["Last month", lastStart, lastEnd], ["This year (FY)", fyStart, today], ["Everything", allStart < fyStart ? allStart : fyStart, today]];
@@ -197,14 +198,15 @@ function ShareStatement({ party, entries, shop, onClose }: { party: Party; entri
           <div className="row between sm"><span>Paid / credited</span><span className="mono" style={{ color: "var(--ok)" }}>{rupees(st.credit)}</span></div>
           <div className="net"><span>{st.closing >= 0 ? "BALANCE DUE" : "ADVANCE"}</span><b>{rupees(Math.abs(st.closing))}</b></div></>}
         <button className="btn p big" disabled={bad} onClick={async () => {
+          await loadPdfFonts();
           const r = await sharePdf(statementPdf(party, st, from, to, shop), name, text);
           if (r === "downloaded") toast("PDF saved — attach it in WhatsApp");
         }}><Icon n="wa" size={18} />Share PDF</button>
         <div className="row">
           {party.phone && <a className={"btn grow" + (bad ? " dis" : "")} target="_blank" rel="noreferrer" href={waLink(party.phone, text)}>WhatsApp text</a>}
-          <button className="btn grow" disabled={bad} onClick={() => downloadPdf(statementPdf(party, st, from, to, shop), name)}>Download PDF</button>
+          <button className="btn grow" disabled={bad} onClick={async () => { await loadPdfFonts(); downloadPdf(statementPdf(party, st, from, to, shop), name); }}>Download PDF</button>
         </div>
-        <div className="xs mut">On a phone, Share PDF opens WhatsApp with the file attached. Names in Hindi script print as “?” in the PDF; the WhatsApp text keeps them.</div>
+        <div className="xs mut">On a phone, Share PDF opens WhatsApp with the file attached.</div>
       </div>
     </Modal>
   );

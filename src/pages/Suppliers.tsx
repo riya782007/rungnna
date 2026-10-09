@@ -5,7 +5,7 @@ import { db, put, type Party, type PurchaseReturnLine, type MoneyMode } from "..
 import { newParty, getShop, waLink, DEFAULT_SHOP, type Shop } from "../lib/billing";
 import { supplierAging, supplierBalances, supplierLedger, savePurchaseReturn, supplierStatementText, supplierStatementPdf, type SupplierEntry } from "../lib/suppliers";
 import { saveVoucher } from "../lib/vouchers";
-import { sharePdf, downloadPdf } from "../lib/pdf";
+import { sharePdf, downloadPdf, loadPdfFonts } from "../lib/pdf";
 import { useApp, go, toast } from "../lib/app";
 import { can } from "../lib/roles";
 import { rupees, toPaise, when } from "../lib/format";
@@ -53,7 +53,7 @@ function SupplierView({ id }: { id: string }) {
   const [ret, setRet] = useState(false);
   const [shop, setShop] = useState<Shop>(DEFAULT_SHOP);
   useEffect(() => { if (p0) supplierLedger(p0).then(setLed); }, [p0?.updated_at, purchases.length, pay, ret]);
-  useEffect(() => { getShop().then(setShop); }, []);
+  useEffect(() => { getShop().then(setShop); loadPdfFonts(); }, []);
   if (!p0) return <div className="skel" style={{ height: 200 }} />;
   const balance = led?.balance || 0;
   return <div>
@@ -61,6 +61,7 @@ function SupplierView({ id }: { id: string }) {
       <button className="btn p" onClick={() => setPay(true)}>Pay supplier</button>
       <button className="btn" onClick={() => setRet(true)}>Purchase return</button>
       <button className="btn g" onClick={async () => {
+        await loadPdfFonts();
         const bytes = supplierStatementPdf(p0, led?.entries || [], shop);
         const text = supplierStatementText(p0, led?.entries || [], balance, shop);
         const r = await sharePdf(bytes, `Supplier-${p0.name}.pdf`, text);

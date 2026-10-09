@@ -1,50 +1,177 @@
-/* A tiny PDF writer (no library, works offline): A4 pages, Helvetica for words, Courier for figures so
-   amounts line up and right-align exactly. Text is emitted as UTF-16BE PDF strings, so ₹ and Hindi names
-   are preserved instead of being rewritten to "Rs." or "?". */
+/* A small PDF writer (works offline): A4 pages.
+   Words are set in embedded Noto Sans (Latin, ₹) and Noto Sans Devanagari (Hindi), shaped with fontkit so
+   conjuncts and vowel signs come out right. Only the glyphs actually used are embedded, so files stay small.
+   Courier (a built-in PDF font) is still used for figure columns.
+   The fonts load once (loadPdfFonts) and are cached by the service worker. If they are not available the
+   writer falls back to the built-in Helvetica with Latin-only text (₹ becomes "Rs.", other scripts "?"),
+   which is always readable — never garbled bytes. */
 
 const W = 595.28, H = 841.89;
-type Font = "F1" | "F2" | "F3"; // Helvetica, Helvetica-Bold, Courier
+type Font = "F1" | "F2" | "F3"; // regular, bold, Courier (figures)
 
 export function pdfSafe(s: string) {
   return String(s ?? "").replace(/[–—]/g, "-").replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/…/g, "...");
 }
-const hexText = (s: string) => {
-  const bytes = [0xfe, 0xff];
-  for (const ch of pdfSafe(s)) {
-    const cp = ch.codePointAt(0)!;
-    if (cp > 0xffff) { const u = cp - 0x10000; const hi = 0xd800 + (u >> 10), lo = 0xdc00 + (u & 1023); bytes.push(hi >> 8, hi & 255, lo >> 8, lo & 255); }
-    else bytes.push(cp >> 8, cp & 255);
-  }
-  return "<" + bytes.map(b => b.toString(16).padStart(2, "0")).join("") + ">";
-};
 
-/* Helvetica advance widths (per 1000 em) for printable ASCII, so text can be measured and truncated */
+/* ---------------------------------------------------------------- fonts */
+type FK = {
+  unitsPerEm: number; ascent: number; descent: number; capHeight: number;
+  bbox: { minX: number; minY: number; maxX: number; maxY: number };
+  hasGlyphForCodePoint(cp: number): boolean;
+  layout(s: string): { glyphs: any[]; positions: { xAdvance: number; xOffset: number; yOffset: number }[]; advanceWidth: number };
+  createSubset(): { includeGlyph(g: any): number; encode(): Uint8Array };
+};
+type FontKey = "sans" | "sansBold" | "deva" | "devaBold";
+type Fonts = Record<FontKey, FK>;
+const FILES: Record<FontKey, string> = {
+  sans: "NotoSans-Regular.subset.ttf", sansBold: "NotoSans-Bold.subset.ttf",
+  deva: "NotoSansDevanagari-Regular.subset.ttf", devaBold: "NotoSansDevanagari-Bold.subset.ttf",
+};
+const TAG: Record<FontKey, string> = { sans: "AAAAAA", sansBold: "AAAAAB", deva: "AAAAAC", devaBold: "AAAAAD" };
+const NAME: Record<FontKey, string> = { sans: "NotoSans", sansBold: "NotoSans-Bold", deva: "NotoSansDevanagari", devaBold: "NotoSansDevanagari-Bold" };
+let fonts: Fonts | null = null;
+let loading: Promise<boolean> | null = null;
+
+export const pdfFontsLoaded = () => !!fonts;
+
+/** Give the writer the four font files as bytes (tests, or anything that already has them). */
+export async function setPdfFonts(d: Record<FontKey, Uint8Array>) {
+  const fk: any = await import("fontkit");
+  const create = fk.create ?? fk.default?.create;
+  const next = {} as Fonts;
+  (Object.keys(FILES) as FontKey[]).forEach(k => { next[k] = create(d[k]) as FK; });
+  fonts = next;
+}
+
+/** Fetch the fonts shipped in /fonts once. Resolves false (and the writer uses its basic fonts) if they can't be loaded. */
+export function loadPdfFonts(base = ((import.meta as any).env?.BASE_URL || "/") + "fonts/"): Promise<boolean> {
+  if (fonts) return Promise.resolve(true);
+  if (!loading) {
+    loading = (async () => {
+      try {
+        const keys = Object.keys(FILES) as FontKey[];
+        const bytes = await Promise.all(keys.map(async k => {
+          const r = await fetch(base + FILES[k]);
+          if (!r.ok) throw new Error(`font ${FILES[k]}: HTTP ${r.status}`);
+          return new Uint8Array(await r.arrayBuffer());
+        }));
+        await setPdfFonts(Object.fromEntries(keys.map((k, i) => [k, bytes[i]])) as Record<FontKey, Uint8Array>);
+        return true;
+      } catch (e) { console.warn("PDF fonts unavailable, using basic fonts", e); return false; }
+      finally { loading = null; }
+    })();
+  }
+  return loading;
+}
+
+/* ---------------------------------------------------------------- text helpers */
+const DEV = /[ऀ-ॿ᳐-᳹‌‍꣠-ꣿ]/;
+const LAT = /[A-Za-z0-9À-ɏ₹]/;
+/* Split into runs of one script. Spaces, punctuation and signs join the run before them. */
+function scriptRuns(s: string) {
+  const out: { dev: boolean; text: string }[] = [];
+  let cur = null as boolean | null, buf = "";
+  for (const ch of s) {
+    const d: boolean = DEV.test(ch) ? true : LAT.test(ch) ? false : cur ?? false;
+    if (cur !== null && d !== cur) { out.push({ dev: cur, text: buf }); buf = ""; }
+    cur = d; buf += ch;
+  }
+  if (buf) out.push({ dev: cur ?? false, text: buf });
+  return out;
+}
+/* A character the font cannot draw becomes "?" rather than an empty box. */
+const drawable = (f: FK, text: string) => [...text].map(ch => (f.hasGlyphForCodePoint(ch.codePointAt(0)!) ? ch : "?")).join("");
+/* Text for the built-in fonts: Latin-1 only. */
+const basic = (s: string) => pdfSafe(s).replace(/₹/g, "Rs.").replace(/[^\u0000-ÿ]/g, "?");
+const fontFor = (dev: boolean, bold: boolean): FontKey => (dev ? (bold ? "devaBold" : "deva") : bold ? "sansBold" : "sans");
+
+/* Helvetica advance widths (per 1000 em) for printable ASCII — used when the embedded fonts are not loaded */
 const HW = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
+
 export function textWidth(s: string, size: number, font: Font = "F1") {
-  const t = pdfSafe(s);
-  if (font === "F3") return t.length * 0.6 * size;
+  if (font === "F3") return basic(s).length * 0.6 * size;
+  if (fonts) {
+    let w = 0;
+    for (const r of scriptRuns(pdfSafe(s))) {
+      const f = fonts[fontFor(r.dev, font === "F2")];
+      w += (f.layout(drawable(f, r.text)).advanceWidth * size) / f.unitsPerEm;
+    }
+    return w;
+  }
+  const t = basic(s);
   let w = 0; for (const ch of t) w += HW[ch.charCodeAt(0) - 32] ?? 556;
   return (w / 1000) * size * (font === "F2" ? 1.05 : 1);
 }
+const graphemes = (t: string): string[] => {
+  const Seg = (Intl as any).Segmenter;
+  return Seg ? Array.from(new Seg(undefined, { granularity: "grapheme" }).segment(t), (x: any) => x.segment as string) : Array.from(t);
+};
 export function fit(s: string, max: number, size: number, font: Font = "F1") {
   let t = pdfSafe(s);
   if (textWidth(t, size, font) <= max) return t;
-  while (t.length > 1 && textWidth(t + "...", size, font) > max) t = t.slice(0, -1);
-  return t + "...";
+  const g = graphemes(t);
+  while (g.length > 1 && textWidth(g.join("") + "...", size, font) > max) g.pop();
+  return g.join("") + "...";
 }
+
+/* ---------------------------------------------------------------- writer */
+const hex2 = (n: number) => n.toString(16).padStart(4, "0");
+const utf16 = (cps: number[]) => cps.map(cp => {
+  if (cp > 0xffff) { const u = cp - 0x10000; return hex2(0xd800 + (u >> 10)) + hex2(0xdc00 + (u & 1023)); }
+  return hex2(cp);
+}).join("");
+const enc = new TextEncoder();
+
+type Used = { key: FontKey; res: string; font: FK; subset: ReturnType<FK["createSubset"]>; uni: Map<number, number[]>; adv: Map<number, number> };
 
 export class Pdf {
   readonly width = W; readonly height = H;
   private pages: string[] = [];
   private cur: string[] = [];
+  private used = new Map<FontKey, Used>();
   constructor() { this.addPage(); }
   addPage() { if (this.cur.length || this.pages.length) this.pages.push(this.cur.join("\n")); this.cur = []; return this; }
+
+  private use(key: FontKey): Used {
+    let u = this.used.get(key);
+    if (!u) {
+      const font = fonts![key];
+      u = { key, res: "E" + (this.used.size + 1), font, subset: font.createSubset(), uni: new Map(), adv: new Map() };
+      this.used.set(key, u);
+    }
+    return u;
+  }
+
   /** y is measured from the TOP of the page (like the screen), in points */
   text(x: number, y: number, s: string, o: { size?: number; font?: Font; align?: "left" | "right" | "center"; gray?: number } = {}) {
     const size = o.size ?? 10, font = o.font ?? "F1";
     const w = o.align && o.align !== "left" ? textWidth(s, size, font) : 0;
     const x0 = o.align === "right" ? x - w : o.align === "center" ? x - w / 2 : x;
-    this.cur.push(`${o.gray !== undefined ? o.gray.toFixed(2) + " g " : ""}BT /${font} ${size} Tf ${x0.toFixed(2)} ${(H - y).toFixed(2)} Td ${hexText(s)} Tj ET${o.gray !== undefined ? " 0 g" : ""}`);
+    const by = H - y;
+    const gray = o.gray !== undefined ? o.gray.toFixed(2) + " g " : "";
+    const reset = o.gray !== undefined ? " 0 g" : "";
+    if (font === "F3" || !fonts) {
+      const t = basic(s);
+      const hex = "<" + [...t].map(ch => ch.charCodeAt(0).toString(16).padStart(2, "0")).join("") + ">";
+      this.cur.push(`${gray}BT /${font} ${size} Tf ${x0.toFixed(2)} ${by.toFixed(2)} Td ${hex} Tj ET${reset}`);
+      return this;
+    }
+    const ops: string[] = [];
+    let pen = 0;
+    for (const r of scriptRuns(pdfSafe(s))) {
+      const u = this.use(fontFor(r.dev, font === "F2"));
+      const run = u.font.layout(drawable(u.font, r.text));
+      const sc = size / u.font.unitsPerEm;
+      ops.push(`/${u.res} ${size} Tf`);
+      run.glyphs.forEach((g, i) => {
+        const p = run.positions[i];
+        const gid = u.subset.includeGlyph(g);
+        if (!u.uni.has(gid)) { u.uni.set(gid, g.codePoints || []); u.adv.set(gid, g.advanceWidth); }
+        ops.push(`1 0 0 1 ${(x0 + pen + p.xOffset * sc).toFixed(2)} ${(by + p.yOffset * sc).toFixed(2)} Tm <${hex2(gid)}> Tj`);
+        pen += p.xAdvance * sc;
+      });
+    }
+    this.cur.push(`${gray}BT ${ops.join(" ")} ET${reset}`);
     return this;
   }
   line(x1: number, y1: number, x2: number, y2: number, width = 0.5, gray = 0.75) {
@@ -59,28 +186,56 @@ export class Pdf {
 
   bytes(): Uint8Array {
     const pages = [...this.pages, this.cur.join("\n")];
-    const objs: string[] = [];
-    const add = (s: string) => { objs.push(s); return objs.length; };
+    const bodies: (string | { dict: string; data: Uint8Array })[] = [];
+    const add = (b: string | { dict: string; data: Uint8Array }) => { bodies.push(b); return bodies.length; };
     const catalog = add(""), pagesId = add("");
     const f1 = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
     const f2 = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
     const f3 = add("<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>");
+    const fontRes = [`/F1 ${f1} 0 R`, `/F2 ${f2} 0 R`, `/F3 ${f3} 0 R`];
+
+    for (const u of this.used.values()) {
+      const upem = u.font.unitsPerEm, k = (v: number) => Math.round((v * 1000) / upem);
+      const gids = [...u.adv.keys()].sort((a, b) => a - b);
+      const ttf = u.subset.encode();                       // after every glyph has been included
+      const file = add({ dict: `/Length1 ${ttf.length}`, data: ttf });
+      const base = `${TAG[u.key]}+${NAME[u.key]}`;
+      const bb = u.font.bbox;
+      const desc = add(`<< /Type /FontDescriptor /FontName /${base} /Flags 4 /FontBBox [${k(bb.minX)} ${k(bb.minY)} ${k(bb.maxX)} ${k(bb.maxY)}] /ItalicAngle 0 /Ascent ${k(u.font.ascent)} /Descent ${k(u.font.descent)} /CapHeight ${k(u.font.capHeight || u.font.ascent * 0.7)} /StemV ${u.key.endsWith("Bold") ? 140 : 80} /FontFile2 ${file} 0 R >>`);
+      const widths = gids.map(g => `${g} [${k(u.adv.get(g)!)}]`).join(" ");
+      const cid = add(`<< /Type /Font /Subtype /CIDFontType2 /BaseFont /${base} /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor ${desc} 0 R /CIDToGIDMap /Identity /DW 1000 /W [${widths}] >>`);
+      const entries = gids.filter(g => u.uni.get(g)?.length).map(g => `<${hex2(g)}> <${utf16(u.uni.get(g)!)}>`);
+      let cmap = "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n";
+      for (let i = 0; i < entries.length; i += 100) { const part = entries.slice(i, i + 100); cmap += `${part.length} beginbfchar\n${part.join("\n")}\nendbfchar\n`; }
+      cmap += "endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend";
+      const tou = add({ dict: "", data: enc.encode(cmap) });
+      const t0 = add(`<< /Type /Font /Subtype /Type0 /BaseFont /${base} /Encoding /Identity-H /DescendantFonts [${cid} 0 R] /ToUnicode ${tou} 0 R >>`);
+      fontRes.push(`/${u.res} ${t0} 0 R`);
+    }
+
     const kids: number[] = [];
     for (const content of pages) {
-      const c = add(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
-      kids.push(add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /Font << /F1 ${f1} 0 R /F2 ${f2} 0 R /F3 ${f3} 0 R >> >> /Contents ${c} 0 R >>`));
+      const c = add({ dict: "", data: enc.encode(content) });
+      kids.push(add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /Font << ${fontRes.join(" ")} >> >> /Contents ${c} 0 R >>`));
     }
-    objs[catalog - 1] = `<< /Type /Catalog /Pages ${pagesId} 0 R >>`;
-    objs[pagesId - 1] = `<< /Type /Pages /Kids [${kids.map(k => k + " 0 R").join(" ")}] /Count ${kids.length} >>`;
-    let out = "%PDF-1.4\n";
+    bodies[catalog - 1] = `<< /Type /Catalog /Pages ${pagesId} 0 R >>`;
+    bodies[pagesId - 1] = `<< /Type /Pages /Kids [${kids.map(x => x + " 0 R").join(" ")}] /Count ${kids.length} >>`;
+
+    const chunks: Uint8Array[] = []; let len = 0;
+    const put = (b: string | Uint8Array) => { const u8 = typeof b === "string" ? enc.encode(b) : b; chunks.push(u8); len += u8.length; };
+    put("%PDF-1.4\n");
     const offs: number[] = [];
-    objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
-    const xref = out.length;
-    out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, "0") + " 00000 n \n").join("");
-    out += `trailer\n<< /Size ${objs.length + 1} /Root ${catalog} 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
-    const b = new Uint8Array(out.length);
-    for (let i = 0; i < out.length; i++) b[i] = out.charCodeAt(i) & 0xff; // content is ASCII after pdfSafe
-    return b;
+    bodies.forEach((b, i) => {
+      offs.push(len);
+      if (typeof b === "string") put(`${i + 1} 0 obj\n${b}\nendobj\n`);
+      else { put(`${i + 1} 0 obj\n<< /Length ${b.data.length} ${b.dict} >>\nstream\n`); put(b.data); put("\nendstream\nendobj\n"); }
+    });
+    const xref = len;
+    put(`xref\n0 ${bodies.length + 1}\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, "0") + " 00000 n \n").join(""));
+    put(`trailer\n<< /Size ${bodies.length + 1} /Root ${catalog} 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+    const out = new Uint8Array(len); let p = 0;
+    for (const c of chunks) { out.set(c, p); p += c.length; }
+    return out;
   }
 }
 
@@ -99,3 +254,6 @@ export function downloadPdf(bytes: Uint8Array, name: string) {
   const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
+
+/** Tests only: forget the loaded fonts so the next document uses the basic fallback. */
+export async function resetPdfFontsForTest() { fonts = null; loading = null; }

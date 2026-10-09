@@ -15,6 +15,7 @@
     "dexie": "4.4.6",
     "dexie-react-hooks": "1.1.7",
     "fast-xml-parser": "5.11.2",
+    "fontkit": "2.0.4",
     "lucide-react": "1.52.0",
     "mathjs": "15.2.0",
     "qrcode-generator": "2.0.4",

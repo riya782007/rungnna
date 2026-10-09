@@ -1,9 +1,10 @@
+import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import { totals, fixLine, due, seriesOf, isSale, DEFAULT_SHOP, type Shop } from "../src/lib/billing";
 import { canMerge, mergeable, mergeLines, buildMerged, returnable, buildReturn, splittable } from "../src/lib/docs";
 import { eodReport } from "../src/lib/eod";
 import { statementRange, localDay, type Entry } from "../src/lib/ledger";
-import { Pdf, pdfSafe, fit, textWidth } from "../src/lib/pdf";
+import { Pdf, pdfSafe, fit, textWidth, setPdfFonts, resetPdfFontsForTest } from "../src/lib/pdf";
 import { isEstimate, maskNote } from "../src/lib/privacy";
 import type { Bill, BillLine, Receipt } from "../src/lib/db";
 
@@ -142,18 +143,47 @@ describe("party statement", () => {
 });
 
 describe("pdf", () => {
-  it("writes a valid PDF with a correct cross-reference table, and pages", () => {
-    const doc = new Pdf();
-    doc.text(40, 50, "Statement ₹1,200 — (RAVI)", { size: 12, font: "F2" }).line(40, 60, 500, 60);
-    doc.addPage().text(40, 50, "page two");
-    const s = new TextDecoder("latin1").decode(doc.bytes());
+  const fontDir = new URL("../public/fonts/", import.meta.url);
+  const rd = (f: string) => new Uint8Array(readFileSync(new URL(f, fontDir)));
+  const latin1 = (b: Uint8Array) => new TextDecoder("latin1").decode(b);
+
+  const checkStructure = (s: string) => {
     expect(s.startsWith("%PDF-1.4")).toBe(true); expect(s.trimEnd().endsWith("%%EOF")).toBe(true);
-    expect(s).toContain("/Count 2"); expect(s).toContain("<feff00530074006100740065006d0065006e0074002020b90031002c0032003000300020002d0020002800520041005600490029> Tj");
     const xref = Number(s.match(/startxref\n(\d+)/)![1]);
     expect(s.slice(xref, xref + 4)).toBe("xref");
     const offs = [...s.slice(xref).matchAll(/^(\d{10}) 00000 n $/gm)].map(m => Number(m[1]));
     offs.forEach((o, i) => expect(s.slice(o).startsWith(`${i + 1} 0 obj`)).toBe(true));
+  };
+
+  it("without the embedded fonts it still prints readable Latin text: no byte-order mark, Rs. for the rupee sign", () => {
+    const doc = new Pdf();
+    doc.text(40, 50, "Statement ₹1,200 — (RAVI)", { size: 12, font: "F2" }).line(40, 60, 500, 60);
+    doc.addPage().text(40, 50, "page two");
+    const s = latin1(doc.bytes());
+    checkStructure(s); expect(s).toContain("/Count 2");
+    expect(s.toLowerCase()).not.toContain("<feff");                 // the old writer put a UTF-16 byte-order mark in every line
+    const ascii = (t: string) => "<" + [...t].map(c => c.charCodeAt(0).toString(16).padStart(2, "0")).join("") + "> Tj";
+    expect(s).toContain(ascii("Statement Rs.1,200 - (RAVI)"));
   });
+
+  it("with the embedded fonts, ₹ and Hindi are real glyphs: fonts embedded, text recoverable, no byte-order mark", async () => {
+    await setPdfFonts({ sans: rd("NotoSans-Regular.subset.ttf"), sansBold: rd("NotoSans-Bold.subset.ttf"), deva: rd("NotoSansDevanagari-Regular.subset.ttf"), devaBold: rd("NotoSansDevanagari-Bold.subset.ttf") });
+    try {
+      const doc = new Pdf();
+      doc.text(40, 50, "Total ₹1,200 बाली कंगन", { size: 12 }).text(40, 80, "Heading", { size: 12, font: "F2" });
+      doc.addPage().text(40, 50, "page two");
+      const bytes = doc.bytes(); const s = latin1(bytes);
+      checkStructure(s); expect(s).toContain("/Count 2");
+      expect(s).toContain("/FontFile2"); expect(s).toContain("/CIDFontType2"); expect(s).toContain("/ToUnicode");
+      expect(s.toLowerCase()).not.toContain("<feff");
+      // the ToUnicode map must contain the rupee sign (U+20B9) and Devanagari BA (U+092C)
+      expect(s).toMatch(/<20b9>/i); expect(s).toMatch(/<092c>/i);
+      // Hindi is shaped, not drawn letter by letter: "कंगन" has 4 letters/signs but fewer or equal glyphs than code points
+      expect(textWidth("बाली", 12)).toBeGreaterThan(0); expect(textWidth("बाली", 12)).not.toBe(textWidth("????", 12));
+      expect(bytes.length).toBeLessThan(120_000);                         // subsetted, not whole fonts
+    } finally { await resetPdfFontsForTest(); }
+  });
+
   it("keeps text inside its column", () => {
     expect(pdfSafe("राम ₹5")).toBe("राम ₹5");
     const t = fit("A VERY LONG CUSTOMER NAME THAT WILL NOT FIT", 80, 9);
