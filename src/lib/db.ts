@@ -88,6 +88,9 @@ export interface Party extends Row {
   photo_id?: string; photo_url?: string;
   tier: "retail" | "wholesale" | "dealer"; credit_limit: number; notes: string;
   opening_balance?: number; // paise they owed before this system (+) or we owed them (−)
+  vendor_code?: string;     // supplier: short code / rate number from the vendor list (1, 3A, M1, 201 …)
+  less_pct?: number;        // supplier: usual discount, e.g. 5 for "5% less"
+  rate_divisor?: number;    // supplier: their printed rates are divided by this (e.g. 1.2); 1 = none
 }
 
 /* Money received from a customer outside a bill. Spread over their oldest dues automatically. */

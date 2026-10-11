@@ -1,8 +1,9 @@
-import { db, uid, setSetting, type Product, type Purchase } from "./db";
+import { db, uid, setSetting, type Product, type Purchase, type Party } from "./db";
 import { blankProduct, findByKey, saveProduct } from "./products";
 import { newPurchase, lineOf, finalizePurchase } from "./stockin";
 import { moneyInput } from "./pos";
 import { ownerOnly } from "./scope";
+import { vendorCost } from "./vendors";
 import { getRule, priceFromCost, type PricingRule } from "./pricing";
 
 export type PhotoRow = { item: string; style: string; color: string; unit: string; hsn: string; qty: string; cost: string; rate: string };
@@ -15,6 +16,10 @@ export function pricePhotoRows(rows: PhotoRow[], rule: PricingRule): PhotoRow[] 
       return { ...r, rate: (priceFromCost(cost, rule, 1, r.unit).rate / 100).toFixed(2) };
     } catch { return r; }
   });
+}
+/* Apply the supplier's terms (rate ÷ divisor, then less %) to every printed cost. Shown to the owner to review; call once. */
+export function applyVendorTerms(rows: PhotoRow[], v?: Pick<Party, "less_pct" | "rate_divisor">): PhotoRow[] {
+  return rows.map(r => ({ ...r, cost: vendorCost(r.cost, v) }));
 }
 export function validatePhotoRows(rows: PhotoRow[]) {
   if (!rows.length || rows.length > 300) throw new Error("Review 1–300 purchase lines");
