@@ -61,7 +61,7 @@ export default function Roles() {
     <div className="grid g2">{(["owner", ...BASES] as Staff["role"][]).map(b => <div key={b} className="card pad">
       <div className="row"><b className="grow" style={{ textTransform: "capitalize" }}>{b}</b>
         {b !== "owner" && <button className="btn sm" onClick={() => setDraft({ id: uid(), name: b[0].toUpperCase() + b.slice(1) + " (custom)", perms: [...BUILTIN[b]], base: b })}>Copy</button>}</div>
-      <div className="xs mut">{ROLE_NOTE[b]} · {b === "owner" ? "all" : BUILTIN[b].length} permissions · {staff.filter(s => s.role === b && !s.role_id).length} people</div>
+      <div className="xs mut">{ROLE_NOTE[b]} · {b === "owner" ? "all" : BUILTIN[b].length} permissions · {(n => `${n} ${n === 1 ? "person" : "people"}`)(staff.filter(s => s.role === b && !s.role_id).length)}</div>
     </div>)}</div>
     {me?.role !== "owner" && <div className="note warn sm" style={{ marginTop: 12 }}>Only the owner's own permissions can never be reduced.</div>}
   </div>;

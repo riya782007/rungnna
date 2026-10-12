@@ -195,8 +195,8 @@ export function WhoAreYou() {
   return (
     <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 16 }}>
       <div className="card" style={{ maxWidth: 440, width: "100%" }}>
-        <header style={{ background: "var(--ink)", color: "#fff", borderRadius: "14px 14px 0 0" }}>
-          <span className="mark">R</span><div><b className="disp" style={{ fontSize: 22 }}>Rungnna</b><div className="xs" style={{ opacity: .7 }}>Jewellery &amp; Co · Shop OS</div></div></header>
+        <header style={{ background: "linear-gradient(140deg,var(--emerald-dk),var(--emerald))", color: "#fff", borderRadius: "14px 14px 0 0" }}>
+          <span className="mark">R</span><div><b style={{ font: "700 26px/1 var(--display)", color: "var(--gold-l)" }}>Rungnna</b><div className="xs" style={{ opacity: .7 }}>Jewellery &amp; Co · Shop OS</div></div></header>
         <div className="pad stack">
           {!sync?.user && sync?.status !== "local" && (
             <details open={!sync?.user} className="stack">
