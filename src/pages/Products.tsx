@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, type Product } from "../lib/db";
 import { label, DEFAULT_TYPES, saveProduct } from "../lib/products";
-import { Head, Thumb, useLocations, locName, DeadToggle, ImageAssist } from "../components/common";
+import { Head, Thumb, useLocations, locName, DeadToggle, ImageAssist , MoneyInput } from "../components/common";
 import { WedgeInput } from "../components/Scanner";
 import { findByScan } from "../lib/products";
 import { go, toast } from "../lib/app";
@@ -121,9 +121,9 @@ function ProductDetail({ id }: { id: string }) {
               <input className="in" list={"pd-sizes-" + p.id} value={p.size || ""} onChange={e => set("size", e.target.value || undefined)} />
               <datalist id={"pd-sizes-" + p.id}>{(tax?.sizes || []).map(s => <option key={s} value={s} />)}</datalist></label>
             <div style={{ gridColumn: "1/-1" }}><DeadToggle value={p.tk} onChange={v => set("tk", v)} /></div>
-            <label className="f">Wholesale rate ₹<input className="in hi mono" inputMode="decimal" value={(p.wholesale_rate || p.rate) ? String((p.wholesale_rate || p.rate) / 100) : ""} onChange={e => { const v = toPaise(e.target.value); setP({ ...p, wholesale_rate: v, rate: v }); }} /></label>
-            <label className="f">Retail rate ₹<input className="in mono" inputMode="decimal" value={p.retail_rate ? String(p.retail_rate / 100) : ""} onChange={e => set("retail_rate", toPaise(e.target.value))} /></label>
-            <label className="f">MRP ₹<input className="in mono" inputMode="decimal" value={p.mrp ? String(p.mrp / 100) : ""} onChange={e => set("mrp", toPaise(e.target.value))} /></label>
+            <label className="f">Wholesale rate ₹<MoneyInput className="in hi mono" paise={p.wholesale_rate || p.rate} onPaise={v => setP({ ...p, wholesale_rate: v, rate: v })} /></label>
+            <label className="f">Retail rate ₹<MoneyInput className="in mono" paise={p.retail_rate || 0} onPaise={v => set("retail_rate", v)} /></label>
+            <label className="f">MRP ₹<MoneyInput className="in mono" paise={p.mrp} onPaise={v => set("mrp", v)} /></label>
             <label className="f">Pieces per packet<input className="in mono" inputMode="numeric" value={p.pack || ""} onChange={e => set("pack", parseInt(e.target.value.replace(/\D/g, "")) || undefined)} /></label>
             <label className="f">Item code (old software)<input className="in mono" inputMode="numeric" value={p.item_code || ""} onChange={e => set("item_code", e.target.value.replace(/\D/g, "") || undefined)} /></label>
             <label className="f">Vendor design code<input className="in mono" value={p.vendor_design_code || ""} onChange={e => set("vendor_design_code", e.target.value.toUpperCase() || undefined)} /></label>

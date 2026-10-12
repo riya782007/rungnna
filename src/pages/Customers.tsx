@@ -6,7 +6,7 @@ import { db, put, type Party, type Payment } from "../lib/db";
 import { newParty, waLink, normPhone, getShop, DEFAULT_SHOP, type Shop } from "../lib/billing";
 import { ledger, receive, balances, statementRange, rangeText, statementPdf, localDay, type Entry } from "../lib/ledger";
 import { sharePdf, downloadPdf, loadPdfFonts } from "../lib/pdf";
-import { Modal } from "../components/common";
+import { Modal , MoneyInput } from "../components/common";
 import { isSale } from "../lib/billing";
 import { go, toast, useApp } from "../lib/app";
 import { rupees, toPaise, when } from "../lib/format";
@@ -143,8 +143,8 @@ function PartyView({ id }: { id: string }) {
             <label className="f">GSTIN<input className="in mono" value={p.gstin} onChange={e => set("gstin", e.target.value.toUpperCase())} /></label>
             <label className="f">State<input className="in" value={p.state} onChange={e => set("state", e.target.value)} placeholder="Delhi" /></label>
             <label className="f">City<input className="in" value={p.city} onChange={e => set("city", e.target.value)} /></label>
-            <label className="f">Credit limit ₹<input className="in mono" inputMode="decimal" value={p.credit_limit ? p.credit_limit / 100 : ""} onChange={e => set("credit_limit", toPaise(e.target.value))} /></label>
-            <label className="f">Opening balance ₹ (old khata)<input className="in mono" inputMode="decimal" placeholder="0" value={p.opening_balance ? p.opening_balance / 100 : ""} onChange={e => { const neg = e.target.value.trim().startsWith("-"); set("opening_balance", (neg ? -1 : 1) * toPaise(e.target.value)); }} /></label>
+            <label className="f">Credit limit ₹<MoneyInput className="in mono" paise={p.credit_limit} onPaise={v => set("credit_limit", v)} /></label>
+            <label className="f">Opening balance ₹ (old khata)<MoneyInput signed className="in mono" placeholder="0" paise={p.opening_balance || 0} onPaise={v => set("opening_balance", v)} /></label>
           </div>
           <label className="f">Address<textarea className="in" rows={2} value={p.address} onChange={e => set("address", e.target.value)} /></label>
           <label className="f">Notes<textarea className="in" rows={2} value={p.notes} onChange={e => set("notes", e.target.value)} placeholder="Likes kundan sets, pays on Saturdays…" /></label>

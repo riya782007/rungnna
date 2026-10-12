@@ -6,7 +6,7 @@ import { db, getSetting, setSetting, recordMovement, type Product } from "../lib
 import { qrSvg } from "../lib/qr";
 import { ownPayload } from "../lib/parse";
 import { blankProduct, saveProduct, findByScan, distinct, DEFAULT_ITEMS, DEFAULT_TYPES, label, itemCodeFor } from "../lib/products";
-import { Head, LocationSelect, DeadToggle } from "../components/common";
+import { Head, LocationSelect, DeadToggle , MoneyInput } from "../components/common";
 import { WedgeInput } from "../components/Scanner";
 import { useApp, toast } from "../lib/app";
 import { can } from "../lib/roles";
@@ -14,7 +14,8 @@ import { inStore } from "../lib/scope";
 import { purchaseLabelJobs, productForLabel } from "../lib/purchase-labels";
 import { toPaise } from "../lib/format";
 import { getRule, priceFromCost, type PricingRule } from "../lib/pricing";
-import { buildTSPL, labelFromProduct, printTSPL, directPrintSupported, connectSerial, connectUSB, serialSupported, usbSupported } from "../lib/tsc";
+import { labelTSPL, labelRate } from "../lib/label-tspl";
+import { printTSPL, directPrintSupported, connectSerial, connectUSB, serialSupported, usbSupported } from "../lib/tsc";
 
 /* Label settings — every number is in millimetres so what you see is what the printer gets. */
 export type LabelCfg = {
@@ -165,15 +166,10 @@ export default function Labels({ args }: { args: string[] }) {
     try {
       validateLabelPrint(cfg, jobs);
       if (cfg.mode !== "roll" || cfg.cols !== 1) throw new Error("Direct TSC printing requires a single-column roll. Use browser printing for sheets or 2-up labels.");
+      // same words and arrangement as the on-screen sticker (lib/label-tspl), built before anything is sent
       const commands = jobs.map(j => {
         const product = productForLabel(j.p, j.qtyOnLabel);
-        const qr = ownPayload(product, cfg.format || "shop");
-        const lbl = labelFromProduct(product, {
-          qr, costCode: cfg.show.cost_code ? j.p.cost_code : undefined,
-          wmm: cfg.w, hmm: cfg.h, gapmm: cfg.gapY || 2, copies: j.copies,
-          offXmm: cfg.offX, offYmm: cfg.offY,
-        });
-        return buildTSPL(lbl);
+        return labelTSPL(cfg, product, j.qtyOnLabel, j.copies, ownPayload(product, cfg.format || "shop"));
       }).join("");
       await printTSPL(commands, prompt);
       toast(`Sent ${total} labels to the TSC printer`);
@@ -215,7 +211,7 @@ export default function Labels({ args }: { args: string[] }) {
                   <input className="in mono" inputMode="decimal" value={cost} placeholder="enter cost" onChange={e => applyCost(e.target.value)} /></label>}
                 </div></details>
                 <label className="f">RATE ₹ {can(me, "rates") && form.cost_code && <span className="xs mut">code {form.cost_code}</span>}
-                  <input className="in hi mono" inputMode="decimal" value={form.rate ? String(form.rate / 100) : ""} onChange={e => { set("rate", toPaise(e.target.value)); set("price_locked", 1); }} /></label>
+                  <MoneyInput className="in hi mono" paise={form.rate} onPaise={v => { set("rate", v); set("price_locked", 1); }} /></label>
                 <label className="f">QTY (pieces per packet — prints as ₹RATE X QTY PCS)<input className="in mono" inputMode="numeric" value={qty} onChange={e => setQty(e.target.value.replace(/\D/g, ""))} /></label>
                 <label className="f">PRINT QTY (labels)<input className="in mono" inputMode="numeric" value={copies} onChange={e => setCopies(e.target.value.replace(/\D/g, ""))}
                   onKeyDown={e => e.key === "Enter" && addJob()} /></label>
@@ -261,7 +257,7 @@ export function LabelView({ cfg, p, qtyOnLabel = 1 }: { cfg: LabelCfg; p: Produc
         {s.style && p.style && <div>{p.style}</div>}
         {s.color && p.color && <div>{p.color}</div>}
         {s.tk && p.tk && <div>TK {p.tk}</div>}
-        {s.rate && p.rate > 0 && <div style={{ fontWeight: 800, fontSize: fs * 1.35 + "pt" }}>₹{p.rate / 100}{s.qty ? `X${pp.pack}${p.type || "PCS"}` : ""}</div>}
+        {s.rate && p.rate > 0 && <div style={{ fontWeight: 800, fontSize: fs * 1.35 + "pt" }}>₹{labelRate(p.rate)}{s.qty ? `X${pp.pack}${p.type || "PCS"}` : ""}</div>}
         {s.cost_code && pp.cost_code && <div style={{ fontFamily: "monospace", fontWeight: 700, fontSize: fs * 0.95 + "pt" }}>{pp.cost_code}</div>}
         {s.code && <div style={{ fontFamily: "monospace", fontSize: fs * 0.8 + "pt" }}>{p.code}</div>}
       </div>
@@ -279,7 +275,7 @@ export function LabelView({ cfg, p, qtyOnLabel = 1 }: { cfg: LabelCfg; p: Produc
         {s.color && p.color && <div>{p.color}</div>}
         {s.tk && p.tk && <div>TK {p.tk}</div>}
         {s.qty && <div>{qtyOnLabel} {p.type || "PCS"}</div>}
-        {s.rate && p.rate > 0 && <div style={{ fontWeight: 800, fontSize: fs * 1.25 + "pt" }}>₹{p.rate / 100}</div>}
+        {s.rate && p.rate > 0 && <div style={{ fontWeight: 800, fontSize: fs * 1.25 + "pt" }}>₹{labelRate(p.rate)}</div>}
         {s.cost_code && pp.cost_code && <div style={{ fontFamily: "monospace", fontWeight: 700, fontSize: fs * 0.95 + "pt" }}>{pp.cost_code}</div>}
         {s.code && <div style={{ fontFamily: "monospace", fontSize: fs * 0.85 + "pt" }}>{p.code}</div>}
       </div>

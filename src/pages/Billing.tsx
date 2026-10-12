@@ -21,7 +21,7 @@ import { hostRemote } from "../lib/remote";
 import { qrSvg } from "../lib/qr";
 import { createPortal } from "react-dom";
 import { MicButton } from "../components/Voice";
-import { Modal, PhotoButton, Thumb } from "../components/common";
+import { Modal, PhotoButton, Thumb, MoneyInput } from "../components/common";
 import { PrintBill, type PrintFormat } from "../components/Invoice";
 import { resolveBillingScan, withBillNames } from "../lib/billing-products";
 
@@ -434,7 +434,7 @@ export default function Billing({ args }: { args: string[] }) {
                       <input className="cell r" style={{ width: 44 }} inputMode="numeric" value={l.pkts || ""} onChange={e => setLine(l.id, { pkts: parseInt(e.target.value) || 0 })} /><span className="xs mut">×{l.pack}</span></span> : <span className="mut">—</span>}</td>
                     <td className="r" data-l={l.type || "Quantity"}><input className="cell r" style={{ width: 56 }} inputMode="numeric" value={l.qty || ""} disabled={l.pack > 1 && l.pkts > 0}
                       onChange={e => setLine(l.id, { qty: parseInt(e.target.value) || 0, pkts: 0 })} /></td>
-                    <td className="r" data-l="Rate ₹"><input className="cell r" style={{ width: 70 }} inputMode="decimal" disabled={!can(me, "rates") && !!(l.product_id && pmap.get(l.product_id)?.rate)} value={l.rate ? l.rate / 100 : ""} onChange={e => setLine(l.id, { rate: toPaise(e.target.value) })} /></td>
+                    <td className="r" data-l="Rate ₹"><MoneyInput className="cell r" style={{ width: 70 }} disabled={!can(me, "rates") && !!(l.product_id && pmap.get(l.product_id)?.rate)} paise={l.rate} onPaise={v => setLine(l.id, { rate: v })} /></td>
                     <td className="r" data-l="Disc"><input className={"cell r" + (discError(l.disc) ? " bad" : "")} style={{ width: 54 }} placeholder="—" title={discError(l.disc) || "10% or ₹ amount"} value={l.disc} onChange={e => setLine(l.id, { disc: e.target.value })} /></td>
                     <td className="r mono b" data-l="Amount">{(l.amount / 100).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
                     <td data-l=""><button className="x" aria-label="Remove line" onClick={() => dropLine(l.id)}>✕</button></td>
@@ -458,14 +458,14 @@ export default function Billing({ args }: { args: string[] }) {
           <div className="sumrow"><span>Discount</span>
             <span className="row" style={{ gap: 4, flexWrap: "nowrap" }}>
               <input className="cell r" style={{ width: 48 }} placeholder="%" value={b.discount_pct || ""} onChange={e => set({ discount_pct: parseFloat(e.target.value) || 0 })} />
-              <input className="cell r" style={{ width: 72 }} placeholder="₹" disabled={!!b.discount_pct} value={b.discount_pct ? (t.discount / 100).toFixed(0) : b.discount ? b.discount / 100 : ""} onChange={e => set({ discount: toPaise(e.target.value) })} /></span></div>
-          <div className="sumrow"><span>Packing</span><input className="cell r" style={{ width: 80 }} value={b.packing ? b.packing / 100 : ""} onChange={e => set({ packing: toPaise(e.target.value) })} /></div>
+              {b.discount_pct ? <input className="cell r" style={{ width: 72 }} disabled value={(t.discount / 100).toFixed(2)} readOnly /> : <MoneyInput className="cell r" style={{ width: 72 }} placeholder="₹" paise={b.discount} onPaise={v => set({ discount: v })} />}</span></div>
+          <div className="sumrow"><span>Packing</span><MoneyInput className="cell r" style={{ width: 80 }} paise={b.packing} onPaise={v => set({ packing: v })} /></div>
           {b.bill_type === "gst" && <div className="sumrow"><span>GST{gstLabel(t)} <button className="linkbtn" onClick={() => set({ gst_mode: b.gst_mode === "exclusive" ? "inclusive" : "exclusive" })}>{b.gst_mode === "exclusive" ? "added" : "included"}</button></span><b className="mono">{rupees(t.gst)}</b></div>}
           {t.igst ? <div className="xs mut" style={{ textAlign: "right" }}>IGST (other state)</div> : t.gst ? <div className="xs mut" style={{ textAlign: "right" }}>CGST {rupees(t.cgst)} + SGST {rupees(t.sgst)}</div> : null}
           {t.adjust ? <div className="sumrow"><span>Round off</span><span className="mono">{rupees(t.adjust)}</span></div> : null}
           <div className="net"><span>{b.bill_type === "challan" ? "VALUE" : "NET"}</span><b>{rupees(t.net)}</b></div>
           {b.bill_type === "challan" ? <div className="note sm">A challan sends the goods out with no money taken. Convert it to an invoice from Bills when the customer is billed.</div> : <>
-          <div className="sumrow"><span>Advance</span><input ref={advanceRef} className="cell r" style={{ width: 80 }} value={b.advance ? b.advance / 100 : ""} onChange={e => set({ advance: toPaise(e.target.value) })} /></div>
+          <div className="sumrow"><span>Advance</span><MoneyInput inputRef={advanceRef} className="cell r" style={{ width: 80 }} paise={b.advance} onPaise={v => set({ advance: v })} /></div>
           <Payments pays={b.payments} left={t.net - b.advance} onChange={payments => set({ payments })} />
           <div className={"sumrow " + (balance > 0 ? "due" : "")}><span>{balance > 0 ? "Balance (credit)" : balance < 0 ? "Return to customer" : "Balance"}</span><b className="mono">{rupees(Math.abs(balance))}</b></div></>}
           <div className="row" style={{ gap: 6 }}>
@@ -514,7 +514,7 @@ function Payments({ pays, left, onChange }: { pays: Payment[]; left: number; onC
       {pays.map((p, i) => (
         <div key={i} className="sumrow"><span className="pill">{p.mode.toUpperCase()}</span>
           <span className="row" style={{ gap: 4, flexWrap: "nowrap" }}>
-            <input className="cell r" style={{ width: 90 }} value={p.amount / 100} onChange={e => onChange(pays.map((x, j) => j === i ? { ...x, amount: toPaise(e.target.value) } : x))} />
+            <MoneyInput className="cell r" style={{ width: 90 }} paise={p.amount} onPaise={v => onChange(pays.map((x, j) => j === i ? { ...x, amount: v } : x))} />
             <button className="x" onClick={() => onChange(pays.filter((_, j) => j !== i))}>✕</button></span></div>))}
       <div className="chips">{(["cash", "upi", "card", "bank"] as const).map(m => <button key={m} className="chip" onClick={() => add(m)} disabled={!rest}>+ {m.toUpperCase()}</button>)}</div>
     </div>
