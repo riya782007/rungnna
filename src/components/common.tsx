@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
+import React, { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, type Location, type Product } from "../lib/db";
 import { photoSrc, savePhoto } from "../lib/image";
@@ -213,4 +213,23 @@ function FlowModal({ product, onClose, onUploaded }: {
       </div>
     </Modal>
   );
+}
+
+/* Rupee box. Keeps exactly what is typed while the box is in use, so "12." → "12.5" works
+   (a plain box re-drawn from paise drops the dot and turns ₹12.50 into ₹125). Reports paise. */
+export function MoneyInput({ paise, onPaise, signed = false, ...rest }: { paise: number; onPaise: (paise: number) => void; signed?: boolean } &
+  Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange"> & { inputRef?: React.Ref<HTMLInputElement> }) {
+  const [text, setText] = useState<string | null>(null);
+  const { inputRef, onBlur, ...props } = rest as any;
+  const shown = text ?? (paise ? String(Math.round(paise) / 100) : "");
+  return <input {...props} ref={inputRef} inputMode="decimal" value={shown}
+    onChange={e => {
+      let v = e.target.value.replace(signed ? /[^\d.-]/g : /[^\d.]/g, "");
+      const neg = signed && v.startsWith("-"); v = v.replace(/-/g, "");
+      const [i, ...d] = v.split("."); v = d.length ? i + "." + d.join("").slice(0, 2) : i;   // one dot, two decimals
+      setText((neg ? "-" : "") + v);
+      const n = Number(v || "0");
+      onPaise(Number.isFinite(n) ? (neg ? -1 : 1) * Math.round(n * 100) : 0);
+    }}
+    onBlur={e => { setText(null); onBlur?.(e); }} />;
 }

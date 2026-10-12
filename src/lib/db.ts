@@ -31,6 +31,7 @@ export interface Product extends Row {
   collection?: string;
   material?: string;
   hsn?: string;
+  gst_rate?: number;       // % — only if this product is taxed differently from the shop rate (blank = shop rate)
   wholesale_rate?: number; // paise
   retail_rate?: number;    // paise
   /* --- product-master keying & pricing (spec: SKU/Model + Vendor) --- */
@@ -88,6 +89,9 @@ export interface Party extends Row {
   photo_id?: string; photo_url?: string;
   tier: "retail" | "wholesale" | "dealer"; credit_limit: number; notes: string;
   opening_balance?: number; // paise they owed before this system (+) or we owed them (−)
+  vendor_code?: string;     // supplier: short code / rate number from the vendor list (1, 3A, M1, 201 …)
+  less_pct?: number;        // supplier: usual discount, e.g. 5 for "5% less"
+  rate_divisor?: number;    // supplier: their printed rates are divided by this (e.g. 1.2); 1 = none
 }
 
 /* Money received from a customer outside a bill. Spread over their oldest dues automatically. */
@@ -99,6 +103,8 @@ export interface Receipt extends Row {
 
 export interface BillLine {
   hsn?: string;
+  gst_rate?: number;       // % override for this line; unset = the bill's rate
+  taxable?: number; tax?: number;  // set by totals() only when the bill mixes GST rates (paise)
   id: string; product_id?: string; code: string; item: string; type: string; style: string; color: string;
   box_no: number; pack: number; pkts: number; qty: number; rate: number; disc: string; amount: number;
   stock_done?: 1;          // these pieces already left the racks on another document (merged / challan / split)
@@ -112,8 +118,10 @@ export type BillStatus = "hold" | "final" | "void" | "converted" | "merged";
 export interface Bill extends Row {
   transport?: Transport;
   compliance?: Compliance;
+  oversold?: { product_id: string; item: string; qty: number }[];   // pieces sold beyond the recorded rack stock — recount these
   no: string; series: string; bill_type: BillType; status: BillStatus;
   party_id?: string; party_name: string; party_phone: string; party_gstin: string; party_state: string;
+  party_address?: string;  // snapshot of the buyer address at billing time (printed on tax invoices)
   price_level?: "wholesale" | "retail" | "dealer";
   salesman: string; box_count: number; total_qty: number;
   gross: number; discount: number; discount_pct: number; packing: number; adjust: number;
@@ -172,9 +180,23 @@ export interface Staff extends Row {
   auth_user_id?: string;
   name: string;
   role: "owner" | "manager" | "salesman" | "helper" | "packer" | "cashier";
+  role_id?: string;        // custom role from the Roles page (its permissions replace the built-in role's)
   phone: string;
   pin: string;             // 4-digit, hashed later when auth moves server-side
   active: 0 | 1;
+}
+
+/* A retailer on the dealer portal (registers online, the shop approves). PIN never leaves the server. */
+export interface Dealer extends Row {
+  phone: string; name: string; shop_name: string; city: string; gstin: string;
+  status: "pending" | "approved" | "blocked"; party_id?: string | null; note: string; created_at: string;
+}
+export type TradeOrderLine = { product_id: string; code: string; title: string; item: string; style: string; color: string; size?: string | null; pack: number; qty: number; rate: number; amount: number };
+/* An order a dealer placed on the portal. Priced by the server; becomes a bill in the shop app. */
+export interface TradeOrder extends Row {
+  no: string; dealer_id: string; dealer_name: string; dealer_phone: string; dealer_shop: string;
+  items: TradeOrderLine[]; total_qty: number; total: number; note: string;
+  status: "new" | "accepted" | "billed" | "cancelled"; bill_id?: string | null; bill_no: string; at: string;
 }
 
 export interface Setting { key: string; value: any; updated_at: string }
@@ -213,6 +235,8 @@ class RungnnaDB extends Dexie {
   store_transfers!: Table<StoreTransfer, string>;
   bank_lines!: Table<BankLine, string>;
   import_batches!: Table<ImportBatch, string>;
+  dealers!: Table<Dealer, string>;
+  trade_orders!: Table<TradeOrder, string>;
 
   constructor() {
     super("rungnna");
@@ -260,6 +284,8 @@ class RungnnaDB extends Dexie {
       locations: "id, &code, store_id, floor, updated_at",
       bills: "id, no, store_id, status, bill_type, party_id, at, updated_at, return_of, merged_into",
     });
+    // dealer (trade) portal: retailers who order online, and their orders
+    this.version(10).stores({ dealers: "id, phone, status, updated_at", trade_orders: "id, no, dealer_id, status, at, updated_at" });
   }
 }
 
@@ -273,16 +299,17 @@ export const uid = () =>
 
 export const now = () => new Date().toISOString();
 
+const memDevice = "D" + Math.random().toString(36).slice(2, 7).toUpperCase();   // only used if localStorage is blocked
 export function deviceId(): string {
   try {
     let d = localStorage.getItem("rj_device");
     if (!d) { d = "D" + Math.random().toString(36).slice(2, 7).toUpperCase(); localStorage.setItem("rj_device", d); }
     return d;
-  } catch { return "D-NOSTORE"; }
+  } catch { return memDevice; }
 }
 
 /* ---- write helpers: every write lands locally first, then queues for the cloud ---- */
-export type Syncable = "products" | "locations" | "movements" | "staff" | "parties" | "bills" | "voice_notes" | "config" | "receipts" | "purchases" | "purchase_returns" | "vouchers" | "fiscal_year_closes" | "stores" | "store_transfers" | "bank_lines" | "import_batches";
+export type Syncable = "products" | "locations" | "movements" | "staff" | "parties" | "bills" | "voice_notes" | "config" | "receipts" | "purchases" | "purchase_returns" | "vouchers" | "fiscal_year_closes" | "stores" | "store_transfers" | "bank_lines" | "import_batches" | "dealers" | "trade_orders";
 const STORE_TABLES = new Set(["locations", "movements", "staff", "bills", "receipts", "purchases", "purchase_returns", "vouchers", "bank_lines", "import_batches"]);
 
 export async function put<T extends Row>(table: Syncable, row: T) {

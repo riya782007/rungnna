@@ -4,7 +4,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, type Bill, type BillType, type Payment } from "../lib/db";
 import { GstBill } from "../components/GstBill";
 import { inStore } from "../lib/scope";
-import { due, getShop, voidBill, convertToGst, shareBill, billText, waLink, deleteEstimates, totals, isSale, docName, docShort, DEFAULT_SHOP, type Shop } from "../lib/billing";
+import { due, getShop, voidBill, convertToGst, shareBill, billText, waLink, deleteEstimates, totals, gstLabel, isSale, docName, docShort, DEFAULT_SHOP, type Shop } from "../lib/billing";
 import { canMerge, mergeable, mergeBills, mergeLines, splitBill, splittable, returnable, returnableBill, buildReturn, saveReturn } from "../lib/docs";
 import { usePrivate, visibleBill, lockNow, isEstimate } from "../lib/privacy";
 import { Icon } from "../components/Icon";
@@ -43,7 +43,7 @@ function BillList() {
   const sum = (f: (b: Bill) => number) => fin.reduce((a, b) => a + f(b), 0);
   const ests = list.filter(b => b.bill_type === "estimate");
   const cns = list.filter(b => b.status === "final" && b.bill_type === "return");
-  const manage = open && can(me, "void");
+  const manage = open && can(me, "estimates.delete");
   const canBill = can(me, "bill");
   const selected = bills.filter(b => sel.has(b.id));
   const selEsts = selected.filter(b => b.bill_type === "estimate");
@@ -111,7 +111,7 @@ function MergeDialog({ sources, onClose, onDone }: { sources: Bill[]; onClose: (
   useEffect(() => { getShop().then(setShop); }, []);
   const lines = useMemo(() => mergeLines(sources), [sources]);
   const preview = useMemo(() => totals({ ...sources[0], items: lines, bill_type: type, gst_rate: shop.gst_rate, gst_mode: shop.gst_mode, discount_pct: 0,
-    discount: sources.reduce((a, s) => a + totals(s, shop.state).discount, 0), packing: sources.reduce((a, s) => a + s.packing, 0) }, shop.state), [sources, lines, type, shop]);
+    discount: sources.reduce((a, s) => a + totals(s, shop.state, shop.gstin).discount, 0), packing: sources.reduce((a, s) => a + s.packing, 0) }, shop.state, shop.gstin), [sources, lines, type, shop]);
   const already = lines.filter(l => l.stock_done).reduce((a, l) => a + l.qty, 0);
   const challans = sources.every(s => s.bill_type === "challan");
   const run = async () => {
@@ -129,7 +129,7 @@ function MergeDialog({ sources, onClose, onDone }: { sources: Bill[]; onClose: (
         </div>
         <div className="row between sm"><span>{lines.length} lines (combined from {sources.reduce((a, s) => a + s.items.length, 0)})</span><b className="mono">{preview.total_qty} pcs</b></div>
         {preview.discount ? <div className="row between sm"><span>Discount carried over</span><span className="mono">−{rupees(preview.discount)}</span></div> : null}
-        {preview.gst ? <div className="row between sm"><span>GST {shop.gst_rate}%</span><span className="mono">{rupees(preview.gst)}</span></div> : null}
+        {preview.gst ? <div className="row between sm"><span>GST{gstLabel(preview)}</span><span className="mono">{rupees(preview.gst)}</span></div> : null}
         <div className="net"><span>NET</span><b>{rupees(preview.net)}</b></div>
         {preview.paid || sources.some(s => s.advance) ? <div className="xs mut">Payments and advances on the sources move to the new invoice.</div> : null}
         <div className="note sm">{already ? `${already} pieces already left the racks with the sources — they won't be taken off again. ` : ""}
@@ -209,11 +209,12 @@ function BillView({ id }: { id: string }) {
             <div className="pad stack">
               {b.status === "final" && b.bill_type === "estimate" && <button className="btn p" onClick={async () => {
                 if (!confirm("Make a GST invoice for this estimate? The estimate stays on record as 'converted'.")) return;
-                const g = await convertToGst(b, shop, me?.id || ""); toast("GST invoice " + g.no); go("bills/" + g.id);
+                try { const g = await convertToGst(b, shop, me?.id || ""); toast("GST invoice " + g.no); go("bills/" + g.id); }
+                catch (e: any) { toast(e.message || "Could not make the GST invoice", true); }
               }}>Convert to GST invoice</button>}
               {b.bill_type === "challan" && mergeable(b) && <button className="btn p" onClick={() => setConv(true)}>Convert challan to invoice</button>}
-              {returnableBill(b) && can(me, "bill") && <button className="btn" onClick={() => setRet(true)}>Sales return (credit note)</button>}
-              {splittable(b) && b.items.length > 1 && can(me, "bill") && <button className="btn" onClick={() => setSplit(true)}>Split — move lines to a new bill</button>}
+              {returnableBill(b) && can(me, "billing.returns") && <button className="btn" onClick={() => setRet(true)}>Sales return (credit note)</button>}
+              {splittable(b) && b.items.length > 1 && can(me, "billing.merge") && <button className="btn" onClick={() => setSplit(true)}>Split — move lines to a new bill</button>}
               {b.status === "final" && (boss ? <button className="btn bad" onClick={async () => {
                 const r = prompt(b.merged_from?.length ? "Reason for cancelling (the merged bills / challans come back as they were):" : "Reason for cancelling this bill (kept on record):"); if (!r) return;
                 await voidBill(b, r, me?.name || ""); toast(b.bill_type === "return" ? "Credit note cancelled — pieces taken off the racks again" : "Bill cancelled — pieces returned to their racks");
@@ -274,7 +275,7 @@ function ReturnDialog({ b, cns, shop, onClose }: { b: Bill; cns: Bill[]; shop: S
   const [refund, setRefund] = useState<"" | Payment["mode"]>("");
   const [busy, setBusy] = useState(false);
   const picks = b.items.map(l => ({ line_id: l.id, qty: parseInt(qty[l.id] || "") || 0 })).filter(p => p.qty > 0);
-  const cn = useMemo(() => totals(buildReturn(b, picks, left, shop, me?.id || ""), shop.state), [JSON.stringify(picks), left, shop]);
+  const cn = useMemo(() => totals(buildReturn(b, picks, left, shop, me?.id || ""), shop.state, shop.gstin), [JSON.stringify(picks), left, shop]);
   const owed = Math.max(0, due(b));
   return (
     <Modal title={`Sales return · ${b.no}`} onClose={onClose}>
@@ -296,7 +297,7 @@ function ReturnDialog({ b, cns, shop, onClose }: { b: Bill; cns: Bill[]; shop: S
           setBusy(true);
           try {
             const draft = buildReturn(b, picks, left, shop, me?.id || "");
-            const done = await saveReturn(draft, b, shop, refund ? { mode: refund, amount: totals(draft, shop.state).net } : undefined);
+            const done = await saveReturn(draft, b, shop, refund ? { mode: refund, amount: totals(draft, shop.state, shop.gstin).net } : undefined);
             toast(`Credit note ${done.no} · ${rupees(done.net)}`); onClose(); go("bills/" + done.id);
           } catch (e: any) { toast(e.message, true); setBusy(false); }
         }}>{busy ? "Saving…" : "Save credit note"}</button>

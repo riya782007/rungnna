@@ -1,3 +1,4 @@
+import { stateCode, GST_STATES } from "../lib/states";
 import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
@@ -5,8 +6,8 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, type Party, type Payment } from "../lib/db";
 import { newParty, waLink, normPhone, getShop, DEFAULT_SHOP, type Shop } from "../lib/billing";
 import { ledger, receive, balances, statementRange, rangeText, statementPdf, localDay, type Entry } from "../lib/ledger";
-import { sharePdf, downloadPdf } from "../lib/pdf";
-import { Modal } from "../components/common";
+import { sharePdf, downloadPdf, loadPdfFonts } from "../lib/pdf";
+import { Modal , MoneyInput } from "../components/common";
 import { isSale } from "../lib/billing";
 import { go, toast, useApp } from "../lib/app";
 import { rupees, toPaise, when } from "../lib/format";
@@ -141,10 +142,11 @@ function PartyView({ id }: { id: string }) {
             <label className="f">Type<select className="in" value={p.kind} onChange={e => set("kind", e.target.value)}><option value="customer">Customer</option><option value="dealer">Dealer</option><option value="supplier">Supplier</option></select></label>
             <label className="f">Price tier<select className="in" value={p.tier} onChange={e => set("tier", e.target.value)}><option value="retail">Retail</option><option value="wholesale">Wholesale</option><option value="dealer">Dealer</option></select></label>
             <label className="f">GSTIN<input className="in mono" value={p.gstin} onChange={e => set("gstin", e.target.value.toUpperCase())} /></label>
-            <label className="f">State<input className="in" value={p.state} onChange={e => set("state", e.target.value)} placeholder="Delhi" /></label>
+            <label className="f">State<input className={"in" + (p.state && !stateCode(p.state) ? " bad" : "")} list="gst-states" value={p.state} onChange={e => set("state", e.target.value)} placeholder="Delhi" title={p.state && !stateCode(p.state) ? "Not a recognised state — pick from the list so GST is right" : ""} />
+              <datalist id="gst-states">{Object.entries(GST_STATES).map(([c, n]) => <option key={c} value={n} />)}</datalist></label>
             <label className="f">City<input className="in" value={p.city} onChange={e => set("city", e.target.value)} /></label>
-            <label className="f">Credit limit ₹<input className="in mono" inputMode="decimal" value={p.credit_limit ? p.credit_limit / 100 : ""} onChange={e => set("credit_limit", toPaise(e.target.value))} /></label>
-            <label className="f">Opening balance ₹ (old khata)<input className="in mono" inputMode="decimal" placeholder="0" value={p.opening_balance ? p.opening_balance / 100 : ""} onChange={e => { const neg = e.target.value.trim().startsWith("-"); set("opening_balance", (neg ? -1 : 1) * toPaise(e.target.value)); }} /></label>
+            <label className="f">Credit limit ₹<MoneyInput className="in mono" paise={p.credit_limit} onPaise={v => set("credit_limit", v)} /></label>
+            <label className="f">Opening balance ₹ (old khata)<MoneyInput signed className="in mono" placeholder="0" paise={p.opening_balance || 0} onPaise={v => set("opening_balance", v)} /></label>
           </div>
           <label className="f">Address<textarea className="in" rows={2} value={p.address} onChange={e => set("address", e.target.value)} /></label>
           <label className="f">Notes<textarea className="in" rows={2} value={p.notes} onChange={e => set("notes", e.target.value)} placeholder="Likes kundan sets, pays on Saturdays…" /></label>
@@ -176,6 +178,7 @@ function ShareStatement({ party, entries, shop, onClose }: { party: Party; entri
   const fyStart = localDay(new Date(d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1, 3, 1).toISOString());
   const first = entries.find(e => e.kind !== "opening");
   const allStart = first ? localDay(first.at) : monthStart;
+  useEffect(() => { loadPdfFonts(); }, []);
   const [from, setFrom] = useState(fyStart);
   const [to, setTo] = useState(today);
   const presets: [string, string, string][] = [["This month", monthStart, today], ["Last month", lastStart, lastEnd], ["This year (FY)", fyStart, today], ["Everything", allStart < fyStart ? allStart : fyStart, today]];
@@ -197,14 +200,15 @@ function ShareStatement({ party, entries, shop, onClose }: { party: Party; entri
           <div className="row between sm"><span>Paid / credited</span><span className="mono" style={{ color: "var(--ok)" }}>{rupees(st.credit)}</span></div>
           <div className="net"><span>{st.closing >= 0 ? "BALANCE DUE" : "ADVANCE"}</span><b>{rupees(Math.abs(st.closing))}</b></div></>}
         <button className="btn p big" disabled={bad} onClick={async () => {
+          await loadPdfFonts();
           const r = await sharePdf(statementPdf(party, st, from, to, shop), name, text);
           if (r === "downloaded") toast("PDF saved — attach it in WhatsApp");
         }}><Icon n="wa" size={18} />Share PDF</button>
         <div className="row">
           {party.phone && <a className={"btn grow" + (bad ? " dis" : "")} target="_blank" rel="noreferrer" href={waLink(party.phone, text)}>WhatsApp text</a>}
-          <button className="btn grow" disabled={bad} onClick={() => downloadPdf(statementPdf(party, st, from, to, shop), name)}>Download PDF</button>
+          <button className="btn grow" disabled={bad} onClick={async () => { await loadPdfFonts(); downloadPdf(statementPdf(party, st, from, to, shop), name); }}>Download PDF</button>
         </div>
-        <div className="xs mut">On a phone, Share PDF opens WhatsApp with the file attached. Names in Hindi script print as “?” in the PDF; the WhatsApp text keeps them.</div>
+        <div className="xs mut">On a phone, Share PDF opens WhatsApp with the file attached.</div>
       </div>
     </Modal>
   );

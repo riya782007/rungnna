@@ -5,7 +5,7 @@ import { db, getSetting, setSetting } from "../lib/db";
 import { api, blobToB64 } from "../lib/ai";
 import { compress, savePhoto } from "../lib/image";
 import { getRule, type PricingRule } from "../lib/pricing";
-import { savePhotoPurchase, validatePhotoRows, pricePhotoRows, type PhotoRow } from "../lib/purchase-photo";
+import { savePhotoPurchase, validatePhotoRows, pricePhotoRows, applyVendorTerms, type PhotoRow } from "../lib/purchase-photo";
 import { currentStore } from "../lib/scope";
 import { go, toast } from "../lib/app";
 import { LocationSelect } from "./common";
@@ -55,6 +55,7 @@ export default function PurchasePhoto({ by }: { by: string }) {
       toast("Purchase saved · " + p.no); go("labels/purchase/" + p.id + "/print");
     } catch (e: any) { setError(e.message); } finally { lock.current = false; setBusy(false); }
   };
+  const vendor = suppliers.find(s => s.id === d.supplier);
   let total = "—", labelCount = 0, validation = "";
   try { const rows = validatePhotoRows(d.rows); total = (rows.reduce((n, r) => n + r.qty * r.cost, 0) / 100).toFixed(2); labelCount = rows.reduce((n, r) => n + r.qty, 0); if (labelCount > 5000) validation = "More than 5000 labels: split this purchase into smaller batches."; } catch (e: any) { validation = e.message; }
   return <section className="purchase-photo stack">
@@ -63,9 +64,9 @@ export default function PurchasePhoto({ by }: { by: string }) {
     <input ref={file} type="file" hidden accept="image/jpeg,image/png,image/webp" multiple onChange={e => { void read(Array.from(e.target.files || [])); e.target.value = ""; }} />
     {busy && <div role="status">Processing…</div>}
     {!!d.rows.length && <>
-      <div className="grid g3"><label className="f">Supplier<select className="in" value={d.supplier} onChange={e => set({ supplier: e.target.value })}><option value="">Select supplier</option>{suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label><label className="f">Supplier bill no.<input className="in" value={d.billNo} onChange={e => set({ billNo: e.target.value })} /></label><LocationSelect value={d.rack} onChange={rack => set({ rack })} buckets={false} /></div>
+      <div className="grid g3"><label className="f">Supplier<select className="in" value={d.supplier} onChange={e => set({ supplier: e.target.value })}><option value="">Select supplier</option>{suppliers.map(s => <option key={s.id} value={s.id}>{s.vendor_code ? s.vendor_code + " · " : ""}{s.name}</option>)}</select></label><label className="f">Supplier bill no.<input className="in" value={d.billNo} onChange={e => set({ billNo: e.target.value })} /></label><LocationSelect value={d.rack} onChange={rack => set({ rack })} buckets={false} /></div>
       <div className="tw"><table className="pos-t"><thead><tr>{[...Object.values(captions), ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>{d.rows.map((r, i) => <tr key={i}>{(Object.keys(blank()) as (keyof PhotoRow)[]).map(k => <td key={k} data-l={captions[k]}><input className="in" aria-label={`${k} line ${i + 1}`} value={r[k]} onChange={e => row(i, k, e.target.value)} style={{ minWidth: k === "item" || k === "style" ? 110 : 65 }} /></td>)}<td><button className="iconbtn" title="Remove line" aria-label="Remove line" onClick={() => set({ rows: d.rows.filter((_, k) => k !== i) })}><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>
-      <div className="row"><button className="btn" disabled={busy} onClick={price}>Apply shop pricing</button><span>Goods cost ₹{total}</span><label className="f">Supplier payable ₹<input className="in" inputMode="decimal" value={d.total} onChange={e => set({ total: e.target.value })} /></label></div>
+      <div className="row">{vendor && (!!vendor.less_pct || (vendor.rate_divisor || 1) !== 1) && <button className="btn" disabled={busy} title="Printed cost ÷ rate divisor, then less %. Press once." onClick={() => set({ rows: applyVendorTerms(d.rows, vendor) })}>Apply vendor terms{vendor.less_pct ? ` (${vendor.less_pct}% less)` : ""}{(vendor.rate_divisor || 1) !== 1 ? ` (÷${vendor.rate_divisor})` : ""}</button>}<button className="btn" disabled={busy} onClick={price}>Apply shop pricing</button><span>Goods cost ₹{total}</span><label className="f">Supplier payable ₹<input className="in" inputMode="decimal" value={d.total} onChange={e => set({ total: e.target.value })} /></label></div>
       {pricing && <div className="row sm"><span>Pricing: {pricing.margin.mode === "percent" ? `+${pricing.margin.percent}%` : `${pricing.margin.mode === "divide" ? "÷" : "×"}${pricing.margin.factor}`} · round ₹{pricing.margin.round_to} {pricing.margin.round_dir}</span><a href="#/settings">Pricing settings</a></div>}
       <div className="row"><b>{labelCount} labels</b><span>One label per PCS / PAIR / SET</span></div>
       {validation && <div className="note warn" role="status">{validation}</div>}

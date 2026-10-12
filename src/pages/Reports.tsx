@@ -67,8 +67,10 @@ export default function Reports() {
 
 function ReportTable({ rows }: { rows: ReportRow[] }) {
   const cols = [...new Set(rows.flatMap(r => Object.keys(r)))];
-  const val = (v: string | number) => typeof v === "number" && Math.abs(v) >= 1000 ? rupees(v) : v;
-  return <div className="card tw"><table><thead><tr>{cols.map(c => <th key={c} className={/(amount|sales|cost|value|gst|taxable|rate)$/i.test(c) ? "r" : ""}>{c.replace(/_/g, " ")}</th>)}</tr></thead>
-    <tbody>{rows.map((r, i) => <tr key={i}>{cols.map(c => <td key={c} className={typeof r[c] === "number" ? "r mono" : ""}>{val(r[c])}</td>)}</tr>)}
+  // money columns (paise) by name — counts and percentages stay plain numbers however big or small
+  const MONEY = /^(sales|amount|cost|rate|cost_value|rate_value|taxable|cgst|sgst|igst|gst|total|net|paid|due)$/i;
+  const val = (c: string, v: string | number) => typeof v === "number" && MONEY.test(c) ? rupees(v) : v;
+  return <div className="card tw"><table><thead><tr>{cols.map(c => <th key={c} className={/(amount|sales|cost|value|gst|taxable|rate|pct|invoices|credit_notes|qty)$/i.test(c) ? "r" : ""}>{c.replace(/_/g, " ")}</th>)}</tr></thead>
+    <tbody>{rows.map((r, i) => <tr key={i}>{cols.map(c => <td key={c} className={typeof r[c] === "number" ? "r mono" : ""}>{val(c, r[c])}</td>)}</tr>)}
       {!rows.length && <tr><td colSpan={Math.max(1, cols.length)} className="empty">No rows for this range.</td></tr>}</tbody></table></div>;
 }

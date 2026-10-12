@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { db, getSetting, setSetting, rebuildStock, now } from "./db";
 import { rfidDefaults } from "./rfid";
 import { ownerOnly } from "./scope";
+import { COLUMNS } from "./columns";
 
 /* Local-first sync.
    - Every save goes to IndexedDB + an outbox row, so the shop never waits on the internet.
@@ -9,7 +10,7 @@ import { ownerOnly } from "./scope";
    - Conflicts: last write wins by updated_at for master data; movements are append-only,
      so two phones recording at the same time can never overwrite each other. */
 
-const TABLES = ["stores", "config", "staff", "locations", "parties", "products", "movements", "bills", "receipts", "purchases", "purchase_returns", "vouchers", "fiscal_year_closes", "voice_notes", "store_transfers", "bank_lines", "import_batches"] as const;
+const TABLES = ["stores", "config", "staff", "locations", "parties", "products", "movements", "bills", "receipts", "purchases", "purchase_returns", "vouchers", "fiscal_year_closes", "voice_notes", "store_transfers", "bank_lines", "import_batches", "dealers", "trade_orders"] as const;
 const PHOTO_TABLES = ["products", "movements", "bills", "parties", "purchases"];
 type T = (typeof TABLES)[number];
 
@@ -102,29 +103,49 @@ async function uploadVoice(c: SupabaseClient) {
   }
 }
 
-const strip = (t: T, r0: any) => {
+/* Only columns the cloud table really has are sent: a field kept only on this device (a draft marker,
+   a newer app version's field) must never stop the whole shop's sync. */
+const missingTable = (e: { code?: string; message?: string }) => e.code === "PGRST205" || e.code === "42P01" || /could not find the table|does not exist/i.test(e.message || "");
+
+export const strip = (t: T, r0: any) => {
   const { photo_id, ...rest } = rfidDefaults(t, r0);
-  if (PHOTO_TABLES.includes(t)) return { ...rest, photo_id: photo_id || null };
-  return rest;
+  const row: any = PHOTO_TABLES.includes(t) ? { ...rest, photo_id: photo_id || null } : rest;
+  const cols = COLUMNS[t];
+  if (!cols) return row;
+  const out: any = {};
+  for (const k of cols) if (k in row && row[k] !== undefined) out[k] = row[k];
+  return out;
 };
 
 async function push(c: SupabaseClient) {
+  const skip = new Set<number>(); // rows the cloud refused this round: kept in the outbox, retried next sync
   for (;;) {
-    const batch = await db.outbox.orderBy("seq").limit(200).toArray();
+    const batch = (await db.outbox.orderBy("seq").limit(200 + skip.size).toArray()).filter(b => !skip.has(b.seq!)).slice(0, 200);
     if (!batch.length) break;
+    const done: number[] = [];
     for (const t of TABLES) {
       const items = batch.filter(b => b.table === t);
       if (!items.length) continue;
       const ids = [...new Set(items.map(i => i.row_id))];
       const rows = (await (db as any)[t].bulkGet(ids)).filter(Boolean).map((r: any) => strip(t, r));
-      if (rows.length) {
-        const { error } = await c.from(t).upsert(rows, { onConflict: "id" });
-        if (error) throw error;
+      let error = rows.length ? (await c.from(t).upsert(rows, { onConflict: "id" })).error : null;
+      if (error && /fetch|network|timeout|jwt|auth/i.test(error.message || "")) throw error; // offline / signed out: try everything later
+      if (!error) { done.push(...items.map(i => i.seq!)); continue; }
+      // one bad row must not hold back the rest: send them one by one and park only the refused ones
+      for (const r of rows) {
+        const e = (await c.from(t).upsert([r], { onConflict: "id" })).error;
+        const mine = items.filter(i => i.row_id === r.id);
+        if (!e) done.push(...mine.map(i => i.seq!));
+        else for (const i of mine) { skip.add(i.seq!); await db.outbox.update(i.seq!, { tries: (i.tries || 0) + 1, last_error: e.message }); }
       }
+      error = null;
     }
-    await db.outbox.bulkDelete(batch.map(b => b.seq!));
+    // outbox rows whose record no longer exists locally are done too
+    done.push(...batch.filter(b => !done.includes(b.seq!) && !skip.has(b.seq!)).map(b => b.seq!));
+    await db.outbox.bulkDelete(done);
     await pendingCount();
   }
+  if (skip.size) throw new Error(`${skip.size} change${skip.size > 1 ? "s" : ""} could not be saved to the cloud — see Settings › Sync`);
 }
 
 /* ---------- pull ---------- */
@@ -135,6 +156,7 @@ async function pull(c: SupabaseClient) {
     for (;;) {
       const since = new Date(new Date(cursor).getTime() - 5000).toISOString(); // small overlap: late commits are never skipped
       const { data, error } = await c.from(t).select("*").gt("updated_at", since).order("updated_at").limit(1000);
+      if (error && missingTable(error)) break;      // a newer feature whose cloud table isn't set up yet: skip it, sync the rest
       if (error) throw error;
       if (!data || !data.length) break;
       const table = (db as any)[t];

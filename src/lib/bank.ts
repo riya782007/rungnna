@@ -1,6 +1,6 @@
 import { db, put, now, uid, type BankLine, type Party } from "./db";
 import { num, txt } from "./importer";
-import { inStore, currentStore, ownerOnly } from "./scope";
+import { inStore, currentStore, requirePerm } from "./scope";
 import { saveVoucher } from "./vouchers";
 import { receive } from "./ledger";
 import { assertUnlocked } from "./finance";
@@ -46,7 +46,7 @@ export function parseBankRows(rows: unknown[][], mapping: BankMap, account: stri
   });
 }
 export async function importBank(lines: ReturnType<typeof parseBankRows>) {
-  ownerOnly();
+  requirePerm("bank.reconcile", "bank reconciliation");
   return db.transaction("rw", [db.bank_lines, db.outbox], async () => {
     let count = 0; const batch = uid();
     for (const l of lines) { if (await db.bank_lines.where("fingerprint").equals(l.fingerprint).count()) continue; await put("bank_lines", { ...l, id: uid(), batch, updated_at: now() }); count++; }
@@ -70,7 +70,7 @@ export function matchScore(line: BankLine, c: BankCandidate): number {
   return 10 + (3 - days) + (ref.length >= 6 && narration.includes(ref) ? 100 : 0) + (name.length >= 3 && narration.includes(name) ? 30 : 0);
 }
 export async function acceptMatch(id: string, key: string, manual = false) {
-  ownerOnly();
+  requirePerm("bank.reconcile", "bank reconciliation");
   return db.transaction("rw", [db.bank_lines, db.receipts, db.vouchers, db.bills, db.config, db.outbox], async () => {
     const l = await db.bank_lines.get(id); if (!l || !inStore(l) || l.match_key) throw new Error("Statement line already matched or unavailable");
     await assertUnlocked(l.date);
@@ -81,7 +81,7 @@ export async function acceptMatch(id: string, key: string, manual = false) {
   });
 }
 export async function voucherFromBank(id: string, type: "receipt" | "payment" | "expense", by: string, party?: Party, category = "other") {
-  ownerOnly();
+  requirePerm("bank.reconcile", "bank reconciliation");
   return db.transaction("rw", [db.bank_lines, db.vouchers, db.receipts, db.bills, db.config, db.settings, db.stores, db.outbox], async () => {
     const l = await db.bank_lines.get(id); if (!l || !inStore(l) || l.match_key) throw new Error("Statement line unavailable or reconciled");
     await assertUnlocked(l.date);

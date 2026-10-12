@@ -1,11 +1,13 @@
 import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db, put, type Party, type PurchaseReturnLine, type MoneyMode } from "../lib/db";
+import { db, put, now, type Party, type PurchaseReturnLine, type MoneyMode } from "../lib/db";
+import vendorText from "../data/vendors.txt?raw";
+import { parseVendorList, importVendors } from "../lib/vendors";
 import { newParty, getShop, waLink, DEFAULT_SHOP, type Shop } from "../lib/billing";
 import { supplierAging, supplierBalances, supplierLedger, savePurchaseReturn, supplierStatementText, supplierStatementPdf, type SupplierEntry } from "../lib/suppliers";
 import { saveVoucher } from "../lib/vouchers";
-import { sharePdf, downloadPdf } from "../lib/pdf";
+import { sharePdf, downloadPdf, loadPdfFonts } from "../lib/pdf";
 import { useApp, go, toast } from "../lib/app";
 import { can } from "../lib/roles";
 import { rupees, toPaise, when } from "../lib/format";
@@ -25,18 +27,19 @@ function SupplierList() {
   const [bal, setBal] = useState(new Map<string, number>());
   const [age, setAge] = useState(new Map<string, { d0_30: number; d31_60: number; d60: number; total: number }>());
   useEffect(() => { supplierBalances().then(setBal); supplierAging().then(setAge); }, [stamp, suppliers.length]);
-  const list = useMemo(() => suppliers.filter(p => !q || (p.name + " " + p.phone + " " + p.city).toLowerCase().includes(q.toLowerCase()))
-    .sort((a, z) => (bal.get(z.id) || 0) - (bal.get(a.id) || 0)), [suppliers, q, bal]);
+  const list = useMemo(() => suppliers.filter(p => !q || ((p.vendor_code || "") + " " + p.name + " " + p.phone + " " + p.city).toLowerCase().includes(q.toLowerCase()))
+    .sort((a, z) => (bal.get(z.id) || 0) - (bal.get(a.id) || 0) || (a.vendor_code || "").localeCompare(z.vendor_code || "", "en", { numeric: true })), [suppliers, q, bal]);
   const total = [...bal.values()].reduce((a, v) => a + Math.max(0, v), 0);
   return <div>
     <Head title="Suppliers" sub={`${suppliers.length} suppliers · ${rupees(total)} payable`}>
+      <button className="btn" onClick={async () => { if (!confirm(`Load the shop vendor list (${parseVendorList(vendorText).length} vendors)? Vendors already loaded are updated, not duplicated.`)) return; const r = await importVendors(parseVendorList(vendorText)); toast(`Vendor list loaded · ${r.added} new, ${r.updated} already there`); }}>Load vendor list</button>
       <button className="btn p" onClick={async () => { const n = prompt("Supplier name"); if (!n) return; const p = { ...newParty(n.toUpperCase()), kind: "supplier" as const }; await put("parties", p); go("suppliers/" + p.id); }}><Icon n="plus" size={18} />Add</button>
     </Head>
     <input className="in" style={{ marginBottom: 12 }} placeholder="Search supplier" value={q} onChange={e => setQ(e.target.value)} />
     <div className="list">{list.map(p => {
       const a = age.get(p.id), b = bal.get(p.id) || 0;
       return <a key={p.id} href={"#/suppliers/" + p.id}>
-        <span className="grow"><b className="sm">{p.name}</b><div className="xs mut">{p.city || "Supplier"}</div></span>
+        <span className="grow"><b className="sm">{p.vendor_code ? p.vendor_code + " · " : ""}{p.name}</b><div className="xs mut">{[p.city || "Supplier", p.less_pct ? p.less_pct + "% less" : "", p.rate_divisor && p.rate_divisor !== 1 ? "rate ÷ " + p.rate_divisor : ""].filter(Boolean).join(" · ")}</div></span>
         <span className="xs mut">0-30 {rupees(a?.d0_30 || 0)} · 31-60 {rupees(a?.d31_60 || 0)} · 60+ {rupees(a?.d60 || 0)}</span>
         <b className="mono" style={{ color: b > 0 ? "var(--bad)" : undefined }}>{rupees(Math.abs(b))}</b><Icon n="chev" size={16} />
       </a>;
@@ -53,7 +56,7 @@ function SupplierView({ id }: { id: string }) {
   const [ret, setRet] = useState(false);
   const [shop, setShop] = useState<Shop>(DEFAULT_SHOP);
   useEffect(() => { if (p0) supplierLedger(p0).then(setLed); }, [p0?.updated_at, purchases.length, pay, ret]);
-  useEffect(() => { getShop().then(setShop); }, []);
+  useEffect(() => { getShop().then(setShop); loadPdfFonts(); }, []);
   if (!p0) return <div className="skel" style={{ height: 200 }} />;
   const balance = led?.balance || 0;
   return <div>
@@ -61,6 +64,7 @@ function SupplierView({ id }: { id: string }) {
       <button className="btn p" onClick={() => setPay(true)}>Pay supplier</button>
       <button className="btn" onClick={() => setRet(true)}>Purchase return</button>
       <button className="btn g" onClick={async () => {
+        await loadPdfFonts();
         const bytes = supplierStatementPdf(p0, led?.entries || [], shop);
         const text = supplierStatementText(p0, led?.entries || [], balance, shop);
         const r = await sharePdf(bytes, `Supplier-${p0.name}.pdf`, text);
@@ -68,6 +72,7 @@ function SupplierView({ id }: { id: string }) {
       }}><Icon n="wa" size={18} />Share statement</button>
       {p0.phone && <a className="btn" target="_blank" rel="noreferrer" href={waLink(p0.phone, supplierStatementText(p0, led?.entries || [], balance, shop))}>WhatsApp text</a>}
     </Head>
+    <VendorTerms p={p0} />
     <div className="hero three">
       <div><span className="k">{balance >= 0 ? "Payable" : "Debit balance"}</span><b>{rupees(Math.abs(balance))}</b></div>
       <div><span className="k">Bills</span><b>{purchases.length}</b></div>
@@ -77,6 +82,18 @@ function SupplierView({ id }: { id: string }) {
       <tbody>{(led?.entries || []).slice().reverse().map((e, i) => <tr key={i}><td className="xs mut">{e.kind === "opening" ? "—" : new Date(e.at).toLocaleDateString("en-IN")}</td><td>{e.ref}<div className="xs mut">{e.note}</div></td><td className="r mono">{e.debit ? rupees(e.debit) : ""}</td><td className="r mono">{e.credit ? rupees(e.credit) : ""}</td><td className="r mono b">{rupees(e.balance)}</td></tr>)}</tbody></table></div>
     {pay && <PaySupplier p={p0} by={me?.id || ""} onClose={() => setPay(false)} />}
     {ret && <ReturnSupplier p={p0} by={me?.id || ""} onClose={() => setRet(false)} />}
+  </div>;
+}
+
+/* Vendor code and terms, used by Purchase bill photos: printed cost ÷ divisor, then less %. */
+function VendorTerms({ p }: { p: Party }) {
+  const [code, setCode] = useState(p.vendor_code || ""), [less, setLess] = useState(String(p.less_pct || 0)), [div, setDiv] = useState(String(p.rate_divisor || 1));
+  const l = Number(less), d = Number(div), bad = !(l >= 0 && l < 100) || !(d > 0);
+  return <div className="card row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+    <label className="f">Vendor code<input className="in" value={code} onChange={e => setCode(e.target.value.toUpperCase())} style={{ width: 90 }} /></label>
+    <label className="f">Less %<input className="in mono" inputMode="decimal" value={less} onChange={e => setLess(e.target.value)} style={{ width: 80 }} /></label>
+    <label className="f">Rate ÷<input className="in mono" inputMode="decimal" value={div} onChange={e => setDiv(e.target.value)} style={{ width: 80 }} /></label>
+    <button className="btn" disabled={bad} onClick={async () => { await put("parties", { ...p, vendor_code: code.trim(), less_pct: l, rate_divisor: d, updated_at: now() }); toast("Vendor terms saved"); }}>Save terms</button>
   </div>;
 }
 

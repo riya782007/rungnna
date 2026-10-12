@@ -8,7 +8,8 @@ import type { Pattern } from "../lib/parse";
 import { when } from "../lib/format";
 import { getShop, saveShop, counterCode, DEFAULT_SHOP, type Shop } from "../lib/billing";
 import { health, type Health } from "../lib/ai";
-import { can, ROLE_NOTE } from "../lib/roles";
+import { can, ROLE_NOTE, roleName } from "../lib/roles";
+import { RoleSelect } from "./Roles";
 import { getPrivate, setCode, lockNow, usePrivate } from "../lib/privacy";
 import { getRule, saveRule, validateKey, priceFromCost, DEFAULT_RULE, type PricingRule, type RoundTo } from "../lib/pricing";
 import { rupees, toPaise } from "../lib/format";
@@ -23,7 +24,7 @@ export default function Settings() {
   const { me, setMe } = useApp();
   const staff = useLiveQuery(() => db.staff.toArray(), [], []);
   const [sync, setSync] = useState<SyncState>();
-  const [nm, setNm] = useState(""); const [role, setRole] = useState<Staff["role"]>("salesman"); const [pin, setPin] = useState("");
+  const [nm, setNm] = useState(""); const [role, setRole] = useState<Staff["role"]>("salesman"); const [roleId, setRoleId] = useState(""); const [pin, setPin] = useState("");
   const [pats, setPats] = useState<Pattern[]>([]);
   const file = useRef<HTMLInputElement>(null);
   useEffect(() => onSync(setSync) as any, []);
@@ -37,7 +38,7 @@ export default function Settings() {
         <div className="stack">
           <div className="card pad stack">
             <div className="row"><span className="avatar" style={{ width: 44, height: 44, fontSize: 17 }}>{me?.name.slice(0, 1)}</span>
-              <span className="grow"><b>{me?.name}</b><div className="xs mut">{me?.role} · {me ? ROLE_NOTE[me.role] : ""}</div></span>
+              <span className="grow"><b>{me?.name}</b><div className="xs mut">{roleName(me)}{me?.role_id ? "" : " · " + (me ? ROLE_NOTE[me.role] : "")}</div></span>
               <button className="btn sm" onClick={() => setMe(null)}>Switch person</button></div>
             {me && <button className="btn sm" onClick={async () => {
               const p = prompt(me.pin ? "New 4-digit PIN (leave empty to remove)" : "Set a 4-digit PIN so nobody else can use your name") ?? null;
@@ -52,19 +53,19 @@ export default function Settings() {
             <div className="pad stack">
               <div className="sm mut">{sync?.pending || 0} changes waiting{sync?.last ? ` · last saved ${when(sync.last)}` : ""}</div>
               {sync?.error && <div className="note bad">{sync.error}</div>}
+              <StuckChanges />
               {sync?.user ? <div className="row"><span className="sm grow">Connected as <b>{sync.user}</b></span><button className="btn sm" onClick={() => syncNow()}>Sync now</button>{admin && <button className="btn sm" onClick={signOut}>Disconnect</button>}</div>
                 : <ShopLogin />}
             </div></div>
 
-          {boss && <div className="card"><header><h3>People</h3></header>
+          {boss && <div className="card"><header><h3>People</h3><span className="grow" /><a className="btn sm" href="#/roles">Roles &amp; permissions</a></header>
             <div className="list" style={{ border: 0, borderRadius: 0, boxShadow: "none" }}>
               {staff.filter(s => !s.deleted).map(s => (
                 <div key={s.id} className="li">
                   <span className="grow"><b className="sm">{s.name}</b>{me?.id === s.id && <span className="pill ok" style={{ marginLeft: 6 }}>you</span>}
-                    <div className="xs mut">{ROLE_NOTE[s.role]}{s.pin ? " · PIN set" : ""}{!s.active ? " · disabled" : ""}</div></span>
-                  <select className="in" style={{ width: 120, height: 34 }} value={s.role} disabled={s.id === me?.id}
-                    onChange={async e => { await put("staff", { ...s, role: e.target.value as Staff["role"] }); toast("Role changed"); }}>
-                    {ROLES.map(r => <option key={r}>{r}</option>)}</select>
+                    <div className="xs mut">{roleName(s)}{s.role_id ? "" : " · " + ROLE_NOTE[s.role]}{s.pin ? " · PIN set" : ""}{!s.active ? " · disabled" : ""}</div></span>
+                  <RoleSelect value={s} allowOwner={me?.role === "owner"} disabled={s.id === me?.id || (s.role === "owner" && me?.role !== "owner")}
+                    onChange={async v => { await put("staff", { ...s, ...v }); toast("Role changed"); }} />
                   <button className="btn sm" onClick={async () => { const n = prompt("Name", s.name); if (n) await put("staff", { ...s, name: n }); }}>Rename</button>
                   {s.id !== me?.id && <button className="btn sm" onClick={async () => { await put("staff", { ...s, active: s.active ? 0 : 1 }); }}>{s.active ? "Disable" : "Enable"}</button>}
                 </div>))}
@@ -72,10 +73,10 @@ export default function Settings() {
             <div className="pad stack" style={{ borderTop: "1px solid var(--line-2)" }}>
               <div className="grid g3">
                 <input className="in" placeholder="Name" value={nm} onChange={e => setNm(e.target.value)} />
-                <select className="in" value={role} onChange={e => setRole(e.target.value as any)}>{ROLES.map(r => <option key={r}>{r}</option>)}</select>
+                <RoleSelect value={{ role, role_id: roleId }} allowOwner={me?.role === "owner"} onChange={v => { setRole(v.role); setRoleId(v.role_id || ""); }} />
                 <input className="in mono" placeholder="PIN (optional)" inputMode="numeric" maxLength={4} value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, ""))} />
               </div>
-              <button className="btn" onClick={async () => { if (!nm.trim()) return; await put("staff", newStaff(nm.trim(), role, pin)); setNm(""); setPin(""); toast("Added"); }}>Add person</button>
+              <button className="btn" onClick={async () => { if (!nm.trim()) return; await put("staff", { ...newStaff(nm.trim(), role, pin), role_id: roleId }); setNm(""); setPin(""); toast("Added"); }}>Add person</button>
             </div></div>}
         </div>
         <div className="stack">
@@ -194,8 +195,8 @@ export function WhoAreYou() {
   return (
     <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 16 }}>
       <div className="card" style={{ maxWidth: 440, width: "100%" }}>
-        <header style={{ background: "var(--ink)", color: "#fff", borderRadius: "14px 14px 0 0" }}>
-          <span className="mark">R</span><div><b className="disp" style={{ fontSize: 22 }}>Rungnna</b><div className="xs" style={{ opacity: .7 }}>Jewellery &amp; Co · Shop OS</div></div></header>
+        <header style={{ background: "linear-gradient(140deg,var(--emerald-dk),var(--emerald))", color: "#fff", borderRadius: "14px 14px 0 0" }}>
+          <span className="mark">R</span><div><b style={{ font: "700 26px/1 var(--display)", color: "var(--gold-l)" }}>Rungnna</b><div className="xs" style={{ opacity: .7 }}>Jewellery &amp; Co · Shop OS</div></div></header>
         <div className="pad stack">
           {!sync?.user && sync?.status !== "local" && (
             <details open={!sync?.user} className="stack">
@@ -467,4 +468,12 @@ function PrivateCard() {
         </div>
       </div></div>
   );
+}
+
+/* Changes the cloud refused (kept safely on this device and retried every sync). Shown so nothing fails silently. */
+function StuckChanges() {
+  const rows = useLiveQuery(() => db.outbox.filter(o => !!o.last_error).limit(20).toArray(), [], []);
+  if (!rows.length) return null;
+  return <div className="note warn"><b>{rows.length} change{rows.length > 1 ? "s" : ""} not yet in the cloud</b>
+    {rows.map(r => <div key={r.seq} className="xs mono">{r.table} · {r.row_id.slice(0, 8)} · tried {r.tries}× · {r.last_error}</div>)}</div>;
 }

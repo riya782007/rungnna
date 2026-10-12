@@ -1,3 +1,4 @@
+import { placeCode } from "../lib/states";
 import { selectedBox, mergeBoxLine, type BillingDraft } from "../lib/billingBox";
 import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
@@ -9,7 +10,7 @@ import { db, put, getSetting, setSetting, type Bill, type BillLine, type Party, 
 import { findByScan, fillFromItemCode, label, readItemMap } from "../lib/products";
 import { NameItemCodes, unnamedCodes } from "../components/NameItemCodes";
 import { isRfidTag, normTag, soldBill, TagSet, Recent } from "../lib/rfid";
-import { newBill, lineFrom, totals, fixLine, finalize, holdBill, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
+import { discError, newBill, lineFrom, totals, gstLabel, fixLine, finalize, holdBill, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
 import { voiceBill } from "../lib/ai";
 import { useApp, toast, beep, go } from "../lib/app";
 import { can } from "../lib/roles";
@@ -21,7 +22,7 @@ import { hostRemote } from "../lib/remote";
 import { qrSvg } from "../lib/qr";
 import { createPortal } from "react-dom";
 import { MicButton } from "../components/Voice";
-import { Modal, PhotoButton, Thumb } from "../components/common";
+import { Modal, PhotoButton, Thumb, MoneyInput } from "../components/common";
 import { PrintBill, type PrintFormat } from "../components/Invoice";
 import { resolveBillingScan, withBillNames } from "../lib/billing-products";
 
@@ -101,6 +102,7 @@ export default function Billing({ args }: { args: string[] }) {
       const d = await getSetting<BillingDraft | null>("draft_bill", null);
       const restored = d && d.status === "hold" && !d.no && (d.bill_type !== "estimate" || isOpen()) ? d : null;
       setBox(restored ? selectedBox(restored) : 1);
+      if (restored) delete (restored as BillingDraft).selected_box;   // draft-only field: never saved onto the bill
       setB(restored || newBill(me?.id || "", s, "gst"));
     })();
   }, [args[0]]);
@@ -111,12 +113,12 @@ export default function Billing({ args }: { args: string[] }) {
   })(); }, [b?.bill_type]);
   useEffect(() => { b?.party_id ? partyDue(b.party_id).then(setDue0) : setDue0(0); }, [b?.party_id, priv]);
 
-  const t = useMemo(() => (b ? totals(withBillNames(b, products, readItemMap(itemNames?.value)), shop.state) : null), [b, shop.state, products, itemNames]);
+  const t = useMemo(() => (b ? totals(withBillNames(b, products, readItemMap(itemNames?.value)), shop.state, shop.gstin) : null), [b, shop.state, products, itemNames]);
   const [askCode, setAskCode] = useState(false);
   useEffect(() => {
     if (priv || !b || b.bill_type !== "estimate") return;
     // locked while an estimate was open: park it out of sight, continue with a GST invoice
-    (async () => { if (b.items.length) await holdBill(totals(b, shop.state)); await setSetting("draft_bill", null); setB(newBill(me?.id || "", shop, "gst")); setBox(1); })();
+    (async () => { if (b.items.length) await holdBill(totals(b, shop.state, shop.gstin)); await setSetting("draft_bill", null); setB(newBill(me?.id || "", shop, "gst")); setBox(1); })();
   }, [priv]);
   const press = useRef<any>(0);
   const hintProps = {
@@ -263,7 +265,7 @@ export default function Billing({ args }: { args: string[] }) {
     const offPct = list ? ((list - t.gross + t.discount) / list) * 100 : 0;
     if (offPct > (shop.max_disc ?? 10) + 0.01 && !can(me, "discount")) {
       const pin = prompt(`Discount is ${offPct.toFixed(1)}% — above the ${shop.max_disc ?? 10}% limit. Owner or manager PIN:`);
-      const ok = pin && (await db.staff.filter(x => (x.role === "owner" || x.role === "manager") && !!x.pin && x.pin === pin).count());
+      const ok = pin && (await db.staff.filter(x => !!x.active && !x.deleted && !!x.pin && x.pin === pin && can(x, "billing.discount_over")).count());
       if (!ok) return toast("Discount not approved", true);
     }
     if (b.bill_type === "gst" && !shop.gstin) toast("Tip: add the shop GSTIN in Settings → Shop profile", true);
@@ -272,6 +274,7 @@ export default function Billing({ args }: { args: string[] }) {
     const done = await finalize(t, shop.state, b.party_name);
     beep("saved");
     toast(`Saved ${done.no} · ${rupees(done.net)}`);
+    if (done.oversold?.length) toast("Stock short — recount: " + done.oversold.map(o => `${o.item} (${o.qty} more than recorded)`).join(", "), true);
     await setSetting("draft_bill", null);
     if (print) setPrinting({ bill: done, fmt });
     if (share) await shareBill(done, shop);
@@ -283,7 +286,7 @@ export default function Billing({ args }: { args: string[] }) {
   async function doHold() {
     if (savingRef.current) return;
     if (!b?.items.length) return toast("Nothing to hold", true);
-    await holdBill(totals(b, shop.state)); await setSetting("draft_bill", null);
+    await holdBill(totals(b, shop.state, shop.gstin)); await setSetting("draft_bill", null);
     toast("Bill on hold — F4 to bring it back"); setB(newBill(me?.id || "", shop, b.bill_type)); setBox(1);
   }
   async function doVoice(audio?: Blob, text?: string) {
@@ -333,7 +336,7 @@ export default function Billing({ args }: { args: string[] }) {
   const boxes = [...new Set([...t.items.map(l => l.box_no), box])].sort((a, z) => a - z);
   const balance = due(t);
   const lastScan = t.items.find(l => l.id === lastScanId);
-  const itemEditor = <Suspense fallback={<div className="pos-entry-loading" role="status">Loading items…</div>}><ManualItems key={b.id} inline persistent focusRequest={entryFocus} products={products} box={box} level={b.price_level || "wholesale"} canRates={can(me, "rates")} onClose={() => {}}
+  const itemEditor = <Suspense fallback={<div className="pos-entry-loading" role="status">Loading items…</div>}><ManualItems key={b.id} inline persistent focusRequest={entryFocus} products={products} box={box} level={b.price_level || "wholesale"} canRates={can(me, "billing.rates")} onClose={() => {}}
     onProduct={(p, count, pieces, rate) => {
       const line = fixLine({ ...lineFrom(p, box, pieces ? 0 : count, b.price_level || "wholesale"), ...(pieces ? { qty: count, pkts: 0 } : {}), rate });
       if (savingRef.current) throw new Error("Wait for the bill to finish saving");
@@ -369,7 +372,7 @@ export default function Billing({ args }: { args: string[] }) {
         </div> : <div className="row" style={{ gap: 8, flexWrap: "nowrap" }}>
           <div className="pos-title" {...hintProps}><b>{b.bill_type === "challan" ? "Delivery challan" : "Tax invoice"}</b><span className="xs mut">{b.bill_type === "challan" ? "goods out · no money" : b.gst_rate + "% GST"}</span></div>
           <div className="seg" role="group" aria-label="Document">
-            {me?.role === "owner" && <button title="Unlock private estimates" aria-label="Unlock private estimates" onClick={() => setAskCode(true)}><Icon n="lock" size={15} /></button>}
+            {can(me, "estimates.open") && <button title="Unlock private estimates" aria-label="Unlock private estimates" onClick={() => setAskCode(true)}><Icon n="lock" size={15} /></button>}
             <button aria-pressed={b.bill_type !== "challan"} onClick={() => set({ bill_type: "gst" })}>Invoice</button>
             <button aria-pressed={b.bill_type === "challan"} onClick={() => set({ bill_type: "challan" })} title="Send goods now, invoice later">Challan</button>
           </div></div>}
@@ -432,8 +435,8 @@ export default function Billing({ args }: { args: string[] }) {
                       <input className="cell r" style={{ width: 44 }} inputMode="numeric" value={l.pkts || ""} onChange={e => setLine(l.id, { pkts: parseInt(e.target.value) || 0 })} /><span className="xs mut">×{l.pack}</span></span> : <span className="mut">—</span>}</td>
                     <td className="r" data-l={l.type || "Quantity"}><input className="cell r" style={{ width: 56 }} inputMode="numeric" value={l.qty || ""} disabled={l.pack > 1 && l.pkts > 0}
                       onChange={e => setLine(l.id, { qty: parseInt(e.target.value) || 0, pkts: 0 })} /></td>
-                    <td className="r" data-l="Rate ₹"><input className="cell r" style={{ width: 70 }} inputMode="decimal" disabled={!can(me, "rates") && !!(l.product_id && pmap.get(l.product_id)?.rate)} value={l.rate ? l.rate / 100 : ""} onChange={e => setLine(l.id, { rate: toPaise(e.target.value) })} /></td>
-                    <td className="r" data-l="Disc"><input className="cell r" style={{ width: 54 }} placeholder="—" value={l.disc} onChange={e => setLine(l.id, { disc: e.target.value })} /></td>
+                    <td className="r" data-l="Rate ₹"><MoneyInput className="cell r" style={{ width: 70 }} disabled={!can(me, "billing.rates") && !!(l.product_id && pmap.get(l.product_id)?.rate)} paise={l.rate} onPaise={v => setLine(l.id, { rate: v })} /></td>
+                    <td className="r" data-l="Disc"><input className={"cell r" + (discError(l.disc) ? " bad" : "")} style={{ width: 54 }} placeholder="—" title={discError(l.disc) || "10% or ₹ amount"} value={l.disc} onChange={e => setLine(l.id, { disc: e.target.value })} /></td>
                     <td className="r mono b" data-l="Amount">{(l.amount / 100).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
                     <td data-l=""><button className="x" aria-label="Remove line" onClick={() => dropLine(l.id)}>✕</button></td>
                   </tr>))}
@@ -455,15 +458,16 @@ export default function Billing({ args }: { args: string[] }) {
           <div className="sumrow"><span>Gross</span><b className="mono">{rupees(t.gross)}</b></div>
           <div className="sumrow"><span>Discount</span>
             <span className="row" style={{ gap: 4, flexWrap: "nowrap" }}>
-              <input className="cell r" style={{ width: 48 }} placeholder="%" value={b.discount_pct || ""} onChange={e => set({ discount_pct: parseFloat(e.target.value) || 0 })} />
-              <input className="cell r" style={{ width: 72 }} placeholder="₹" disabled={!!b.discount_pct} value={b.discount_pct ? (t.discount / 100).toFixed(0) : b.discount ? b.discount / 100 : ""} onChange={e => set({ discount: toPaise(e.target.value) })} /></span></div>
-          <div className="sumrow"><span>Packing</span><input className="cell r" style={{ width: 80 }} value={b.packing ? b.packing / 100 : ""} onChange={e => set({ packing: toPaise(e.target.value) })} /></div>
-          {b.bill_type === "gst" && <div className="sumrow"><span>GST {b.gst_rate}% <button className="linkbtn" onClick={() => set({ gst_mode: b.gst_mode === "exclusive" ? "inclusive" : "exclusive" })}>{b.gst_mode === "exclusive" ? "added" : "included"}</button></span><b className="mono">{rupees(t.gst)}</b></div>}
+              <MoneyInput className={"cell r" + (b.discount_pct > 100 ? " bad" : "")} style={{ width: 48 }} placeholder="%" paise={Math.round((b.discount_pct || 0) * 100)} onPaise={v => set({ discount_pct: v / 100 })} />
+              {b.discount_pct ? <input className="cell r" style={{ width: 72 }} disabled value={(t.discount / 100).toFixed(2)} readOnly /> : <MoneyInput className="cell r" style={{ width: 72 }} placeholder="₹" paise={b.discount} onPaise={v => set({ discount: v })} />}</span></div>
+          <div className="sumrow"><span>Packing</span><MoneyInput className="cell r" style={{ width: 80 }} paise={b.packing} onPaise={v => set({ packing: v })} /></div>
+          {b.bill_type === "gst" && <div className="sumrow"><span>GST{gstLabel(t)} <button className="linkbtn" onClick={() => set({ gst_mode: b.gst_mode === "exclusive" ? "inclusive" : "exclusive" })}>{b.gst_mode === "exclusive" ? "added" : "included"}</button></span><b className="mono">{rupees(t.gst)}</b></div>}
+          {b.bill_type === "gst" && b.party_state && !placeCode(b.party_gstin, b.party_state) && <div className="xs" style={{ textAlign: "right", color: "var(--bad)" }}>Check buyer state “{b.party_state}” — not recognised, GST type may be wrong</div>}
           {t.igst ? <div className="xs mut" style={{ textAlign: "right" }}>IGST (other state)</div> : t.gst ? <div className="xs mut" style={{ textAlign: "right" }}>CGST {rupees(t.cgst)} + SGST {rupees(t.sgst)}</div> : null}
           {t.adjust ? <div className="sumrow"><span>Round off</span><span className="mono">{rupees(t.adjust)}</span></div> : null}
           <div className="net"><span>{b.bill_type === "challan" ? "VALUE" : "NET"}</span><b>{rupees(t.net)}</b></div>
           {b.bill_type === "challan" ? <div className="note sm">A challan sends the goods out with no money taken. Convert it to an invoice from Bills when the customer is billed.</div> : <>
-          <div className="sumrow"><span>Advance</span><input ref={advanceRef} className="cell r" style={{ width: 80 }} value={b.advance ? b.advance / 100 : ""} onChange={e => set({ advance: toPaise(e.target.value) })} /></div>
+          <div className="sumrow"><span>Advance</span><MoneyInput inputRef={advanceRef} className="cell r" style={{ width: 80 }} paise={b.advance} onPaise={v => set({ advance: v })} /></div>
           <Payments pays={b.payments} left={t.net - b.advance} onChange={payments => set({ payments })} />
           <div className={"sumrow " + (balance > 0 ? "due" : "")}><span>{balance > 0 ? "Balance (credit)" : balance < 0 ? "Return to customer" : "Balance"}</span><b className="mono">{rupees(Math.abs(balance))}</b></div></>}
           <div className="row" style={{ gap: 6 }}>
@@ -487,7 +491,7 @@ export default function Billing({ args }: { args: string[] }) {
       <Suspense fallback={<div className="toast" role="status">Loading billing tool…</div>}>
         {calculator && <PosCalculator lines={t.items} onClose={() => setCalculator(false)} onApply={(value, target: CalcTarget, id) => {
           if (value < 0) throw new Error("Billing amounts cannot be negative");
-          if (target === "rate") { const l = t.items.find(l => l.id === id); if (!l) throw new Error("Select an item"); if (!can(me, "rates") && l.product_id && pmap.get(l.product_id)?.rate) throw new Error("Owner approval is required to change this price"); setLine(id, { rate: value }); }
+          if (target === "rate") { const l = t.items.find(l => l.id === id); if (!l) throw new Error("Select an item"); if (!can(me, "billing.rates") && l.product_id && pmap.get(l.product_id)?.rate) throw new Error("Owner approval is required to change this price"); setLine(id, { rate: value }); }
           if (target === "packing") set({ packing: value });
           if (target === "discount") set({ discount: value, discount_pct: 0 });
         }} />}
@@ -512,7 +516,7 @@ function Payments({ pays, left, onChange }: { pays: Payment[]; left: number; onC
       {pays.map((p, i) => (
         <div key={i} className="sumrow"><span className="pill">{p.mode.toUpperCase()}</span>
           <span className="row" style={{ gap: 4, flexWrap: "nowrap" }}>
-            <input className="cell r" style={{ width: 90 }} value={p.amount / 100} onChange={e => onChange(pays.map((x, j) => j === i ? { ...x, amount: toPaise(e.target.value) } : x))} />
+            <MoneyInput className="cell r" style={{ width: 90 }} paise={p.amount} onPaise={v => onChange(pays.map((x, j) => j === i ? { ...x, amount: v } : x))} />
             <button className="x" onClick={() => onChange(pays.filter((_, j) => j !== i))}>✕</button></span></div>))}
       <div className="chips">{(["cash", "upi", "card", "bank"] as const).map(m => <button key={m} className="chip" onClick={() => add(m)} disabled={!rest}>+ {m.toUpperCase()}</button>)}</div>
     </div>
@@ -524,7 +528,7 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
   const [photo, setPhoto] = useState<string | undefined>();
   const parties = useLiveQuery(() => db.parties.filter(p => !p.deleted).toArray(), [], []);
   const list = useMemo(() => { const x = q.trim().toLowerCase(); return x ? parties.filter(p => (p.name + " " + p.phone + " " + p.city).toLowerCase().includes(x)).slice(0, 12) : parties.slice(0, 12); }, [q, parties]);
-  const pick = (p: Party) => onPick({ party_id: p.id, party_name: p.name, party_phone: p.phone, party_gstin: p.gstin, party_state: p.state, price_level: p.tier });
+  const pick = (p: Party) => onPick({ party_id: p.id, party_name: p.name, party_phone: p.phone, party_gstin: p.gstin, party_state: p.state, party_address: [p.address, p.city, p.pin].filter(Boolean).join(", "), price_level: p.tier });
   const create = async () => {
     const isPhone = /^\+?\d[\d\s]{7,}$/.test(q.trim());
     const name = isPhone ? prompt("Customer name") || "" : q.trim();
@@ -545,7 +549,7 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
         </div>
         <PhotoButton webcam value={photo} onChange={setPhoto} label="Customer photo" />
         <div className="row"><button className="btn p" onClick={create}>+ New customer “{q || "…"}”</button>
-          <button className="btn" onClick={() => onPick({ party_id: undefined, party_name: "", party_phone: "", party_gstin: "", party_state: "" })}>Walk-in / cash</button>
+          <button className="btn" onClick={() => onPick({ party_id: undefined, party_name: "", party_phone: "", party_gstin: "", party_state: "", party_address: "" })}>Walk-in / cash</button>
           <button className="btn" onClick={() => go("customers")}>Manage customers</button></div>
       </div>
     </Modal>

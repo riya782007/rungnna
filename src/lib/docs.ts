@@ -55,11 +55,11 @@ export function mergeLines(sources: Bill[]): BillLine[] {
 /* The new invoice (still unsaved): customer from the first source, lines combined, every payment and advance carried over. */
 export function buildMerged(sources: Bill[], type: BillType, shop: Shop, by: string): Bill {
   const first = [...sources].sort((a, z) => a.at.localeCompare(z.at))[0];
-  const tot = sources.map(s => totals(s, shop.state));
+  const tot = sources.map(s => totals(s, shop.state, shop.gstin));
   const b = newBill(by, shop, type);
   return {
     ...b,
-    party_id: first.party_id, party_name: first.party_name, party_phone: first.party_phone, party_gstin: first.party_gstin, party_state: first.party_state,
+    party_id: first.party_id, party_name: first.party_name, party_phone: first.party_phone, party_gstin: first.party_gstin, party_state: first.party_state, party_address: first.party_address,
     salesman: first.salesman, items: mergeLines(sources),
     discount: tot.reduce((a, t) => a + t.discount, 0), discount_pct: 0,
     packing: tot.reduce((a, t) => a + t.packing, 0),
@@ -103,20 +103,21 @@ export async function splitBill(b0: Bill, lineIds: string[], shop: Shop, by: str
   if (!staying.length) throw new Error("Leave at least one line on the original bill");
   const fresh = newBill(by, shop, b.bill_type);
   const base: Bill = { ...fresh, party_id: b.party_id, party_name: b.party_name, party_phone: b.party_phone, party_gstin: b.party_gstin,
-    party_state: b.party_state, salesman: b.salesman, gst_rate: b.gst_rate, gst_mode: b.gst_mode, remarks: "Split from " + (b.no || "held bill") };
+ party_address: b.party_address,
+    party_state: b.party_state, salesman: b.salesman, gst_rate: b.gst_rate, gst_mode: b.gst_mode, price_level: b.price_level, remarks: "Split from " + (b.no || "held bill") };
   const movingProducts = new Set(moving.map(l => l.product_id).filter(Boolean) as string[]);
   const pieces = await db.products.bulkGet([...movingProducts]);
   const tagSet = new Set(pieces.flatMap(p => p?.barcodes || []));
   const tagsMoving = (b.rfid_tags || []).filter(t => tagSet.has(t) && !staying.some(l => l.product_id && pieces.find(p => p?.id === l.product_id)?.barcodes.includes(t)));
 
   if (b.status === "hold") {
-    const split = totals({ ...base, items: moving.map(l => ({ ...l })), rfid_tags: tagsMoving }, shop.state);
-    const original = totals({ ...b, items: staying, rfid_tags: (b.rfid_tags || []).filter(t => !tagsMoving.includes(t)) }, shop.state);
+    const split = totals({ ...base, items: moving.map(l => ({ ...l })), rfid_tags: tagsMoving }, shop.state, shop.gstin);
+    const original = totals({ ...b, items: staying, rfid_tags: (b.rfid_tags || []).filter(t => !tagsMoving.includes(t)) }, shop.state, shop.gstin);
     await db.transaction("rw", [db.bills, db.outbox], async () => { await put("bills", split); await put("bills", original); });
     return { original, split };
   }
 
-  const original = totals({ ...b, items: staying, rfid_tags: (b.rfid_tags || []).filter(t => !tagsMoving.includes(t)) }, shop.state);
+  const original = totals({ ...b, items: staying, rfid_tags: (b.rfid_tags || []).filter(t => !tagsMoving.includes(t)) }, shop.state, shop.gstin);
   const draft: Bill = { ...base, items: moving.map(l => ({ ...l, stock_done: 1 as const })), rfid_tags: tagsMoving };
   const split = await finalize(draft, shop.state, b.party_name, async saved => {
     await put("bills", original);
@@ -161,7 +162,7 @@ export function buildReturn(bill: Bill, picks: { line_id: string; qty: number }[
   }
   const cn0: Bill = {
     ...newBill(by, shop, "return"),
-    party_id: bill.party_id, party_name: bill.party_name, party_phone: bill.party_phone, party_gstin: bill.party_gstin, party_state: bill.party_state,
+    party_id: bill.party_id, party_name: bill.party_name, party_phone: bill.party_phone, party_gstin: bill.party_gstin, party_state: bill.party_state, party_address: bill.party_address,
     salesman: bill.salesman, gst_rate: bill.gst_rate, gst_mode: bill.gst_mode, items,
     return_of: bill.id, return_of_no: bill.no, src_type: bill.bill_type, remarks: "Return against " + bill.no,
   };

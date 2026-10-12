@@ -1,5 +1,5 @@
 import { db, type Bill, type BillLine, type Product, type Voucher } from "./db";
-import { due, isReturn, isSale } from "./billing";
+import { due, isReturn, isSale, taxLines, getShop } from "./billing";
 import { localDay } from "./ledger";
 import { isEstimate, isOpen } from "./privacy";
 import { currentStore, inStore } from "./scope";
@@ -73,20 +73,22 @@ export async function reportData(r: Range) {
     const qty = stock.filter(c => c.product_id === p.id).reduce((a, c) => a + c.qty, 0);
     return { code: p.code, item: [p.item, p.style, p.color].filter(Boolean).join(" · "), qty, last_sale: last ? localDay(last) : "Never", days };
   }).filter(x => x.qty > 0 && x.days >= 90);
-  const gstr = saleBills.filter(b => b.bill_type === "gst").reduce((m, b) => {
-    const type = b.party_gstin ? "B2B" : "B2C";
-    for (const l of b.items) {
-      const p = l.product_id ? prod.get(l.product_id) : undefined;
-      const hsn = p?.hsn || "7117";
-      const k = type + "|" + hsn;
-      const row = m.get(k) || { type, hsn, taxable: 0, gst: 0, invoices: 0 };
-      row.taxable = Number(row.taxable) + l.amount;
-      row.gst = Number(row.gst) + Math.round(l.amount * b.gst_rate / (b.gst_mode === "inclusive" ? 100 + b.gst_rate : 100));
-      row.invoices = Number(row.invoices) + 1;
-      m.set(k, row);
+  /* GSTR-1 style HSN summary: taxable value and tax exactly as printed on each invoice (bill discount,
+     packing, inclusive rates and per-line GST rates included); credit notes against tax invoices are subtracted. */
+  const shopHsn = (await getShop()).hsn || "7117";
+  const gstr = new Map<string, { type: string; hsn: string; gst_pct: number; taxable: number; cgst: number; sgst: number; igst: number; gst: number; invoices: number; credit_notes: number }>();
+  const taxDocs = [...saleBills.filter(b => b.bill_type === "gst"), ...returnBills.filter(b => b.src_type === "gst")];
+  for (const b of taxDocs) {
+    const sign = b.bill_type === "return" ? -1 : 1, type = b.party_gstin ? "B2B" : "B2C", seen = new Set<string>();
+    for (const t of taxLines(b, shopHsn)) {
+      const k = type + "|" + t.hsn + "|" + t.rate;
+      const row = gstr.get(k) || { type, hsn: t.hsn, gst_pct: t.rate, taxable: 0, cgst: 0, sgst: 0, igst: 0, gst: 0, invoices: 0, credit_notes: 0 };
+      row.taxable += sign * t.taxable; row.cgst += sign * t.cgst; row.sgst += sign * t.sgst; row.igst += sign * t.igst;
+      row.gst = row.cgst + row.sgst + row.igst;
+      if (!seen.has(k)) { seen.add(k); if (sign > 0) row.invoices += 1; else row.credit_notes += 1; }
+      gstr.set(k, row);
     }
-    return m;
-  }, new Map<string, ReportRow>());
+  }
   return { byDay, byMonth, byHour, byItem, byParty, byArea, bySalesman, valuation, dead, pl, gstr: [...gstr.values()], supplierReturns: returnsRows, dues: saleBills.reduce((a, b) => a + Math.max(0, due(b)), 0) };
 }
 

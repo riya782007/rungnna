@@ -4,7 +4,7 @@ import { db, put, uid, now, deviceId, applyMovement, type ImportBatch, type Part
 import { parseCSV, findHeader, guessMap, txt, num, balancePaise, type Kind } from "./importer";
 import { blankProduct, normUnit } from "./products";
 import { newParty } from "./billing";
-import { currentStore, inStore, ownerOnly } from "./scope";
+import { currentStore, inStore, requirePerm } from "./scope";
 import { assertUnlocked } from "./finance";
 
 export type MigrationKind = Kind | "stock";
@@ -70,7 +70,7 @@ export async function migrationPreview(sheets: MappedSheet[]) {
   return { issues, added, updated };
 }
 export async function importMigration(sheets: MappedSheet[], filename: string, by: string) {
-  ownerOnly(); await assertUnlocked(now());
+  requirePerm("import.data", "importing data"); await assertUnlocked(now());
   return db.transaction("rw", [db.products, db.parties, db.locations, db.movements, db.stock, db.import_batches, db.config, db.outbox], async () => {
     const preview = await migrationPreview(sheets); if (preview.issues.length) throw new Error(preview.issues.join("; "));
     const batch: ImportBatch = { id: uid(), filename, at: now(), by_staff: by, store_id: currentStore(), updated_at: now(), changes: [] };
@@ -107,7 +107,7 @@ export async function importMigration(sheets: MappedSheet[], filename: string, b
   });
 }
 export async function undoMigration() {
-  ownerOnly();
+  requirePerm("import.data", "importing data");
   await assertUnlocked(now());
   return db.transaction("rw", [db.products, db.parties, db.locations, db.movements, db.stock, db.import_batches, db.config, db.bills, db.receipts, db.vouchers, db.purchases, db.outbox], async () => {
     const batch = (await db.import_batches.filter(b => inStore(b) && !b.deleted).sortBy("at")).slice(-1)[0]; if (!batch || batch.undone) throw new Error("No import to undo");

@@ -67,7 +67,7 @@ export function buildTSPL(l: TscLabel): string {
   // Encrypted cost code — printed bigger/bold at the bottom-left so the owner
   // reads it at a glance but it means nothing to a customer.
   if (l.costCode) {
-    cmds.push(`TEXT ${x},${mm(hMm) - lineH - oy},"3",0,1,1,${q(l.costCode)}`);
+    cmds.push(`TEXT ${x},${mm(hMm) - lineH + oy},"3",0,1,1,${q(l.costCode)}`);
   }
 
   cmds.push(`PRINT 1,${Math.max(1, l.copies)}`);
@@ -100,8 +100,9 @@ async function sendSerial(tspl: string, prompt: boolean): Promise<boolean> {
     serialPort = ports[0];
     if (!serialPort && !prompt) return false;
     if (!serialPort) serialPort = await nav.serial.requestPort();
-    if (!serialPort.readable) await serialPort.open({ baudRate: 9600 });
   }
+  // a printer that was switched off / unplugged comes back closed: reopen instead of failing
+  if (!serialPort.writable) { try { await serialPort.open({ baudRate: 9600 }); } catch (e: any) { if (!/already open/i.test(e?.message || "")) { serialPort = null; throw e; } } }
   const writer = serialPort.writable.getWriter();
   try { await writer.write(new TextEncoder().encode(tspl)); }
   finally { writer.releaseLock(); }

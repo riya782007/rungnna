@@ -4,7 +4,7 @@ import { db, now } from "../src/lib/db";
 import { newParty, newBill, DEFAULT_SHOP, totals } from "../src/lib/billing";
 import { savePhotoPurchase, validatePhotoRows, pricePhotoRows, type PhotoRow } from "../src/lib/purchase-photo";
 import { DEFAULT_RULE } from "../src/lib/pricing";
-import { MAIN_STORE, setScope } from "../src/lib/scope";
+import { MAIN_STORE, setScope, setScopePerms } from "../src/lib/scope";
 import { supplierLedger } from "../src/lib/suppliers";
 
 const row: PhotoRow = { item: "BALI", style: "K5209", color: "G", unit: "PAIR", hsn: "7117", qty: "4", cost: "25.50", rate: "100" };
@@ -61,8 +61,12 @@ describe("reviewed photo purchases", () => {
   it("does not guess missing prices or convert packaging quantities", () => {
     for (const patch of [{ item: "" }, { cost: "" }, { rate: "" }, { qty: "1.5" }, { unit: "DOZEN" }, { hsn: "bad" }]) expect(() => validatePhotoRows([{ ...row, ...patch }])).toThrow();
   });
-  it("restricts purchase-photo saves to owners", async () => {
-    setScope(MAIN_STORE, "salesman"); await expect(savePhotoPurchase([row], input)).rejects.toThrow("Owner only");
+  it("restricts purchase-photo saves to owners and roles granted it", async () => {
+    setScope(MAIN_STORE, "salesman"); setScopePerms(new Set());
+    await expect(savePhotoPurchase([row], input)).rejects.toThrow("doesn't allow");
+    setScopePerms(new Set(["purchases.photo"]));
+    await expect(savePhotoPurchase([row], input)).resolves.toMatchObject({ status: "final" });
+    setScopePerms(new Set());
   });
   it("preserves explicit bb box quantities through recalculation", () => {
     expect(totals({ ...newBill("o", DEFAULT_SHOP), box_count: 2 }).box_count).toBe(2);
