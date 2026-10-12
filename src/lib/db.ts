@@ -121,6 +121,7 @@ export interface Bill extends Row {
   oversold?: { product_id: string; item: string; qty: number }[];   // pieces sold beyond the recorded rack stock — recount these
   no: string; series: string; bill_type: BillType; status: BillStatus;
   party_id?: string; party_name: string; party_phone: string; party_gstin: string; party_state: string;
+  party_address?: string;  // snapshot of the buyer address at billing time (printed on tax invoices)
   price_level?: "wholesale" | "retail" | "dealer";
   salesman: string; box_count: number; total_qty: number;
   gross: number; discount: number; discount_pct: number; packing: number; adjust: number;

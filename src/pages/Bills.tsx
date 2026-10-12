@@ -209,7 +209,8 @@ function BillView({ id }: { id: string }) {
             <div className="pad stack">
               {b.status === "final" && b.bill_type === "estimate" && <button className="btn p" onClick={async () => {
                 if (!confirm("Make a GST invoice for this estimate? The estimate stays on record as 'converted'.")) return;
-                const g = await convertToGst(b, shop, me?.id || ""); toast("GST invoice " + g.no); go("bills/" + g.id);
+                try { const g = await convertToGst(b, shop, me?.id || ""); toast("GST invoice " + g.no); go("bills/" + g.id); }
+                catch (e: any) { toast(e.message || "Could not make the GST invoice", true); }
               }}>Convert to GST invoice</button>}
               {b.bill_type === "challan" && mergeable(b) && <button className="btn p" onClick={() => setConv(true)}>Convert challan to invoice</button>}
               {returnableBill(b) && can(me, "bill") && <button className="btn" onClick={() => setRet(true)}>Sales return (credit note)</button>}

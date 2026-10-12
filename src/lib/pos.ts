@@ -1,5 +1,5 @@
 import { uid, type BillLine } from "./db";
-import { fixLine } from "./billing";
+import { fixLine, discError } from "./billing";
 
 export function moneyInput(value: string): number {
   const clean = value.trim().replace(/,/g, "");
@@ -19,6 +19,8 @@ export function validatePosLines(lines: BillLine[]) {
   for (const l of lines) {
     if (!Number.isSafeInteger(l.qty) || l.qty <= 0) throw new Error("Enter a positive whole quantity for " + l.item);
     if (!Number.isSafeInteger(l.rate) || l.rate < 0 || !Number.isSafeInteger(l.amount) || l.amount < 0) throw new Error("Invalid amount for " + l.item);
+    const d = discError(l.disc); if (d) throw new Error(d + " (" + (l.item || l.style) + ")");
+    if (l.pack > 1 && l.pkts > 0 && l.qty !== l.pkts * l.pack) throw new Error("Packets and pieces disagree for " + l.item);
   }
 }
 

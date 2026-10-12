@@ -52,6 +52,7 @@ export default function Settings() {
             <div className="pad stack">
               <div className="sm mut">{sync?.pending || 0} changes waiting{sync?.last ? ` · last saved ${when(sync.last)}` : ""}</div>
               {sync?.error && <div className="note bad">{sync.error}</div>}
+              <StuckChanges />
               {sync?.user ? <div className="row"><span className="sm grow">Connected as <b>{sync.user}</b></span><button className="btn sm" onClick={() => syncNow()}>Sync now</button>{admin && <button className="btn sm" onClick={signOut}>Disconnect</button>}</div>
                 : <ShopLogin />}
             </div></div>
@@ -467,4 +468,12 @@ function PrivateCard() {
         </div>
       </div></div>
   );
+}
+
+/* Changes the cloud refused (kept safely on this device and retried every sync). Shown so nothing fails silently. */
+function StuckChanges() {
+  const rows = useLiveQuery(() => db.outbox.filter(o => !!o.last_error).limit(20).toArray(), [], []);
+  if (!rows.length) return null;
+  return <div className="note warn"><b>{rows.length} change{rows.length > 1 ? "s" : ""} not yet in the cloud</b>
+    {rows.map(r => <div key={r.seq} className="xs mono">{r.table} · {r.row_id.slice(0, 8)} · tried {r.tries}× · {r.last_error}</div>)}</div>;
 }

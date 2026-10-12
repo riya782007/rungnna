@@ -70,12 +70,23 @@ export async function duplicateNumbers(): Promise<{ no: string; ids: string[] }[
 }
 
 /* ---------------- maths (all paise) ---------------- */
+/** A line discount is blank, "10%" (0–100) or a rupee amount "25" / "25.50". Anything else is a typing mistake. */
+export const DISC_RE = /^(\d+(\.\d{1,2})?)\s*%?$/;
+export function discError(disc: string): string {
+  const d = (disc || "").trim();
+  if (!d) return "";
+  const m = d.match(DISC_RE);
+  if (!m) return "Discount must be a number like 10% or 25";
+  if (d.endsWith("%") && Number(m[1]) > 100) return "Discount cannot be more than 100%";
+  return "";
+}
 export function lineAmount(l: Pick<BillLine, "qty" | "rate" | "disc">) {
   const g = l.qty * l.rate;
   const d = (l.disc || "").trim();
-  if (!d) return g;
-  if (d.endsWith("%")) return Math.round(g - g * (parseFloat(d) || 0) / 100);
-  return Math.max(0, g - Math.round((parseFloat(d) || 0) * 100));
+  if (!d || discError(d)) return g;        // an invalid discount is never applied (save is blocked until it is fixed)
+  const n = parseFloat(d);
+  if (d.endsWith("%")) return Math.round(g - g * Math.min(100, n) / 100);
+  return Math.max(0, g - Math.round(n * 100));
 }
 export function fixLine(l: BillLine): BillLine {
   const qty = l.pack > 1 && l.pkts > 0 ? l.pkts * l.pack : l.qty;
@@ -98,10 +109,12 @@ export function totals(b: Bill, shopState = "", shopGstin = ""): Bill {
   const total_qty = items.reduce((a, l) => a + l.qty, 0);
   const box_count = Math.max(b.box_count || 0, new Set(items.map(l => l.box_no)).size);
   // a discount can never exceed the goods on the bill, so NET can't go negative
-  const discount = Math.min(gross, Math.max(0, b.discount_pct ? Math.round(gross * b.discount_pct / 100) : b.discount));
+  const pct = Number.isFinite(b.discount_pct) ? Math.min(100, Math.max(0, b.discount_pct)) : 0;
+  const discount = Math.min(gross, Math.max(0, pct ? Math.round(gross * pct / 100) : (Number.isFinite(b.discount) ? b.discount : 0)));
+  const packing = Number.isFinite(b.packing) ? Math.max(0, b.packing) : 0;
   // a credit note against a tax invoice reverses its GST; estimates, challans and their returns carry none
   const rate = b.bill_type === "gst" || (b.bill_type === "return" && b.src_type === "gst") ? b.gst_rate : 0;
-  let base = gross - discount + b.packing, gst = 0, lines = items;
+  let base = gross - discount + packing, gst = 0, lines = items;
   // lines taxed at a different rate than the bill (e.g. a 12% item on a 3% bill) are taxed line by line
   const mixed = !!rate && items.some(l => l.gst_rate != null && l.gst_rate !== rate);
   if (mixed) {
@@ -122,11 +135,55 @@ export function totals(b: Bill, shopState = "", shopGstin = ""): Bill {
     }
   }
   const inter = isInterState({ state: shopState, gstin: shopGstin }, b.party_state, b.party_gstin);
-  const igst = inter ? gst : 0, cgst = inter ? 0 : Math.floor(gst / 2), sgst = inter ? 0 : gst - Math.floor(gst / 2);
+  // CGST/SGST are split rate by rate, so every "CGST x%" row printed on the invoice adds up to the bill's total exactly
+  const groups = rateGroups(lines, mixed ? null : { rate, taxable: base, tax: gst }, rate);
+  const cgst = inter ? 0 : groups.reduce((a, g) => a + Math.floor(g.tax / 2), 0);
+  const sgst = inter ? 0 : gst - cgst, igst = inter ? gst : 0;
   const raw = base + gst;
   const net = Math.round(raw / 100) * 100;
-  const paid = b.bill_type === "challan" ? 0 : b.payments.filter(p => p.mode !== "credit").reduce((a, p) => a + p.amount, 0);
-  return { ...b, items: lines, gross, total_qty, box_count, discount, gst, cgst, sgst, igst, adjust: net - raw, net, paid };
+  const paid = b.bill_type === "challan" ? 0 : b.payments.filter(p => p.mode !== "credit").reduce((a, p) => a + (Number.isFinite(p.amount) ? p.amount : 0), 0);
+  return { ...b, items: lines, gross, total_qty, box_count, discount, discount_pct: pct, packing, gst, cgst, sgst, igst, adjust: net - raw, net, paid };
+}
+
+type RateGroup = { rate: number; taxable: number; tax: number };
+function rateGroups(lines: BillLine[], single: RateGroup | null, def: number): RateGroup[] {
+  if (single) return single.tax || single.rate ? [single] : [];
+  const m = new Map<number, RateGroup>();
+  for (const l of lines) {
+    const r = l.gst_rate ?? def, g = m.get(r) || { rate: r, taxable: 0, tax: 0 };
+    g.taxable += l.taxable || 0; g.tax += l.tax || 0; m.set(r, g);
+  }
+  return [...m.values()].sort((a, z) => a.rate - z.rate);
+}
+
+export type TaxRow = { rate: number; hsn: string; taxable: number; cgst: number; sgst: number; igst: number };
+/** The tax on a saved/computed bill, line by line, so it can be summarised by rate (invoice) or by HSN (GSTR-1).
+    Line values always add back to the bill's own taxable value and CGST/SGST/IGST. */
+export function taxLines(b: Bill, shopHsn = "7117"): TaxRow[] {
+  if (!b.gst || !b.items.length) return [];
+  const mixed = b.items.every(l => l.tax != null && l.taxable != null);
+  const amounts = b.items.map(l => l.amount);
+  const taxable = mixed ? b.items.map(l => l.taxable!) : allocate(b.net - b.adjust - b.gst, amounts);
+  const tax = mixed ? b.items.map(l => l.tax!) : allocate(b.gst, amounts);
+  const rows = b.items.map((l, i) => ({ rate: mixed ? l.gst_rate ?? b.gst_rate : b.gst_rate, hsn: (l.hsn || shopHsn || "").trim(), taxable: taxable[i], cgst: 0, sgst: 0, igst: 0 }));
+  // split each rate's tax the same way totals() did, then spread it over that rate's lines
+  for (const r of [...new Set(rows.map(x => x.rate))]) {
+    const idx = rows.map((x, i) => (x.rate === r ? i : -1)).filter(i => i >= 0);
+    const t = idx.reduce((a, i) => a + tax[i], 0), w = idx.map(i => tax[i] || 1);
+    const parts = b.igst ? { igst: t, cgst: 0, sgst: 0 } : { igst: 0, cgst: Math.floor(t / 2), sgst: t - Math.floor(t / 2) };
+    (["cgst", "sgst", "igst"] as const).forEach(k => allocate(parts[k], w).forEach((v, j) => { rows[idx[j]][k] = v; }));
+  }
+  return rows;
+}
+/** Rows summed by a key: rate ("3") for the invoice, or HSN+rate for the HSN summary. */
+export function taxSummary(b: Bill, by: "rate" | "hsn", shopHsn = "7117"): TaxRow[] {
+  const m = new Map<string, TaxRow>();
+  for (const r of taxLines(b, shopHsn)) {
+    const k = by === "rate" ? String(r.rate) : r.hsn + "|" + r.rate;
+    const g = m.get(k) || { ...r, taxable: 0, cgst: 0, sgst: 0, igst: 0 };
+    g.taxable += r.taxable; g.cgst += r.cgst; g.sgst += r.sgst; g.igst += r.igst; m.set(k, g);
+  }
+  return [...m.values()].sort((a, z) => a.rate - z.rate || a.hsn.localeCompare(z.hsn));
 }
 export const due = (b: Pick<Bill, "net" | "advance" | "paid"> & { bill_type?: BillType }) =>
   b.bill_type === "challan" ? 0 : b.net - b.advance - b.paid;   // a challan asks for no money
@@ -259,9 +316,10 @@ export async function voidBill(b: Bill, reason: string, by: string) {
 export async function convertToGst(est: Bill, shop: Shop, by: string): Promise<Bill> {
   const g: Bill = { ...est, id: uid(), no: "", series: "", bill_type: "gst", status: "hold", gst_rate: shop.gst_rate, gst_mode: shop.gst_mode,
     converted_from: est.id, by_staff: by, at: now(), payments: est.payments };
-  const done = await finalize(g, shop.state);
-  await put("bills", { ...est, status: "converted", converted_to: done.id });
-  return done;
+  const fresh = await db.bills.get(est.id);
+  if (!fresh || fresh.status !== "final" || fresh.converted_to) throw new Error("This estimate was already converted or changed — reopen it");
+  // the estimate is marked converted inside the same save, so a crash can never leave both live
+  return finalize(g, shop.state, est.party_name, async done => { await put("bills", { ...fresh, status: "converted", converted_to: done.id }); });
 }
 
 /* ---------------- customers ---------------- */

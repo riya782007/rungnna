@@ -9,7 +9,7 @@ import { db, put, getSetting, setSetting, type Bill, type BillLine, type Party, 
 import { findByScan, fillFromItemCode, label, readItemMap } from "../lib/products";
 import { NameItemCodes, unnamedCodes } from "../components/NameItemCodes";
 import { isRfidTag, normTag, soldBill, TagSet, Recent } from "../lib/rfid";
-import { newBill, lineFrom, totals, gstLabel, fixLine, finalize, holdBill, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
+import { discError, newBill, lineFrom, totals, gstLabel, fixLine, finalize, holdBill, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
 import { voiceBill } from "../lib/ai";
 import { useApp, toast, beep, go } from "../lib/app";
 import { can } from "../lib/roles";
@@ -101,6 +101,7 @@ export default function Billing({ args }: { args: string[] }) {
       const d = await getSetting<BillingDraft | null>("draft_bill", null);
       const restored = d && d.status === "hold" && !d.no && (d.bill_type !== "estimate" || isOpen()) ? d : null;
       setBox(restored ? selectedBox(restored) : 1);
+      if (restored) delete (restored as BillingDraft).selected_box;   // draft-only field: never saved onto the bill
       setB(restored || newBill(me?.id || "", s, "gst"));
     })();
   }, [args[0]]);
@@ -434,7 +435,7 @@ export default function Billing({ args }: { args: string[] }) {
                     <td className="r" data-l={l.type || "Quantity"}><input className="cell r" style={{ width: 56 }} inputMode="numeric" value={l.qty || ""} disabled={l.pack > 1 && l.pkts > 0}
                       onChange={e => setLine(l.id, { qty: parseInt(e.target.value) || 0, pkts: 0 })} /></td>
                     <td className="r" data-l="Rate ₹"><input className="cell r" style={{ width: 70 }} inputMode="decimal" disabled={!can(me, "rates") && !!(l.product_id && pmap.get(l.product_id)?.rate)} value={l.rate ? l.rate / 100 : ""} onChange={e => setLine(l.id, { rate: toPaise(e.target.value) })} /></td>
-                    <td className="r" data-l="Disc"><input className="cell r" style={{ width: 54 }} placeholder="—" value={l.disc} onChange={e => setLine(l.id, { disc: e.target.value })} /></td>
+                    <td className="r" data-l="Disc"><input className={"cell r" + (discError(l.disc) ? " bad" : "")} style={{ width: 54 }} placeholder="—" title={discError(l.disc) || "10% or ₹ amount"} value={l.disc} onChange={e => setLine(l.id, { disc: e.target.value })} /></td>
                     <td className="r mono b" data-l="Amount">{(l.amount / 100).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
                     <td data-l=""><button className="x" aria-label="Remove line" onClick={() => dropLine(l.id)}>✕</button></td>
                   </tr>))}
@@ -525,7 +526,7 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
   const [photo, setPhoto] = useState<string | undefined>();
   const parties = useLiveQuery(() => db.parties.filter(p => !p.deleted).toArray(), [], []);
   const list = useMemo(() => { const x = q.trim().toLowerCase(); return x ? parties.filter(p => (p.name + " " + p.phone + " " + p.city).toLowerCase().includes(x)).slice(0, 12) : parties.slice(0, 12); }, [q, parties]);
-  const pick = (p: Party) => onPick({ party_id: p.id, party_name: p.name, party_phone: p.phone, party_gstin: p.gstin, party_state: p.state, price_level: p.tier });
+  const pick = (p: Party) => onPick({ party_id: p.id, party_name: p.name, party_phone: p.phone, party_gstin: p.gstin, party_state: p.state, party_address: [p.address, p.city, p.pin].filter(Boolean).join(", "), price_level: p.tier });
   const create = async () => {
     const isPhone = /^\+?\d[\d\s]{7,}$/.test(q.trim());
     const name = isPhone ? prompt("Customer name") || "" : q.trim();
@@ -546,7 +547,7 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
         </div>
         <PhotoButton webcam value={photo} onChange={setPhoto} label="Customer photo" />
         <div className="row"><button className="btn p" onClick={create}>+ New customer “{q || "…"}”</button>
-          <button className="btn" onClick={() => onPick({ party_id: undefined, party_name: "", party_phone: "", party_gstin: "", party_state: "" })}>Walk-in / cash</button>
+          <button className="btn" onClick={() => onPick({ party_id: undefined, party_name: "", party_phone: "", party_gstin: "", party_state: "", party_address: "" })}>Walk-in / cash</button>
           <button className="btn" onClick={() => go("customers")}>Manage customers</button></div>
       </div>
     </Modal>
