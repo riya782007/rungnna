@@ -10,7 +10,7 @@ import { COLUMNS } from "./columns";
    - Conflicts: last write wins by updated_at for master data; movements are append-only,
      so two phones recording at the same time can never overwrite each other. */
 
-const TABLES = ["stores", "config", "staff", "locations", "parties", "products", "movements", "bills", "receipts", "purchases", "purchase_returns", "vouchers", "fiscal_year_closes", "voice_notes", "store_transfers", "bank_lines", "import_batches"] as const;
+const TABLES = ["stores", "config", "staff", "locations", "parties", "products", "movements", "bills", "receipts", "purchases", "purchase_returns", "vouchers", "fiscal_year_closes", "voice_notes", "store_transfers", "bank_lines", "import_batches", "dealers", "trade_orders"] as const;
 const PHOTO_TABLES = ["products", "movements", "bills", "parties", "purchases"];
 type T = (typeof TABLES)[number];
 
@@ -105,6 +105,8 @@ async function uploadVoice(c: SupabaseClient) {
 
 /* Only columns the cloud table really has are sent: a field kept only on this device (a draft marker,
    a newer app version's field) must never stop the whole shop's sync. */
+const missingTable = (e: { code?: string; message?: string }) => e.code === "PGRST205" || e.code === "42P01" || /could not find the table|does not exist/i.test(e.message || "");
+
 export const strip = (t: T, r0: any) => {
   const { photo_id, ...rest } = rfidDefaults(t, r0);
   const row: any = PHOTO_TABLES.includes(t) ? { ...rest, photo_id: photo_id || null } : rest;
@@ -154,6 +156,7 @@ async function pull(c: SupabaseClient) {
     for (;;) {
       const since = new Date(new Date(cursor).getTime() - 5000).toISOString(); // small overlap: late commits are never skipped
       const { data, error } = await c.from(t).select("*").gt("updated_at", since).order("updated_at").limit(1000);
+      if (error && missingTable(error)) break;      // a newer feature whose cloud table isn't set up yet: skip it, sync the rest
       if (error) throw error;
       if (!data || !data.length) break;
       const table = (db as any)[t];

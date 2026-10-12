@@ -4,6 +4,7 @@ import { db, type Product } from "../lib/db";
 import { Head, Thumb, Modal, Switch } from "../components/common";
 import { useApp, toast, go } from "../lib/app";
 import { can } from "../lib/roles";
+import { dealerUrl } from "../lib/trade";
 import { rupees } from "../lib/format";
 import { label } from "../lib/products";
 import { slugify } from "../../api/_listing";
@@ -77,8 +78,21 @@ export default function Catalogue() {
             </div>
           </div>
 
+          <div className="card dealer-card">
+            <header><h3>Dealer portal</h3><span className="pill ok" style={{ marginLeft: "auto" }}>accounts · trade rates</span></header>
+            <div className="pad stack">
+              <div className="xs mut">Retailers register with their mobile and a PIN; you approve them; they order published designs at your trade rates and the order lands in Sell › Trade orders, priced by the server.</div>
+              <code className="mono xs" style={{ wordBreak: "break-all" }}>{dealerUrl()}</code>
+              <div className="row">
+                <button className="btn sm" onClick={() => share(dealerUrl(), "")}>Copy link</button>
+                <a className="btn sm g" href={waShare(`Order from our wholesale catalogue — register once with your mobile: ${dealerUrl()}`)} target="_blank" rel="noopener">Invite on WhatsApp</a>
+                {can(me, "dealers.manage") && <a className="btn sm p" href="#/dealers">Trade orders</a>}
+              </div>
+            </div>
+          </div>
+
           <div className="card">
-            <header><h3>Trade portal</h3><span className={"pill " + (portal?.enabled ? "ok" : "")} style={{ marginLeft: "auto" }}>{portal?.enabled ? "on · private link" : "off"}</span></header>
+            <header><h3>Secret-link line sheet</h3><span className={"pill " + (portal?.enabled ? "ok" : "")} style={{ marginLeft: "auto" }}>{portal?.enabled ? "on · private link" : "off"}</span></header>
             <div className="pad stack">
               <div className="xs mut">Wholesale rates, packing and an order builder that sends the order to your WhatsApp. Only people with the link see trade rates; it is hidden from Google.</div>
               {portal?.enabled ? <>

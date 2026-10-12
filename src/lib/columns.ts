@@ -6,6 +6,9 @@ export const COLUMNS: Record<string, readonly string[]> = {
   bill_items: ["amount","bill_id","box_no","code","color","deleted","disc","id","item","product_id","qty","rate","style","type","updated_at"],
   bills: ["adjust","advance","at","bill_type","box_count","by_staff","cgst","compliance","converted_from","converted_to","deleted","device","discount","discount_pct","gross","gst","gst_mode","gst_rate","id","igst","items","merged_from","merged_into","merged_into_no","net","no","oversold","packing","paid","party_address","party_gstin","party_id","party_name","party_phone","party_state","payments","photo_id","photo_url","price_level","remarks","return_of","return_of_no","rfid_tags","salesman","series","sgst","src_type","status","store_id","total_qty","transport","updated_at","voice_id","void_reason"],
   config: ["deleted","id","updated_at","value"],
+  dealer_secrets: ["dealer_id","failed","locked_until","pin_hash"],
+  dealer_sessions: ["created_at","dealer_id","expires_at","token_hash"],
+  dealers: ["city","created_at","deleted","gstin","id","name","note","party_id","phone","shop_name","status","updated_at"],
   fiscal_year_closes: ["at","by_staff","closed_upto","customer_balances","deleted","device","fy","id","supplier_balances","updated_at"],
   import_batches: ["at","by_staff","changes","deleted","filename","id","store_id","undone","updated_at"],
   invoice_series: ["block_from","block_to","device","id","next_no","series","updated_at"],
@@ -19,6 +22,7 @@ export const COLUMNS: Record<string, readonly string[]> = {
   staff: ["active","auth_user_id","deleted","id","name","phone","pin","role","role_id","store_id","updated_at"],
   store_transfers: ["at","by_staff","deleted","device","from_store","id","items","no","received_at","received_by","status","to_store","updated_at"],
   stores: ["active","address","code","deleted","id","name","updated_at"],
+  trade_orders: ["at","bill_id","bill_no","dealer_id","dealer_name","dealer_phone","dealer_shop","deleted","id","items","no","note","status","total","total_qty","updated_at"],
   voice_notes: ["at","by_staff","deleted","entity","entity_id","id","seconds","transcript","updated_at","url"],
   vouchers: ["amount","at","by_staff","category","credit_account","debit_account","deleted","device","id","mode","no","note","party_id","party_kind","party_name","ref","series","store_id","type","updated_at"],
 };

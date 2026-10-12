@@ -29,9 +29,9 @@ const waLink = (s: Shop, text: string) => { const n = waNumber(s); return n ? `h
 const titleOf = (p: PubProduct) => p.content?.title || [p.item, p.color].filter(Boolean).join(" ") || p.code;
 const descOf = (p: PubProduct) => p.content?.seo?.metaDescription || p.content?.subtitle || `${titleOf(p)} — imitation jewellery`;
 
-type Head = { title: string; description: string; canonical: string; image?: string | null; keywords?: string[]; robots: string; ogType?: string; extra?: string };
+export type Head = { title: string; description: string; canonical: string; image?: string | null; keywords?: string[]; robots: string; ogType?: string; extra?: string };
 
-function page(h: Head, shop: Shop, body: string, base: string, opts: { nav?: "shop" | "trade" | "none"; script?: string } = {}): string {
+export function page(h: Head, shop: Shop, body: string, base: string, opts: { nav?: "shop" | "trade" | "none"; script?: string } = {}): string {
   const name = shopName(shop);
   const wa = waLink(shop, `Hello ${name}`);
   return `<!doctype html><html lang="en-IN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -41,10 +41,10 @@ ${h.keywords?.length ? `<meta name="keywords" content="${esc(h.keywords.join(", 
 <meta property="og:site_name" content="${esc(name)}"><meta property="og:type" content="${h.ogType || "website"}"><meta property="og:title" content="${esc(h.title)}">
 <meta property="og:description" content="${esc(h.description)}"><meta property="og:url" content="${esc(h.canonical)}">
 ${h.image ? `<meta property="og:image" content="${esc(h.image)}"><meta name="twitter:image" content="${esc(h.image)}">` : ""}
-<meta name="twitter:card" content="${h.image ? "summary_large_image" : "summary"}"><meta name="theme-color" content="#241B2E">
-<link rel="icon" href="/icon.svg">${h.extra || ""}<style>${CSS}</style></head><body>
+<meta name="twitter:card" content="${h.image ? "summary_large_image" : "summary"}"><meta name="theme-color" content="#0F5C4D">
+<link rel="icon" href="/icon.svg"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">${h.extra || ""}<style>${CSS}</style></head><body>
 <header class="top"><a class="brand" href="${opts.nav === "none" ? esc(h.canonical) : base + "/shop"}"><span class="mark">R</span><span>${esc(name)}<small>${esc(shop.tagline || "Fashion & imitation jewellery · Sadar Bazar, Delhi")}</small></span></a>
-${opts.nav === "none" ? "" : `<nav><a href="${base}/shop"${opts.nav === "shop" ? ' aria-current="page"' : ""}>Shop</a><a href="${base}/trade"${opts.nav === "trade" ? ' aria-current="page"' : ""}>Trade portal</a>${wa ? `<a class="wa" href="${esc(wa)}" rel="noopener">WhatsApp</a>` : ""}</nav>`}</header>
+${opts.nav === "none" ? "" : `<nav><a href="${base}/shop"${opts.nav === "shop" ? ' aria-current="page"' : ""}>Shop</a><a href="${base}/dealer"${opts.nav === "trade" ? ' aria-current="page"' : ""}>Dealer login</a>${wa ? `<a class="wa" href="${esc(wa)}" rel="noopener">WhatsApp</a>` : ""}</nav>`}</header>
 <main>${body}</main>
 <footer><b>${esc(name)}</b>${shop.address ? `<span>${esc(shop.address)}</span>` : ""}${shop.phone ? `<span>${esc(shop.phone)}</span>` : ""}<span>Retail &amp; wholesale imitation jewellery · Sadar Bazar, Delhi</span></footer>
 ${opts.script ? `<script>${opts.script}</script>` : ""}</body></html>`;
@@ -91,7 +91,7 @@ ${c?.highlights?.length ? `<ul class="hl">${c.highlights.map(x => `<li>${esc(x)}
 ${c?.description ? `<section><h2>${esc(h2[0] || "Design details")}</h2>${c.description.split(/\n{2,}/).map(x => `<p>${esc(x)}</p>`).join("")}</section>` : ""}
 <section><h2>${esc(h2[1] || "Specifications")}</h2><table class="specs">${specs.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join("")}</table></section>
 <section class="trade-cta"><h2>${esc(h2[2] || "Wholesale & trade")}</h2><p>${esc(c?.trade?.summary || "Retailers, boutiques and resellers can buy this design in wholesale quantity.")}</p>
-${c?.trade?.moq ? `<p class="mut">${esc(c.trade.moq)}${c.trade.packing ? " · " + esc(c.trade.packing) : ""}</p>` : ""}<a class="btn ghost" href="${base}/trade">Trade portal</a></section>
+${c?.trade?.moq ? `<p class="mut">${esc(c.trade.moq)}${c.trade.packing ? " · " + esc(c.trade.packing) : ""}</p>` : ""}<a class="btn ghost" href="${base}/dealer">Order at trade rates</a></section>
 ${c?.faq?.length ? `<section><h2>Questions</h2>${c.faq.map(f => `<details><summary>${esc(f.q)}</summary><p>${esc(f.a)}</p></details>`).join("")}</section>` : ""}`;
   return page({ title: c?.seo?.metaTitle || `${title} | ${name}`, description: descOf(p), canonical: url, image: p.image_url, keywords: c?.seo?.keywords, robots: "index,follow,max-image-preview:large", ogType: "product", extra: ld(jsonld) }, shop, body, base, { nav: "shop" });
 }
@@ -167,22 +167,23 @@ export function renderSitemap(list: Pick<PubProduct, "slug" | "updated_at">[], b
 
 export const renderRobots = (base: string) => `User-agent: *\nAllow: /shop\nAllow: /p/\nDisallow: /trade\nDisallow: /c/\nDisallow: /api/\nSitemap: ${base}/sitemap.xml\n`;
 
-const CSS = `:root{--ink:#17161B;--mut:#7A7580;--line:#E7E3DC;--bg:#FAF7F1;--gold:#B8903F;--gold-d:#8C6A26;--ok:#1F7A5C;--card:#fff}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans",sans-serif;-webkit-font-smoothing:antialiased}
+export const CSS = `:root{--ink:#241B2E;--mut:#6B6175;--line:#E7DBC6;--bg:#FAF6EF;--gold:#C8A24C;--gold-d:#A07E2E;--gold-l:#F7EED8;--ok:#0F5C4D;--em:#0F5C4D;--em-d:#0A4034;--mist:#E6F0ED;--card:#fff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 "Plus Jakarta Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans",sans-serif;-webkit-font-smoothing:antialiased}
 a{color:inherit}img{max-width:100%;display:block}
 .top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px clamp(14px,4vw,40px);background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
 .brand{display:flex;align-items:center;gap:10px;text-decoration:none;font-weight:700}.brand small{display:block;font-weight:400;font-size:12px;color:var(--mut)}
 .mark{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:linear-gradient(145deg,#D9B869,#9C7630);color:#2A1E05;font-weight:800}
 nav a{text-decoration:none;margin-left:14px;font-size:14px;color:var(--mut)}nav a[aria-current]{color:var(--ink);font-weight:600}nav a.wa{color:var(--ok);font-weight:600}
 main{max-width:1180px;margin:0 auto;padding:clamp(14px,3vw,32px)}
-.hero{padding:10px 0 18px}.hero h1,h1{font:600 clamp(26px,4vw,40px)/1.15 Georgia,"Times New Roman",serif;margin:0 0 8px;letter-spacing:-.01em}
-h2{font:600 22px/1.2 Georgia,serif;margin:0 0 10px}section{margin:28px 0}
+.hero{padding:10px 0 18px}.hero h1,h1{font:700 clamp(30px,4.4vw,46px)/1.08 "Cormorant Garamond",Georgia,"Times New Roman",serif;margin:0 0 8px;letter-spacing:-.005em}
+h2{font:700 26px/1.2 "Cormorant Garamond",Georgia,serif;margin:0 0 10px}section{margin:28px 0}
+.brand>span:last-child{font:700 21px/1.05 "Cormorant Garamond",Georgia,serif;color:var(--em-d)}.brand small{font-family:"Plus Jakarta Sans",sans-serif}
 .mut{color:var(--mut)}.warn{color:#9A6A00}
-.btn{display:inline-block;background:var(--ink);color:#fff;text-decoration:none;border:0;border-radius:999px;padding:12px 22px;font-weight:600;font-size:15px;cursor:pointer}
-.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--ink)}.btn:disabled{opacity:.4;cursor:default}
-.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}.chips a{margin:0;padding:6px 14px;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--ink)}.chips a[aria-current]{background:var(--ink);color:#fff}
+.btn{display:inline-block;background:var(--em);color:#fff;box-shadow:0 8px 22px -12px rgba(15,92,77,.8);text-decoration:none;border:0;border-radius:999px;padding:12px 22px;font-weight:600;font-size:15px;cursor:pointer}
+.btn.ghost{background:transparent;color:var(--em-d);border:1px solid var(--em);box-shadow:none}.btn:disabled{opacity:.4;cursor:default}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}.chips a{margin:0;padding:6px 14px;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--ink)}.chips a[aria-current]{background:var(--em);border-color:var(--em);color:#fff}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:16px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;display:flex;flex-direction:column}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 6px 24px -14px rgba(36,27,46,.25);transition:transform .2s,box-shadow .2s}.card:hover{transform:translateY(-2px);box-shadow:0 14px 34px -16px rgba(36,27,46,.3)}
 .card>a{text-decoration:none}.card img,.noimg{aspect-ratio:4/5;width:100%;height:auto;object-fit:cover;background:#F2EEE6}
 .noimg{display:grid;place-items:center;font:700 28px Georgia,serif;color:var(--gold-d)}
 .card h3{font-size:15px;font-weight:600;margin:10px 12px 4px;line-height:1.3}

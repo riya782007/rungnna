@@ -3,6 +3,7 @@ import {
   renderProduct, renderShop, renderTrade, renderCatalogue, renderNotFound, renderSitemap, renderRobots,
   type PubProduct, type Shop, type Catalogue, type TradeRate,
 } from "./_pages.js";
+import { renderDealer } from "./_dealer.js";
 
 /* Public web pages, rendered on the server so Google and WhatsApp previews see real
    content. Reached through the rewrites in vercel.json:
@@ -50,6 +51,8 @@ export async function GET(req: Request) {
       return out(renderSitemap(list, base), 200, "application/xml; charset=utf-8");
     }
     const shop = await shopInfo();
+
+    if (view === "dealer") return out(renderDealer(shop, base, { url: env("SUPABASE_URL"), key: env("SUPABASE_ANON_KEY") }), 200, undefined, PRIVATE);
 
     if (view === "product") {
       const [p] = await rest<PubProduct[]>(`public_products?select=*&slug=eq.${encodeURIComponent(slug)}&limit=1`);

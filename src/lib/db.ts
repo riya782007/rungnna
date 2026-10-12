@@ -186,6 +186,19 @@ export interface Staff extends Row {
   active: 0 | 1;
 }
 
+/* A retailer on the dealer portal (registers online, the shop approves). PIN never leaves the server. */
+export interface Dealer extends Row {
+  phone: string; name: string; shop_name: string; city: string; gstin: string;
+  status: "pending" | "approved" | "blocked"; party_id?: string | null; note: string; created_at: string;
+}
+export type TradeOrderLine = { product_id: string; code: string; title: string; item: string; style: string; color: string; size?: string | null; pack: number; qty: number; rate: number; amount: number };
+/* An order a dealer placed on the portal. Priced by the server; becomes a bill in the shop app. */
+export interface TradeOrder extends Row {
+  no: string; dealer_id: string; dealer_name: string; dealer_phone: string; dealer_shop: string;
+  items: TradeOrderLine[]; total_qty: number; total: number; note: string;
+  status: "new" | "accepted" | "billed" | "cancelled"; bill_id?: string | null; bill_no: string; at: string;
+}
+
 export interface Setting { key: string; value: any; updated_at: string }
 export interface Photo { id: string; blob: Blob; w: number; h: number; bytes: number; url?: string; uploaded: 0 | 1; created_at: string }
 export interface Outbox { seq?: number; table: string; row_id: string; at: string; tries: number; last_error?: string }
@@ -222,6 +235,8 @@ class RungnnaDB extends Dexie {
   store_transfers!: Table<StoreTransfer, string>;
   bank_lines!: Table<BankLine, string>;
   import_batches!: Table<ImportBatch, string>;
+  dealers!: Table<Dealer, string>;
+  trade_orders!: Table<TradeOrder, string>;
 
   constructor() {
     super("rungnna");
@@ -269,6 +284,8 @@ class RungnnaDB extends Dexie {
       locations: "id, &code, store_id, floor, updated_at",
       bills: "id, no, store_id, status, bill_type, party_id, at, updated_at, return_of, merged_into",
     });
+    // dealer (trade) portal: retailers who order online, and their orders
+    this.version(10).stores({ dealers: "id, phone, status, updated_at", trade_orders: "id, no, dealer_id, status, at, updated_at" });
   }
 }
 
@@ -292,7 +309,7 @@ export function deviceId(): string {
 }
 
 /* ---- write helpers: every write lands locally first, then queues for the cloud ---- */
-export type Syncable = "products" | "locations" | "movements" | "staff" | "parties" | "bills" | "voice_notes" | "config" | "receipts" | "purchases" | "purchase_returns" | "vouchers" | "fiscal_year_closes" | "stores" | "store_transfers" | "bank_lines" | "import_batches";
+export type Syncable = "products" | "locations" | "movements" | "staff" | "parties" | "bills" | "voice_notes" | "config" | "receipts" | "purchases" | "purchase_returns" | "vouchers" | "fiscal_year_closes" | "stores" | "store_transfers" | "bank_lines" | "import_batches" | "dealers" | "trade_orders";
 const STORE_TABLES = new Set(["locations", "movements", "staff", "bills", "receipts", "purchases", "purchase_returns", "vouchers", "bank_lines", "import_batches"]);
 
 export async function put<T extends Row>(table: Syncable, row: T) {
