@@ -1,3 +1,4 @@
+import { can } from "../lib/roles";
 import { useEffect, useState } from "react";
 import { db, put, type Bill, type Transport } from "../lib/db";
 import type { Shop } from "../lib/billing";
@@ -10,7 +11,7 @@ export function GstBill({ b, shop }: { b: Bill; shop: Shop }) {
   const { me } = useApp();
   const [tr, setTr] = useState<Transport>(b.transport || { vehicle_no: "", transporter_id: "", transporter_name: "", distance: 1, mode: "1", from_city: "", from_pin: "", to_address: "", to_city: "", to_pin: "", to_state_code: b.party_gstin.slice(0, 2) });
   const [configured, setConfigured] = useState(false), [sandbox, setSandbox] = useState(true), [busy, setBusy] = useState(false);
-  useEffect(() => { if (me?.role === "owner") gstRequest().then(j => { setConfigured(j.configured); setSandbox(j.sandbox); }).catch(() => {}); }, [me?.role]);
+  useEffect(() => { if (can(me, "gst.register")) gstRequest().then(j => { setConfigured(j.configured); setSandbox(j.sandbox); }).catch(() => {}); }, [me?.role]);
   useEffect(() => { if (!b.transport && b.party_id) db.parties.get(b.party_id).then(p => { if (p) setTr(t => ({ ...t, to_address: p.address, to_city: p.city, to_pin: p.pin })); }); }, [b.party_id]);
   if (b.status !== "final" || !["gst", "challan"].includes(b.bill_type)) return null;
   const draft = { ...b, transport: tr };
@@ -40,8 +41,8 @@ export function GstBill({ b, shop }: { b: Bill; shop: Shop }) {
         {record && <div className="note sm">{record.sandbox ? "SANDBOX · " : ""}{record.id}{record.cancelled_at ? " · Cancelled" : ""}</div>}
         {errors.length > 0 && <div className="note warn sm">{errors.join(" · ")}</div>}
         <div className="row"><button className="btn" disabled={busy || !!errors.length} onClick={() => run(async () => { await save(); downloadGst(draft, shop, kind); })}><Icon n="download" size={16} />Download JSON</button>
-          {configured && me?.role === "owner" && !record && <button className="btn p" disabled={busy || !!errors.length} onClick={() => run(async () => { await save(); await submitGst(draft, kind, "generate"); toast("Acknowledgement saved"); })}>{sandbox ? "Submit to sandbox" : "Generate"}</button>}
-          {configured && me?.role === "owner" && canCancel(record) && <button className="btn bad" disabled={busy} onClick={() => { const reason = prompt("Cancellation reason"); if (reason) run(() => submitGst(b, kind, "cancel", reason)); }}>Cancel within 24 hours</button>}</div>
+          {configured && can(me, "gst.register") && !record && <button className="btn p" disabled={busy || !!errors.length} onClick={() => run(async () => { await save(); await submitGst(draft, kind, "generate"); toast("Acknowledgement saved"); })}>{sandbox ? "Submit to sandbox" : "Generate"}</button>}
+          {configured && can(me, "gst.register") && canCancel(record) && <button className="btn bad" disabled={busy} onClick={() => { const reason = prompt("Cancellation reason"); if (reason) run(() => submitGst(b, kind, "cancel", reason)); }}>Cancel within 24 hours</button>}</div>
       </div>;
     })}
   </section>;

@@ -43,7 +43,7 @@ function BillList() {
   const sum = (f: (b: Bill) => number) => fin.reduce((a, b) => a + f(b), 0);
   const ests = list.filter(b => b.bill_type === "estimate");
   const cns = list.filter(b => b.status === "final" && b.bill_type === "return");
-  const manage = open && can(me, "void");
+  const manage = open && can(me, "estimates.delete");
   const canBill = can(me, "bill");
   const selected = bills.filter(b => sel.has(b.id));
   const selEsts = selected.filter(b => b.bill_type === "estimate");
@@ -213,8 +213,8 @@ function BillView({ id }: { id: string }) {
                 catch (e: any) { toast(e.message || "Could not make the GST invoice", true); }
               }}>Convert to GST invoice</button>}
               {b.bill_type === "challan" && mergeable(b) && <button className="btn p" onClick={() => setConv(true)}>Convert challan to invoice</button>}
-              {returnableBill(b) && can(me, "bill") && <button className="btn" onClick={() => setRet(true)}>Sales return (credit note)</button>}
-              {splittable(b) && b.items.length > 1 && can(me, "bill") && <button className="btn" onClick={() => setSplit(true)}>Split — move lines to a new bill</button>}
+              {returnableBill(b) && can(me, "billing.returns") && <button className="btn" onClick={() => setRet(true)}>Sales return (credit note)</button>}
+              {splittable(b) && b.items.length > 1 && can(me, "billing.merge") && <button className="btn" onClick={() => setSplit(true)}>Split — move lines to a new bill</button>}
               {b.status === "final" && (boss ? <button className="btn bad" onClick={async () => {
                 const r = prompt(b.merged_from?.length ? "Reason for cancelling (the merged bills / challans come back as they were):" : "Reason for cancelling this bill (kept on record):"); if (!r) return;
                 await voidBill(b, r, me?.name || ""); toast(b.bill_type === "return" ? "Credit note cancelled — pieces taken off the racks again" : "Bill cancelled — pieces returned to their racks");

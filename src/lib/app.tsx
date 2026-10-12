@@ -1,7 +1,8 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { db, put, uid, now, getSetting, setSetting, type Staff, type Location } from "./db";
 import { initStores } from "./stores";
-import { setScope, currentStore, MAIN_STORE } from "./scope";
+import { setScope, setScopePerms, currentStore, MAIN_STORE } from "./scope";
+import { setRolesCache, permsOf } from "./roles";
 import { useLiveQuery } from "dexie-react-hooks";
 
 /* ---------- tiny hash router (works offline, no server rewrites needed) ---------- */
@@ -89,6 +90,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
   const setMe = (s: Staff | null) => { const id = s?.role === "owner" ? store : s?.store_id || MAIN_STORE; setScope(id, s?.role || "owner"); setStore(id); setMeS(s); setSetting("me", s?.id || ""); };
   const switchStore = async (id: string) => { if (me?.role !== "owner") throw new Error("Owner only"); await setSetting("active_store", id); setScope(id, "owner"); setStore(id); };
+  // custom roles sync like any setting; every check (lib/roles) and every guarded save (scope.requirePerm) follows them
+  const rolesRow = useLiveQuery(() => db.config.get("roles"), []);
+  const [, bump] = useState(0);
+  useEffect(() => { setRolesCache((rolesRow?.value as any)?.roles); setScopePerms(permsOf(me)); bump(n => n + 1); }, [rolesRow?.updated_at, me?.id, me?.role, me?.role_id]);
   return <AppCtx.Provider value={{ me, setMe, ready, store, switchStore }}>{children}</AppCtx.Provider>;
 }
 

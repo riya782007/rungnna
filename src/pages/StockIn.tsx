@@ -112,7 +112,7 @@ function StockInSession() {
   return (
     <div style={{ paddingBottom: 80 }}>
       <Head title="Stock in" sub="Stand at the rack, scan every packet, save once. New labels become products by themselves." />
-      {me?.role === "owner" && <details className="purchase-import"><summary>Purchase bill photos / manual purchase entry</summary><Suspense fallback={<div role="status">Loading purchase entry…</div>}><PurchasePhoto by={me.id} /></Suspense></details>}
+      {can(me, "purchases.photo") && <details className="purchase-import"><summary>Purchase bill photos / manual purchase entry</summary><Suspense fallback={<div role="status">Loading purchase entry…</div>}><PurchasePhoto by={me?.id || ""} /></Suspense></details>}
       <div className="split">
         <div className="stack">
           <div className="card pad stack">

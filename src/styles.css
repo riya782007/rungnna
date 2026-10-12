@@ -684,3 +684,14 @@ html{scrollbar-gutter:stable}
 .inv-wm span{transform:rotate(-24deg);text-align:center;font-weight:800;line-height:1.1;letter-spacing:.04em;
   font-size:44px;color:rgba(176,80,106,.13)}
 @media screen{.inv-wm{position:absolute}}
+
+/* ---------- roles & permissions ---------- */
+.sec-title{margin:22px 0 10px;font-size:15px}
+.perm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.perm-group{border:1px solid var(--line);border-radius:14px;padding:12px;background:var(--surface)}
+.perm-group-title{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-2)}
+.perm{display:flex;gap:8px;align-items:flex-start;font-size:14px;padding:4px 0;cursor:pointer}
+.perm input{margin-top:3px;accent-color:var(--em-d)}
+.perm-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.role-card summary{list-style:none;cursor:pointer}.role-card summary::-webkit-details-marker{display:none}
+.role-editor{box-shadow:none}

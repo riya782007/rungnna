@@ -180,6 +180,7 @@ export interface Staff extends Row {
   auth_user_id?: string;
   name: string;
   role: "owner" | "manager" | "salesman" | "helper" | "packer" | "cashier";
+  role_id?: string;        // custom role from the Roles page (its permissions replace the built-in role's)
   phone: string;
   pin: string;             // 4-digit, hashed later when auth moves server-side
   active: 0 | 1;

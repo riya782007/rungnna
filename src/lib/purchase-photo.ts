@@ -2,7 +2,7 @@ import { db, uid, setSetting, type Product, type Purchase, type Party } from "./
 import { blankProduct, findByKey, saveProduct } from "./products";
 import { newPurchase, lineOf, finalizePurchase } from "./stockin";
 import { moneyInput } from "./pos";
-import { ownerOnly } from "./scope";
+import { requirePerm } from "./scope";
 import { vendorCost } from "./vendors";
 import { getRule, priceFromCost, type PricingRule } from "./pricing";
 
@@ -38,7 +38,7 @@ export function validatePhotoRows(rows: PhotoRow[]) {
 }
 
 export async function savePhotoPurchase(rows: PhotoRow[], input: { by: string; rack: string; supplierId: string; billNo: string; photoId?: string; note: string; invoiceTotal?: string }): Promise<Purchase> {
-  ownerOnly();
+  requirePerm("purchases.photo", "saving purchase bill photos");
   const checked = validatePhotoRows(rows);
   if (checked.reduce((n, r) => n + r.qty, 0) > 5000) throw new Error("Purchase exceeds the 5000-label batch limit. Split it before saving.");
   const invoice_total = input.invoiceTotal?.trim() ? moneyInput(input.invoiceTotal) : undefined;

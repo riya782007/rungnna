@@ -16,7 +16,7 @@ export const COLUMNS: Record<string, readonly string[]> = {
   purchase_returns: ["at","by_staff","deleted","device","id","items","no","note","purchase_id","purchase_no","series","store_id","supplier_id","supplier_name","total_cost","total_qty","updated_at"],
   purchases: ["at","by_staff","deleted","device","id","invoice_total","items","loc_id","no","note","photo_id","photo_url","rfid_tags","status","store_id","supplier_bill","supplier_id","supplier_name","total_cost","total_qty","updated_at"],
   receipts: ["allocations","amount","at","by_staff","deleted","device","id","mode","no","note","opening_part","party_id","party_name","store_id","unallocated","updated_at"],
-  staff: ["active","auth_user_id","deleted","id","name","phone","pin","role","store_id","updated_at"],
+  staff: ["active","auth_user_id","deleted","id","name","phone","pin","role","role_id","store_id","updated_at"],
   store_transfers: ["at","by_staff","deleted","device","from_store","id","items","no","received_at","received_by","status","to_store","updated_at"],
   stores: ["active","address","code","deleted","id","name","updated_at"],
   voice_notes: ["at","by_staff","deleted","entity","entity_id","id","seconds","transcript","updated_at","url"],
