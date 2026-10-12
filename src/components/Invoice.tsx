@@ -35,6 +35,10 @@ export function InvoiceSheet({ b, shop, format }: { b: Bill; shop: Shop; format:
   const title = format === "packing" ? "PACKING SLIP" : docName(b).toUpperCase();
   const boxes = [...new Set(b.items.map(l => l.box_no))].sort((a, z) => a - z);
   const thermal = format === "80mm" || format === "58mm";
+  /* Owner rule (R-204): an estimate is a quotation, not a sale. It carries "sale not executed"
+     in Hindi and English so it can never be mistaken for a bill — by the party, by a salesman,
+     or by an inspector reading it a year later. A numbered tax invoice never carries it. */
+  const notExecuted = format !== "packing" && (b.bill_type === "estimate" || (b.bill_type !== "return" && !b.no));
   const page = thermal ? "auto" : format === "a4" ? "A4" : "A5";
   const pageName = thermal ? "rj-receipt" : format === "a4" ? "rj-a4" : "rj-a5";
   return (
@@ -45,10 +49,14 @@ export function InvoiceSheet({ b, shop, format }: { b: Bill; shop: Shop; format:
           <div className="inv-sub">{[shop.address, shop.phone].filter(Boolean).join(" · ")}</div>
           {shop.gstin && (b.bill_type === "gst" || (b.bill_type === "return" && b.src_type === "gst")) && <div className="inv-sub">GSTIN: <b>{shop.gstin}</b>{shop.state ? " · State: " + shop.state : ""}</div>}</div>
         <div className="inv-title">{title}{b.status === "void" && <div className="inv-void">CANCELLED</div>}</div>
+      {notExecuted && <div className="inv-notexec">SALE NOT EXECUTED · बिक्री निष्पादित नहीं</div>}
       </div>
       {b.compliance && format !== "packing" && <div className="inv-compliance">
         {b.compliance.irn && <><div>{b.compliance.irn.sandbox ? "SANDBOX · " : ""}IRN: {b.compliance.irn.id}{b.compliance.irn.cancelled_at ? " · CANCELLED" : ""}</div><div>Acknowledgement: {b.compliance.irn.ack_no} · {b.compliance.irn.generated_at}</div>{b.compliance.irn.signed_qr && !b.compliance.irn.cancelled_at && <span className="signed-qr" dangerouslySetInnerHTML={{ __html: qrSvg(b.compliance.irn.signed_qr).svg }} />}</>}
         {b.compliance.ewb && <div>{b.compliance.ewb.sandbox ? "SANDBOX · " : ""}EWB: {b.compliance.ewb.id}{b.compliance.ewb.cancelled_at ? " · CANCELLED" : ""}</div>}
+      </div>}
+      {notExecuted && !thermal && <div className="inv-wm" aria-hidden="true">
+        <span>SALE NOT EXECUTED<br />बिक्री निष्पादित नहीं</span>
       </div>}
       <div className="inv-meta">
         <div><b>{docName(b)} No:</b> {b.no || "(draft)"}<br /><b>Date:</b> {new Date(b.at).toLocaleString("en-IN")}
