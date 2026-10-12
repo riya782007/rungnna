@@ -76,16 +76,16 @@ export async function reportData(r: Range) {
   /* GSTR-1 style HSN summary: taxable value and tax exactly as printed on each invoice (bill discount,
      packing, inclusive rates and per-line GST rates included); credit notes against tax invoices are subtracted. */
   const shopHsn = (await getShop()).hsn || "7117";
-  const gstr = new Map<string, { type: string; hsn: string; rate: number; taxable: number; cgst: number; sgst: number; igst: number; gst: number; invoices: number }>();
+  const gstr = new Map<string, { type: string; hsn: string; gst_pct: number; taxable: number; cgst: number; sgst: number; igst: number; gst: number; invoices: number; credit_notes: number }>();
   const taxDocs = [...saleBills.filter(b => b.bill_type === "gst"), ...returnBills.filter(b => b.src_type === "gst")];
   for (const b of taxDocs) {
     const sign = b.bill_type === "return" ? -1 : 1, type = b.party_gstin ? "B2B" : "B2C", seen = new Set<string>();
     for (const t of taxLines(b, shopHsn)) {
       const k = type + "|" + t.hsn + "|" + t.rate;
-      const row = gstr.get(k) || { type, hsn: t.hsn, rate: t.rate, taxable: 0, cgst: 0, sgst: 0, igst: 0, gst: 0, invoices: 0 };
+      const row = gstr.get(k) || { type, hsn: t.hsn, gst_pct: t.rate, taxable: 0, cgst: 0, sgst: 0, igst: 0, gst: 0, invoices: 0, credit_notes: 0 };
       row.taxable += sign * t.taxable; row.cgst += sign * t.cgst; row.sgst += sign * t.sgst; row.igst += sign * t.igst;
       row.gst = row.cgst + row.sgst + row.igst;
-      if (!seen.has(k)) { seen.add(k); row.invoices += 1; }
+      if (!seen.has(k)) { seen.add(k); if (sign > 0) row.invoices += 1; else row.credit_notes += 1; }
       gstr.set(k, row);
     }
   }

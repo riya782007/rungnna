@@ -95,10 +95,12 @@ export function fixLine(l: BillLine): BillLine {
 }
 /** Split integer paise by weights so the parts always add back to the total. */
 export function allocate(total: number, weights: number[]) {
-  const sum = weights.reduce((a, n) => a + n, 0);
-  const out = weights.map(n => (sum ? Math.floor(total * n / sum) : 0));
+  if (!weights.length) return [];
+  const w = weights.some(n => n > 0) ? weights.map(n => Math.max(0, n)) : weights.map(() => 1);   // all free lines: share equally
+  const sum = w.reduce((a, n) => a + n, 0);
+  const out = w.map(n => Math.floor(total * n / sum));
   let left = total - out.reduce((a, n) => a + n, 0);
-  for (let i = 0; left > 0 && i < out.length; i++, left--) out[i]++;
+  for (let i = 0; left > 0; i = (i + 1) % out.length, left--) out[i]++;
   return out;
 }
 /** " 3%" for a single-rate bill; "" (just "GST") when lines carry different rates. */

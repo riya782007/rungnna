@@ -80,3 +80,15 @@ describe("estimate → GST invoice", () => {
     expect((await db.bills.toArray()).filter(b => b.bill_type === "gst")).toHaveLength(1);
   });
 });
+
+describe("free lines with packing still add up", () => {
+  it("all lines 100% off + packing: packing is taxed and every row adds up", () => {
+    for (const items of [[line({ disc: "100%" }), line({ disc: "100%" })], [line({ disc: "100%" }), line({ disc: "100%", gst_rate: 12 })]]) {
+      const t = totals(bill({ items, packing: 5000 }), "Delhi");
+      expect(t.net - t.adjust - t.gst).toBe(5000);
+      const rows = taxLines(t);
+      expect(sum(rows.map(r => r.taxable))).toBe(5000);
+      expect(sum(rows.map(r => r.cgst + r.sgst))).toBe(t.gst);
+    }
+  });
+});

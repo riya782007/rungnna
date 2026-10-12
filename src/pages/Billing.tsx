@@ -1,3 +1,4 @@
+import { placeCode } from "../lib/states";
 import { selectedBox, mergeBoxLine, type BillingDraft } from "../lib/billingBox";
 import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
@@ -457,10 +458,11 @@ export default function Billing({ args }: { args: string[] }) {
           <div className="sumrow"><span>Gross</span><b className="mono">{rupees(t.gross)}</b></div>
           <div className="sumrow"><span>Discount</span>
             <span className="row" style={{ gap: 4, flexWrap: "nowrap" }}>
-              <input className="cell r" style={{ width: 48 }} placeholder="%" value={b.discount_pct || ""} onChange={e => set({ discount_pct: parseFloat(e.target.value) || 0 })} />
+              <MoneyInput className={"cell r" + (b.discount_pct > 100 ? " bad" : "")} style={{ width: 48 }} placeholder="%" paise={Math.round((b.discount_pct || 0) * 100)} onPaise={v => set({ discount_pct: v / 100 })} />
               {b.discount_pct ? <input className="cell r" style={{ width: 72 }} disabled value={(t.discount / 100).toFixed(2)} readOnly /> : <MoneyInput className="cell r" style={{ width: 72 }} placeholder="₹" paise={b.discount} onPaise={v => set({ discount: v })} />}</span></div>
           <div className="sumrow"><span>Packing</span><MoneyInput className="cell r" style={{ width: 80 }} paise={b.packing} onPaise={v => set({ packing: v })} /></div>
           {b.bill_type === "gst" && <div className="sumrow"><span>GST{gstLabel(t)} <button className="linkbtn" onClick={() => set({ gst_mode: b.gst_mode === "exclusive" ? "inclusive" : "exclusive" })}>{b.gst_mode === "exclusive" ? "added" : "included"}</button></span><b className="mono">{rupees(t.gst)}</b></div>}
+          {b.bill_type === "gst" && b.party_state && !placeCode(b.party_gstin, b.party_state) && <div className="xs" style={{ textAlign: "right", color: "var(--bad)" }}>Check buyer state “{b.party_state}” — not recognised, GST type may be wrong</div>}
           {t.igst ? <div className="xs mut" style={{ textAlign: "right" }}>IGST (other state)</div> : t.gst ? <div className="xs mut" style={{ textAlign: "right" }}>CGST {rupees(t.cgst)} + SGST {rupees(t.sgst)}</div> : null}
           {t.adjust ? <div className="sumrow"><span>Round off</span><span className="mono">{rupees(t.adjust)}</span></div> : null}
           <div className="net"><span>{b.bill_type === "challan" ? "VALUE" : "NET"}</span><b>{rupees(t.net)}</b></div>

@@ -53,3 +53,17 @@ describe("TSPL for the TSC printer", () => {
     expect(() => labelTSPL(DEFAULT_CFG, { ...p, item: "अंगूठी" }, 1, 1, "x")).toThrow(/Hindi/);
   });
 });
+
+describe("TSPL never prints a wrong price or quantity", () => {
+  const big = { ...p, rate: 124550, pack: 144 };
+  const words = (t: string) => [...t.matchAll(/TEXT \d+,\d+,"\d",0,1,1,"([^"]*)"/g)].map(m => m[1]);
+  for (const key of ["40x30", "38x25", "rj", "50x25"]) it(`${key}: the full rate line is printed, or the job is refused`, () => {
+    const cfg = { ...DEFAULT_CFG, ...PRESETS.find(x => x.key === key)!.cfg, show: all } as LabelCfg;
+    const pp = productForLabel(big, 144);
+    let t = "";
+    try { t = labelTSPL(cfg, pp, 144, 1, ownPayload(pp)); } catch (e: any) { expect(e.message).toMatch(/fit|Too much|QR|room/); return; }
+    const joined = [...new Set(words(t))].join("");
+    expect(joined).toContain("Rs.1245.50X144PCS");
+    expect(joined).toContain("OAX12PCS".replace("12", "144"));
+  });
+});
