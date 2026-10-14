@@ -50,7 +50,12 @@ export default function PurchasePhoto({ by }: { by: string }) {
 
   const check = async () => {
     setChecking(true);
-    try { const r = await api<{ configured: boolean; model: string }>("purchase-photo"); setConnection(r.configured ? `Gemini configured · ${r.model}` : "Gemini needs GEMINI_API_KEY in Vercel Production environment variables, then redeploy."); }
+    try {
+      const r = await api<{ configured: boolean; provider: string; model: string; keys: Record<string, boolean> }>("purchase-photo");
+      setConnection(r.configured
+        ? `Ready · tries ${r.provider}${r.model ? " (" + r.model + ")" : ""}`
+        : "No AI key can read a bill yet. Add OPENAI_API_KEY or GEMINI_API_KEY in Vercel → Environment Variables, then redeploy.");
+    }
     catch (e: any) { setConnection(e.message); } finally { setChecking(false); }
   };
 
@@ -72,12 +77,15 @@ export default function PurchasePhoto({ by }: { by: string }) {
       // bills that print no article get one built from item + rate, so the lines neither collide nor merge
       const rows = pricePhotoRows(autoArticle(read), rule);
       const boxes = out.rows.filter((r: any) => r?.box && String(r.box).trim() && String(r.box).trim() !== "0").length;
+      const readBy = out.read_by ? String(out.read_by) : "";
+      const fellBack = Array.isArray(out.attempts) && out.attempts.some((a: any) => a && a.ok === false && !a.skipped);
       const supplier = suppliers.find(s => s.name.toLowerCase() === String(out.supplier || "").toLowerCase())?.id || "";
       set({
         rows, supplier, billNo: String(out.bill_no || ""), total: String(out.invoice_total || ""),
         warnings: [
           ...(Array.isArray(out.warnings) ? out.warnings.map(String) : []),
           boxes ? `${boxes} line(s) showed a box/packet count. Labels print one per piece; set packet sizes on the product if you want packet stickers.` : "",
+          fellBack && readBy ? `Read by ${readBy} — an earlier provider was unavailable, so check these lines a little harder than usual.` : "",
         ].filter(Boolean).join("\n"),
         photoId: await savePhoto(files[0]),
       });
@@ -157,7 +165,7 @@ export default function PurchasePhoto({ by }: { by: string }) {
 
   return <section className="purchase-photo stack">
     <div className="row"><b className="grow">Purchase bill photos</b>
-      <button className="btn" disabled={checking || busy} onClick={check}>{checking ? "Checking…" : "Check Gemini"}</button>
+      <button className="btn" disabled={checking || busy} onClick={check}>{checking ? "Checking…" : "Check AI"}</button>
       <button className="btn" disabled={busy} onClick={() => file.current?.click()}><Camera size={17} />Read bill</button>
       <button className="btn" disabled={busy} onClick={() => set({ rows: [...d.rows, blank()] })}><Plus size={17} />Line</button></div>
     {connection && <div role="status" className="note">{connection}</div>}

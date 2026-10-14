@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePrintJob } from "../lib/printing";
+import { lazy, Suspense } from "react";
+const PurchasePhoto = lazy(() => import("../components/PurchasePhoto"));
 import { createPortal } from "react-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, getSetting, setSetting, recordMovement, type Product } from "../lib/db";
@@ -186,6 +188,12 @@ export default function Labels({ args }: { args: string[] }) {
       </Head>
       <div className="split">
         <div className="stack">
+          {can(me, "purchases.photo") && <details className="card purchase-import" open={args[0] === "bill"}>
+            <summary className="pad b">From a purchase bill — upload the photo, get the labels</summary>
+            <div style={{ borderTop: "1px solid var(--line-2)" }} className="pad">
+              <Suspense fallback={<div role="status">Loading bill reader…</div>}><PurchasePhoto by={me?.id || ""} /></Suspense>
+            </div>
+          </details>}
           <div className="card">
             <header><h3>Barcode print</h3><span className="xs mut">scan an existing label to copy its details</span></header>
             <div className="pad stack">

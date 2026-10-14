@@ -100,3 +100,128 @@ export async function chainJson<T>(a: ChatArgs, accept: (raw: any) => T, order: 
   }
   return { data: null, attempts };
 }
+
+/* ===========================================================================
+   One chain for everything: OpenAI → Gemini → Groq.
+
+   The shop's rule used to be "Gemini sees the photo, OpenAI writes the words".
+   The owner now wants a single order for every AI job, photos included, so that
+   one provider being out of credit or slow never stops the counter.
+
+   Vision is the catch. OpenAI and Gemini both read images; the Groq model the
+   shop runs (openai/gpt-oss-120b) is text-only, so for a job with a picture Groq
+   is skipped unless GROQ_VISION_MODEL names a model that can actually see. A
+   provider that cannot do the job is not an error — it is simply not asked.
+=========================================================================== */
+
+export type AIProvider = "openai" | "gemini" | "groq";
+export type AIPart = { text: string } | { image: { mime: string; data: string } };
+
+export const DEFAULT_ORDER: AIProvider[] = ["openai", "gemini", "groq"];
+
+export const geminiConfigured = () => !!env("GEMINI_API_KEY");
+export const geminiModel = () => env("GEMINI_MODEL") || "gemini-2.5-flash";
+export const groqVisionModel = () => env("GROQ_VISION_MODEL") || "";
+
+const hasImage = (parts: AIPart[]) => parts.some(p => "image" in p);
+
+/** Can this provider do this particular job? */
+export function canServe(p: AIProvider, parts: AIPart[]): boolean {
+  const configured = p === "openai" ? openaiConfigured() : p === "gemini" ? geminiConfigured() : groqConfigured();
+  if (!configured) return false;
+  if (!hasImage(parts)) return true;
+  if (p === "groq") return !!groqVisionModel();   // the default Groq model cannot see
+  return true;
+}
+
+/* ---- OpenAI-dialect call that can carry images (serves OpenAI and Groq) ---- */
+async function chatOpenAIDialect(p: "openai" | "groq", parts: AIPart[], o: { system?: string; json?: boolean; temperature?: number; timeoutMs?: number }): Promise<string> {
+  const key = env(p === "openai" ? "OPENAI_API_KEY" : "GROQ_API_KEY");
+  if (!key) throw new ProviderError(p, 503, "no_key", `${p === "openai" ? "OPENAI_API_KEY" : "GROQ_API_KEY"} is not set`);
+  const content = parts.map(part => "text" in part
+    ? { type: "text", text: part.text }
+    : { type: "image_url", image_url: { url: `data:${part.image.mime};base64,${part.image.data}` } });
+  const body: any = {
+    model: p === "openai" ? openaiModel() : (hasImage(parts) ? groqVisionModel() : groqModel()),
+    messages: [...(o.system ? [{ role: "system", content: o.system }] : []), { role: "user", content }],
+  };
+  if (o.json) body.response_format = { type: "json_object" };
+  if (p === "groq") body.temperature = o.temperature ?? 0.2;
+  let r: Response;
+  try {
+    r = await fetch(ENDPOINT[p], {
+      method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+      body: JSON.stringify(body), signal: AbortSignal.timeout(o.timeoutMs ?? 45_000),
+    });
+  } catch (e: any) {
+    const t = /timeout|abort/i.test(String(e?.name || e?.message));
+    throw new ProviderError(p, 504, t ? "timeout" : "error", t ? `${p} took too long` : `${p} unreachable: ${e?.message || e}`);
+  }
+  const j: any = await r.json().catch(() => ({}));
+  if (!r.ok) throw new ProviderError(p, r.status, classify(r.status, j), j?.error?.message || `${p} error ${r.status}`);
+  const text = j?.choices?.[0]?.message?.content;
+  if (typeof text !== "string" || !text.trim()) throw new ProviderError(p, 502, "error", `${p} returned an empty answer`);
+  return text;
+}
+
+/* ---- Gemini, same shape in and out ---- */
+async function chatGemini(parts: AIPart[], o: { system?: string; json?: boolean; temperature?: number; timeoutMs?: number }): Promise<string> {
+  const key = env("GEMINI_API_KEY");
+  if (!key) throw new ProviderError("groq", 503, "no_key", "GEMINI_API_KEY is not set");   // provider field is cosmetic here
+  const body: any = {
+    contents: [{ role: "user", parts: parts.map(p => "text" in p ? { text: p.text } : { inline_data: { mime_type: p.image.mime, data: p.image.data } }) }],
+    generationConfig: { temperature: o.temperature ?? 0.2, ...(o.json ? { responseMimeType: "application/json" } : {}) },
+  };
+  if (o.system) body.systemInstruction = { parts: [{ text: o.system }] };
+  let r: Response;
+  try {
+    r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${geminiModel()}:generateContent`, {
+      method: "POST", headers: { "content-type": "application/json", "x-goog-api-key": key },
+      body: JSON.stringify(body), signal: AbortSignal.timeout(o.timeoutMs ?? 45_000),
+    });
+  } catch (e: any) {
+    const t = /timeout|abort/i.test(String(e?.name || e?.message));
+    throw new ProviderError("groq", 504, t ? "timeout" : "error", t ? "gemini took too long" : `gemini unreachable: ${e?.message || e}`);
+  }
+  const j: any = await r.json().catch(() => ({}));
+  if (!r.ok) throw new ProviderError("groq", r.status, classify(r.status, j), j?.error?.message || `gemini error ${r.status}`);
+  const text = (j?.candidates?.[0]?.content?.parts || []).map((x: any) => x.text || "").join("");
+  if (!text.trim()) throw new ProviderError("groq", 502, "error", "gemini returned an empty answer");
+  return text;
+}
+
+export type AIAttempt = { provider: AIProvider; ok: boolean; skipped?: boolean; kind?: string; message?: string };
+
+/** Ask one provider. Exported so a caller can pin one deliberately. */
+export const askOne = (p: AIProvider, parts: AIPart[], o: { system?: string; json?: boolean; temperature?: number; timeoutMs?: number } = {}) =>
+  p === "gemini" ? chatGemini(parts, o) : chatOpenAIDialect(p, parts, o);
+
+/** OpenAI → Gemini → Groq. Returns the first usable answer and how it got there. */
+export async function askAI(
+  parts: AIPart[],
+  o: { system?: string; json?: boolean; temperature?: number; timeoutMs?: number; accept?: (raw: any) => any } = {},
+  order: AIProvider[] = DEFAULT_ORDER,
+): Promise<{ text: string; data?: any; provider: AIProvider; attempts: AIAttempt[] }> {
+  const attempts: AIAttempt[] = [];
+  let asked = 0;
+  for (const p of order) {
+    if (!canServe(p, parts)) {
+      attempts.push({ provider: p, ok: false, skipped: true, message: hasImage(parts) && p === "groq" ? "no vision model configured" : "no API key" });
+      continue;
+    }
+    asked++;
+    try {
+      const text = await askOne(p, parts, o);
+      const data = o.json ? (o.accept ? o.accept(parseJsonLoose(text)) : parseJsonLoose(text)) : undefined;
+      attempts.push({ provider: p, ok: true });
+      return { text, data, provider: p, attempts };
+    } catch (e: any) {
+      attempts.push({ provider: p, ok: false, kind: e instanceof ProviderError ? e.kind : "error", message: String(e?.message || e).slice(0, 200) });
+    }
+  }
+  const why = attempts.map(a => `${a.provider}: ${a.skipped ? "skipped — " : ""}${a.message || "failed"}`).join(" · ");
+  throw Object.assign(
+    new Error(asked ? `Every AI provider failed. ${why}` : `No AI provider can do this yet. ${why}`),
+    { status: asked ? 502 : 503, attempts },
+  );
+}
