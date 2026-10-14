@@ -6,7 +6,9 @@ import { requirePerm } from "./scope";
 import { vendorCost } from "./vendors";
 import { getRule, priceFromCost, type PricingRule } from "./pricing";
 
-export type PhotoRow = { item: string; style: string; color: string; unit: string; hsn: string; qty: string; cost: string; rate: string };
+export type PhotoRow = { item: string; style: string; color: string; unit: string; hsn: string; qty: string; cost: string; rate: string;
+  /** set when autoArticle() invented the article because the bill printed none */
+  autoStyle?: boolean };
 export function pricePhotoRows(rows: PhotoRow[], rule: PricingRule): PhotoRow[] {
   return rows.map(r => {
     if (r.rate.trim() || !r.cost.trim() || !/^(PCS|PAIR|SET)$/i.test(r.unit.trim())) return r;
@@ -21,6 +23,33 @@ export function pricePhotoRows(rows: PhotoRow[], rule: PricingRule): PhotoRow[] 
 export function applyVendorTerms(rows: PhotoRow[], v?: Pick<Party, "less_pct" | "rate_divisor">): PhotoRow[] {
   return rows.map(r => ({ ...r, cost: vendorCost(r.cost, v) }));
 }
+/* Many of this shop's bills print no article number at all. The RLJ challan, for instance, lists
+   "CHOTI" seven times and "SETS" thirteen times, and the only thing telling those articles apart is
+   the rate. Without an article every line fails validation, and merging them by name would put seven
+   differently-priced articles onto one product.
+
+   So the article is built from the item and its cost — CHOTI-273, SETS-86 — which has the useful
+   property that re-buying the same thing at the same rate next month matches the SAME product
+   instead of making a new one. Two lines that collide (the same item at the same rate really is one
+   article) get a -2, -3 suffix rather than being silently combined, so the owner decides.
+
+   Only blank articles are filled; anything the bill actually printed is left exactly as read. */
+export function autoArticle(rows: PhotoRow[]): PhotoRow[] {
+  const used = new Set(rows.map(r => r.style.trim().toUpperCase()).filter(Boolean));
+  return rows.map(r => {
+    if (r.style.trim()) return r;
+    const name = r.item.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "").slice(0, 12) || "ITEM";
+    const rupees = (() => { try { const c = moneyInput(r.cost); return c > 0 ? String(Math.round(c / 100)) : ""; } catch { return ""; } })();
+    const stem = rupees ? `${name}-${rupees}` : name;
+    let style = stem;
+    for (let n = 2; used.has(style); n++) style = `${stem}-${n}`;
+    used.add(style);
+    return { ...r, style, autoStyle: true };
+  });
+}
+/** Articles this app invented because the bill printed none — shown to the owner before saving. */
+export const autoArticleCount = (rows: PhotoRow[]) => rows.filter(r => r.autoStyle).length;
+
 export function validatePhotoRows(rows: PhotoRow[]) {
   if (!rows.length || rows.length > 300) throw new Error("Review 1–300 purchase lines");
   return rows.map((r, i) => {
@@ -36,6 +65,27 @@ export function validatePhotoRows(rows: PhotoRow[]) {
     return { ...r, qty, cost, rate };
   });
 }
+
+/* Draft products for the on-screen sticker preview, so the owner sees the real label before
+   approving. The labels actually PRINTED are built from the saved purchase by
+   purchaseLabelJobs(), so the preview can never be the thing that goes to the printer. */
+export function draftLabelProducts(rows: PhotoRow[], by: string, rule: PricingRule, limit = 6): Product[] {
+  return rows.slice(0, limit).map(r => {
+    let cost = 0, rate = 0;
+    try { cost = moneyInput(r.cost); } catch { /* blank while typing */ }
+    try { rate = moneyInput(r.rate); } catch { /* blank while typing */ }
+    const unit = /^(PCS|PAIR|SET)$/i.test(r.unit.trim()) ? r.unit.trim().toUpperCase() : "PCS";
+    return {
+      ...blankProduct(by),
+      item: r.item.trim().toUpperCase(), style: r.style.trim().toUpperCase(), model: r.style.trim().toUpperCase(),
+      color: r.color.trim().toUpperCase(), type: unit, pack: 1, rate, cost,
+      cost_code: cost > 0 ? priceFromCost(cost, rule, 1, unit).cost_code : "",
+    };
+  });
+}
+
+/** Labels this bill will print, by the same rule the Labels page uses: one per PCS / PAIR / SET. */
+export const labelCountFor = (rows: { qty: number }[]) => rows.reduce((n, r) => n + r.qty, 0);
 
 export async function savePhotoPurchase(rows: PhotoRow[], input: { by: string; rack: string; supplierId: string; billNo: string; photoId?: string; note: string; invoiceTotal?: string }): Promise<Purchase> {
   requirePerm("purchases.photo", "saving purchase bill photos");

@@ -47,7 +47,7 @@ export const DEFAULT_CFG: LabelCfg = {
   show: { shop: true, item: true, style: true, color: true, rate: true, tk: false, code: false, qty: true, cost_code: false },
 };
 
-type Job = { p: Product; qtyOnLabel: number; copies: number };
+export type Job = { p: Product; qtyOnLabel: number; copies: number };
 
 export function validateLabelPrint(cfg: LabelCfg, jobs: Job[]) {
   if (![cfg.w, cfg.h, cfg.qr, cfg.font].every(n => Number.isFinite(n) && n > 0) || cfg.w > 200 || cfg.h > 300 || ![cfg.gapX, cfg.gapY, cfg.pad].every(n => Number.isFinite(n) && n >= 0) || ![cfg.offX, cfg.offY].every(Number.isFinite) || !Number.isSafeInteger(cfg.cols) || cfg.cols < 1 || cfg.cols > 20) throw new Error("Check label size, gaps and columns in printer settings");
@@ -330,7 +330,9 @@ function LabelSettings({ cfg, upd, sample, qty }: { cfg: LabelCfg; upd: (p: Part
   );
 }
 
-function PrintSheet({ cfg, jobs }: { cfg: LabelCfg; jobs: Job[] }) {
+/* Exported so the Stock-in bill reader prints through exactly this renderer.
+   Two code paths for one sticker is how label geometry drifts. */
+export function PrintSheet({ cfg, jobs }: { cfg: LabelCfg; jobs: Job[] }) {
   if (cfg.mode === "roll") {
     const pageW = cfg.cols * cfg.w + (cfg.cols - 1) * cfg.gapX;
     const rows: Job[][] = []; for (let i = 0; i < jobs.length; i += cfg.cols) rows.push(jobs.slice(i, i + cfg.cols));

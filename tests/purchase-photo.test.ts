@@ -75,3 +75,107 @@ describe("reviewed photo purchases", () => {
     expect(totals({ ...newBill("o", DEFAULT_SHOP), box_count: 2 }).box_count).toBe(2);
   });
 });
+
+/* The two bill shapes the shop actually hands over:
+   - a printed challan (RLJ 5494) with NO article column, "CHOTI"/"SETS"/"Copper Set" repeated
+     on 30 lines at different rates, and a Box column beside a piece count;
+   - a handwritten order/estimate form where quantity and rate are written together ("23x252").
+   Before autoArticle() every one of those lines failed validation for want of an article, and
+   any two that shared a name collided on save. */
+describe("bills that print no article number", () => {
+  const challan = (item: string, cost: string, qty: string): PhotoRow =>
+    ({ item, style: "", color: "", unit: "PCS", hsn: "", qty, cost, rate: "" });
+
+  it("builds an article from the item and its rate, so same-name lines stay separate", async () => {
+    const { autoArticle } = await import("../src/lib/purchase-photo");
+    const rows = autoArticle([
+      challan("CHOTI", "273", "23"), challan("CHOTI", "176", "5"), challan("CHOTI", "190", "5"),
+      challan("SETS", "255", "33"), challan("SETS", "86", "40"), challan("Copper Set", "980", "2"),
+    ]);
+    expect(rows.map(r => r.style)).toEqual(["CHOTI-273", "CHOTI-176", "CHOTI-190", "SETS-255", "SETS-86", "COPPERSET-980"]);
+    expect(rows.every(r => r.autoStyle)).toBe(true);
+    expect(new Set(rows.map(r => r.style)).size).toBe(rows.length);
+  });
+
+  it("separates two lines of the same item at the same rate instead of silently merging them", async () => {
+    const { autoArticle } = await import("../src/lib/purchase-photo");
+    // the real challan has SETS at 91.00 on both line 13 and line 18
+    const rows = autoArticle([challan("SETS", "91", "20"), challan("SETS", "91", "8")]);
+    expect(rows.map(r => r.style)).toEqual(["SETS-91", "SETS-91-2"]);
+  });
+
+  it("never touches an article the bill actually printed", async () => {
+    const { autoArticle } = await import("../src/lib/purchase-photo");
+    const rows = autoArticle([
+      { ...challan("KADA", "112", "12"), style: "0705" },
+      challan("KADA", "100", "12"),
+    ]);
+    expect(rows[0].style).toBe("0705");
+    expect(rows[0].autoStyle).toBeUndefined();
+    expect(rows[1].style).toBe("KADA-100");
+  });
+
+  it("turns a whole page of that challan into saveable lines and the right label count", async () => {
+    const { autoArticle } = await import("../src/lib/purchase-photo");
+    const page = [
+      ["CHOTI", "273", "23"], ["CHOTI", "176", "5"], ["CHOTI", "190", "5"], ["CHOTI", "149", "11"],
+      ["CHOTI", "196", "11"], ["CHOTI", "216", "11"], ["CHOTI", "162", "18"], ["SETS", "255", "33"],
+      ["SETS", "86", "40"], ["SETS", "90", "17"], ["SETS", "121", "12"], ["SETS", "193", "16"],
+      ["SETS", "91", "20"], ["SETS", "100", "16"], ["SETS", "83", "18"], ["SETS", "95", "17"],
+      ["SETS", "92", "16"], ["SETS", "91", "8"], ["SETS", "125", "6"], ["SETS", "76", "144"],
+    ].map(([i, c, q]) => challan(i, c, q));
+    const rows = pricePhotoRows(autoArticle(page), DEFAULT_RULE);
+    const checked = validatePhotoRows(rows);              // would have thrown before autoArticle
+    expect(checked).toHaveLength(20);
+    expect(checked.reduce((n, r) => n + r.qty, 0)).toBe(447);   // one label per piece
+    // qty x cost must reproduce the bill's own arithmetic: the 20 printed line totals
+    // (6279 + 880 + 950 + ... + 10944) add up to Rs 55,544.00
+    expect(checked.reduce((n, r) => n + r.qty * r.cost, 0)).toBe(5554400);
+  });
+
+  it("saves a no-article bill end to end and gives every line its own product", async () => {
+    setScopePerms(new Set(["purchases.photo", "products.edit", "stock.in"]));
+    const { autoArticle } = await import("../src/lib/purchase-photo");
+    const rows = pricePhotoRows(autoArticle([
+      challan("CHOTI", "273", "23"), challan("CHOTI", "176", "5"), challan("SETS", "91", "20"), challan("SETS", "91", "8"),
+    ]), DEFAULT_RULE);
+    const p = await savePhotoPurchase(rows, { ...input, billNo: "5494" });
+    expect(p.status).toBe("final");
+    expect(p.items).toHaveLength(4);
+    const products = await db.products.toArray();
+    expect(products).toHaveLength(4);
+    expect(new Set(products.map(x => x.code)).size).toBe(4);     // distinct codes, so a scan is unambiguous
+    expect(new Set(products.map(x => x.style)).size).toBe(4);
+    expect(p.items.reduce((n, l) => n + l.qty, 0)).toBe(56);
+    setScopePerms(new Set());
+  });
+
+  it("re-buying the same item at the same rate matches the existing product instead of making a new one", async () => {
+    setScopePerms(new Set(["purchases.photo", "products.edit", "stock.in"]));
+    const { autoArticle } = await import("../src/lib/purchase-photo");
+    const once = pricePhotoRows(autoArticle([challan("CHOTI", "273", "23")]), DEFAULT_RULE);
+    await savePhotoPurchase(once, { ...input, billNo: "5494" });
+    const again = pricePhotoRows(autoArticle([challan("CHOTI", "273", "10")]), DEFAULT_RULE);
+    await savePhotoPurchase(again, { ...input, billNo: "5611" });
+    expect(await db.products.count()).toBe(1);                   // same article, restocked
+    expect(await db.purchases.count()).toBe(2);
+    setScopePerms(new Set());
+  });
+});
+
+describe("sticker preview before approval", () => {
+  it("shows the real sticker fields, and never becomes the thing that prints", async () => {
+    const { draftLabelProducts } = await import("../src/lib/purchase-photo");
+    const [p] = draftLabelProducts([{ ...row, item: "choti", style: "choti-273", cost: "273", rate: "550" }], "owner", DEFAULT_RULE);
+    expect(p.item).toBe("CHOTI");
+    expect(p.style).toBe("CHOTI-273");
+    expect(p.rate).toBe(55000);
+    expect(p.cost).toBe(27300);
+    expect(p.cost_code).toBeTruthy();     // the owner's cost cipher, as on the packet stickers
+    expect(p.pack).toBe(1);
+  });
+  it("does not throw while a cost is half-typed", async () => {
+    const { draftLabelProducts } = await import("../src/lib/purchase-photo");
+    expect(() => draftLabelProducts([{ ...row, cost: "", rate: "" }], "owner", DEFAULT_RULE)).not.toThrow();
+  });
+});

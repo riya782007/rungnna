@@ -710,6 +710,11 @@ html{scrollbar-gutter:stable}
 .perm{display:flex;gap:8px;align-items:flex-start;font-size:14px;padding:4px 0;cursor:pointer}
 .perm input{margin-top:3px;accent-color:var(--em-d)}
 .perm-flag{margin-left:6px;vertical-align:1px;padding:0 6px;font-size:10px;letter-spacing:.02em;text-transform:uppercase}
+
+/* Stock in › bill reader: the sticker preview, and the articles the app had to invent */
+.label-preview{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:12px;background:var(--fill);border:1px solid var(--line);border-radius:var(--r)}
+.label-preview .lbl{background:#fff;box-shadow:var(--sh)}
+.in.auto-filled{background:var(--gold-l);border-color:var(--gold)}
 .perm-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
 .role-card summary{list-style:none;cursor:pointer}.role-card summary::-webkit-details-marker{display:none}
 .role-editor{box-shadow:none}
