@@ -55,12 +55,14 @@ begin
 end
 $fn$;
 
--- the old 6-argument overload refuses, so a /dealer page cached before this deploy cannot
--- create a stateless dealer account
+-- The old 6-argument overload refuses, so a /dealer page served before this deploy cannot create
+-- a stateless dealer account. The wording is for the window between this migration and the
+-- matching deploy, when refreshing the page will NOT help — so it sends the dealer to the shop
+-- rather than into a loop.
 create or replace function dealer_register(p_phone text, p_name text, p_shop text, p_city text, p_gstin text, p_pin text)
 returns text language plpgsql security definer set search_path = public, extensions as $fn$
 begin
-  raise exception 'Please refresh this page and register again - we now need your state for GST';
+  raise exception 'Sign-up is being updated right now - please call or WhatsApp the shop and we will register you';
 end
 $fn$;
 
