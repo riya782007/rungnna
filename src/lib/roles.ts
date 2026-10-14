@@ -85,7 +85,8 @@ const STOCK = ["stock.view", "stock.in", "stock.move", "stock.count", "racks.man
 const COUNTER = ["billing.sell", "billing.returns", "billing.merge", "customers.manage", "receipts.take", "money.vouchers"];
 export const BUILTIN: Record<Staff["role"], string[]> = {
   owner: ALL_PERMS,
-  manager: [...STOCK, ...COUNTER, "sales.today", "billing.rates", "billing.discount_over", "billing.void", "estimates.delete", "settings.manage", "rates.view", "suppliers.manage", "ai.use"],
+  // a manager already runs suppliers and purchases, so reading a supplier's bill photo belongs here
+  manager: [...STOCK, ...COUNTER, "sales.today", "billing.rates", "billing.discount_over", "billing.void", "estimates.delete", "settings.manage", "rates.view", "suppliers.manage", "purchases.photo", "ai.use"],
   cashier: [...STOCK, ...COUNTER, "sales.today"],
   salesman: [...STOCK, ...COUNTER],
   helper: [...STOCK],
