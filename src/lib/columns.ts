@@ -8,7 +8,7 @@ export const COLUMNS: Record<string, readonly string[]> = {
   config: ["deleted","id","updated_at","value"],
   dealer_secrets: ["dealer_id","failed","locked_until","pin_hash"],
   dealer_sessions: ["created_at","dealer_id","expires_at","token_hash"],
-  dealers: ["city","created_at","deleted","gstin","id","name","note","party_id","phone","shop_name","status","updated_at"],
+  dealers: ["city","created_at","deleted","gstin","id","name","note","party_id","phone","shop_name","state","status","updated_at"],
   fiscal_year_closes: ["at","by_staff","closed_upto","customer_balances","deleted","device","fy","id","supplier_balances","updated_at"],
   import_batches: ["at","by_staff","changes","deleted","filename","id","store_id","undone","updated_at"],
   invoice_series: ["block_from","block_to","device","id","next_no","series","updated_at"],

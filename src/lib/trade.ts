@@ -10,11 +10,16 @@ export const dealerUrl = () => `${location.origin}/dealer`;
 
 /** The customer account for a dealer: the linked one, else one with the same mobile, else a new wholesale customer. */
 export async function partyForDealer(d: Dealer): Promise<Party> {
-  if (d.party_id) { const p = await db.parties.get(d.party_id); if (p && !p.deleted) return p; }
+  const fill = async (p: Party) => {
+    // the state decides CGST+SGST vs IGST: if the account has none and the dealer gave one, use it
+    if (!p.state && d.state) { const fixed = { ...p, state: d.state }; await put("parties", fixed); return fixed; }
+    return p;
+  };
+  if (d.party_id) { const p = await db.parties.get(d.party_id); if (p && !p.deleted) return fill(p); }
   const phone = normPhone(d.phone);
   const same = await db.parties.filter(p => !p.deleted && p.kind !== "supplier" && normPhone(p.phone) === phone).first();
-  if (same) return same;
-  const p: Party = { ...newParty(d.shop_name || d.name, d.phone), kind: "dealer", city: d.city, gstin: d.gstin, tier: "wholesale",
+  if (same) return fill(same);
+  const p: Party = { ...newParty(d.shop_name || d.name, d.phone), kind: "dealer", city: d.city, gstin: d.gstin, state: d.state || "", tier: "wholesale",
     notes: `Dealer portal${d.shop_name && d.name ? " · " + d.name : ""}` };
   await put("parties", p);
   return p;
@@ -41,7 +46,7 @@ export async function orderToBill(o: TradeOrder, type: BillType, by: string): Pr
   const items = o.items.map(l => fixLine({ ...lineFrom(products.get(l.product_id)!, 1, 0, "wholesale"), pkts: 0, qty: l.qty, rate: l.rate }));
   const b0 = newBill(by, shop, type);
   const b = totals({ ...b0, items, party_id: party?.id, party_name: party?.name || o.dealer_shop || o.dealer_name, party_phone: o.dealer_phone,
-    party_gstin: party?.gstin || dealer?.gstin || "", party_state: party?.state || "", party_address: party ? [party.address, party.city, party.pin].filter(Boolean).join(", ") : "",
+    party_gstin: party?.gstin || dealer?.gstin || "", party_state: party?.state || dealer?.state || "", party_address: party ? [party.address, party.city, party.pin].filter(Boolean).join(", ") : "",
     price_level: "wholesale", remarks: [`Trade order ${o.no}`, o.note].filter(Boolean).join(" · ") }, shop.state, shop.gstin);
   await db.transaction("rw", [db.bills, db.trade_orders, db.outbox], async () => {
     await holdBill(b);

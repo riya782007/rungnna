@@ -77,7 +77,12 @@ export async function GET(req: Request) {
     }
 
     if (view === "catalogue") {
-      const [cat] = await rest<Catalogue[]>(`public_catalogues?select=*&slug=eq.${encodeURIComponent(slug)}&limit=1`);
+      // fetched by slug through a keyed function, never listed: a curated catalogue is sent to ONE
+      // buyer, and its title/note can name them. anon has no SELECT on the view any more, so a
+      // dealer holding this page's key cannot enumerate the collections made for other buyers.
+      const [cat] = await rest<Catalogue[]>("rpc/catalogue_by_slug", {
+        method: "POST", body: JSON.stringify({ p_slug: slug }),
+      });
       if (!cat) return out(renderNotFound(shop, base, "catalogue"), 404, undefined, PRIVATE);
       const ids = (Array.isArray(cat.product_ids) ? cat.product_ids : []).filter(x => typeof x === "string").slice(0, 500);
       const found = ids.length ? await rest<PubProduct[]>(`public_products?select=*&id=in.${encodeURIComponent(inList(ids))}`) : [];

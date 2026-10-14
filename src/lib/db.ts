@@ -189,6 +189,7 @@ export interface Staff extends Row {
 /* A retailer on the dealer portal (registers online, the shop approves). PIN never leaves the server. */
 export interface Dealer extends Row {
   phone: string; name: string; shop_name: string; city: string; gstin: string;
+  state: string;   // taken at sign-up: it decides CGST+SGST vs IGST on this dealer's bills
   status: "pending" | "approved" | "blocked"; party_id?: string | null; note: string; created_at: string;
 }
 export type TradeOrderLine = { product_id: string; code: string; title: string; item: string; style: string; color: string; size?: string | null; pack: number; qty: number; rate: number; amount: number };

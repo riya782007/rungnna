@@ -39,6 +39,7 @@ function script(cfg: { url: string; key: string }, shop: Shop): string {
   return `(()=>{"use strict";
 const API=${JSON.stringify(cfg.url)}+"/rest/v1/rpc/",KEY=${JSON.stringify(cfg.key)},WA=${JSON.stringify(wa.length === 10 ? "91" + wa : wa)};
 const $=s=>document.querySelector(s),root=$("#dp"),T="rj_dealer",C="rj_dealer_cart";
+const ST=["Andaman and Nicobar Islands", "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chandigarh", "Chhattisgarh", "Dadra and Nagar Haveli and Daman and Diu", "Delhi", "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jammu and Kashmir", "Jharkhand", "Karnataka", "Kerala", "Ladakh", "Lakshadweep", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram", "Nagaland", "Odisha", "Puducherry", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu", "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal", "Other Territory"];
 const e=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const inr=p=>"₹"+(Math.round(p)/100).toLocaleString("en-IN",{maximumFractionDigits:2});
 const get=k=>{try{return localStorage.getItem(k)}catch{return null}},set=(k,v)=>{try{v==null?localStorage.removeItem(k):localStorage.setItem(k,v)}catch{}};
@@ -56,7 +57,7 @@ function auth(){const reg=state.mode==="register";return '<div class="auth"><hea
  '<div style="padding-top:16px" class="tabs"><button data-m="login" aria-pressed="'+!reg+'">Log in</button><button data-m="register" aria-pressed="'+reg+'">New dealer</button></div>'+
  '<form id="af">'+(state.msg?'<div class="msg'+(state.bad?" bad":"")+'">'+e(state.msg)+'</div>':"")+
  '<label>Mobile number<input class="in" name="phone" inputmode="tel" autocomplete="tel" required placeholder="10-digit mobile"></label>'+
- (reg?'<label>Your name<input class="in" name="name" required autocomplete="name"></label><label>Shop name<input class="in" name="shop" autocomplete="organization"></label><label>City<input class="in" name="city"></label><label>GSTIN (optional)<input class="in" name="gstin" maxlength="15" style="text-transform:uppercase"></label>':"")+
+ (reg?'<label>Your name<input class="in" name="name" required autocomplete="name"></label><label>Shop name<input class="in" name="shop" autocomplete="organization"></label><label>City<input class="in" name="city"></label>'+'<label>State<select class="in" name="state" required><option value="">Choose your state…</option>'+ST.map(x=>'<option value="'+e(x)+'">'+e(x)+'</option>').join("")+'</select></label>'+'<label>GSTIN (optional)<input class="in" name="gstin" maxlength="15" style="text-transform:uppercase"></label>':"")+
  '<label>'+(reg?"Choose a 4–6 digit PIN":"PIN")+'<input class="in" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4,6}" maxlength="6" required autocomplete="'+(reg?"new-password":"current-password")+'"></label>'+
  '<button class="btn" '+(state.busy?"disabled":"")+'>'+(state.busy?"Please wait…":reg?"Register":"Log in")+'</button>'+
  (WA?'<a class="mut" style="font-size:13px" href="https://wa.me/'+WA+'?text='+encodeURIComponent("Hello, I need help with the dealer portal")+'">Forgot PIN? Message the shop</a>':"")+'</form></div>'}
@@ -84,10 +85,10 @@ function draw(){root.innerHTML=state.mode==="shop"?shopView():auth();bind()}
 function bind(){
  root.querySelectorAll("[data-m]").forEach(b=>b.onclick=()=>{state.mode=b.dataset.m;state.msg="";draw()});
  const f=$("#af");if(f)f.onsubmit=async ev=>{ev.preventDefault();const d=Object.fromEntries(new FormData(f));state.busy=true;draw();
-  try{if(state.mode==="register"){await rpc("dealer_register",{p_phone:d.phone,p_name:d.name,p_shop:d.shop||"",p_city:d.city||"",p_gstin:d.gstin||"",p_pin:d.pin});state.busy=false;state.mode="login";msg("Registered! The shop will approve your account — you'll get a WhatsApp, then log in here.");return}
+  try{if(state.mode==="register"){await rpc("dealer_register",{p_phone:d.phone,p_name:d.name,p_shop:d.shop||"",p_city:d.city||"",p_gstin:d.gstin||"",p_pin:d.pin,p_state:d.state||""});state.busy=false;state.mode="login";msg("Registered! The shop will approve your account — you'll get a WhatsApp, then log in here.");return}
    const r=await rpc("dealer_login",{p_phone:d.phone,p_pin:d.pin});state.busy=false;if(r&&r.error){msg(r.error,true);return}set(T,r.token);state.msg="";await boot()}
   catch(x){state.busy=false;msg(x.message,true)}};
- const out=$("#out");if(out)out.onclick=async()=>{const t=get(T);set(T,null);try{await rpc("dealer_logout",{p_token:t})}catch{}state.mode="login";state.info=null;draw()};
+ const out=$("#out");if(out)out.onclick=async()=>{const t=get(T);set(T,null);set(C,null);state.cart={};try{await rpc("dealer_logout",{p_token:t})}catch{}state.mode="login";state.info=null;state.items=[];draw()};
  const q=$("#q");if(q)q.oninput=()=>{state.q=q.value;const pos=q.selectionStart;draw();const n=$("#q");n.focus();n.setSelectionRange(pos,pos)};
  root.querySelectorAll("[data-c]").forEach(a=>a.onclick=ev=>{ev.preventDefault();state.cat=a.dataset.c;draw()});
  root.querySelectorAll("[data-d]").forEach(b=>b.onclick=()=>{const id=b.dataset.id,n=Math.max(0,Math.min(999,(state.cart[id]||0)+Number(b.dataset.d)));if(n)state.cart[id]=n;else delete state.cart[id];save();state.msg="";draw()});
