@@ -10,6 +10,7 @@ import { getShop, saveShop, counterCode, DEFAULT_SHOP, type Shop } from "../lib/
 import { health, type Health } from "../lib/ai";
 import { can, ROLE_NOTE, roleName } from "../lib/roles";
 import { RoleSelect } from "./Roles";
+import { codeMatches, getOpenCode, setOpenCode, DEFAULT_OPEN_CODE } from "../lib/openCode";
 import { getPrivate, setCode, lockNow, usePrivate } from "../lib/privacy";
 import { getRule, saveRule, validateKey, priceFromCost, DEFAULT_RULE, type PricingRule, type RoundTo } from "../lib/pricing";
 import { rupees, toPaise } from "../lib/format";
@@ -47,6 +48,12 @@ export default function Settings() {
             }}>{me.pin ? "Change my PIN" : "Set my PIN"}</button>}
             {me?.role === "owner" && !me.pin && <div className="note warn sm">Set a PIN — it's needed to approve big discounts and to keep your owner access safe.</div>}
           </div>
+
+          {boss && <div className="card"><header><h3>Shop passcode</h3></header>
+            <div className="pad stack">
+              <div className="sm mut">The phrase that opens this app on any counter. It keeps a passer-by out of the till; what a person may actually do is still decided by their role.</div>
+              <OpenCodeSetting />
+            </div></div>}
 
           <div className="card"><header><h3>Cloud backup</h3><span className="grow" />
             <span className={"pill " + (!sync?.user ? "warn" : sync?.status === "idle" ? "ok" : sync?.status === "error" ? "bad" : "warn")}>{!sync?.user ? "not connected" : sync?.status === "idle" ? "all saved" : sync?.status}</span></header>
@@ -186,28 +193,34 @@ export function ShopLogin({ onDone }: { onDone?: () => void }) {
 export function WhoAreYou() {
   const { setMe } = useApp();
   const staff = useLiveQuery(() => db.staff.filter(s => !s.deleted && !!s.active).toArray(), [], []);
-  const [sync, setSync] = useState<SyncState>();
+  const [code, setCode] = useState("");
+  const [saved, setSaved] = useState<string | null>(null);
+  const [bad, setBad] = useState(false);
+  const [people, setPeople] = useState(false);      // the full person + PIN flow, on request
   const [pick, setPick] = useState<Staff | null>(null);
   const [pin, setPin] = useState("");
   const [owner, setOwner] = useState("");
-  useEffect(() => onSync(setSync) as any, []);
+  useEffect(() => { getOpenCode().then(setSaved); }, []);
   const needsName = staff.length === 1 && staff[0].name === "Owner";
+
+  const open = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!codeMatches(code, saved)) { setBad(true); setCode(""); return; }
+    // one phrase, straight in as the owner; a person can still be chosen below
+    const who = staff.find(s => s.role === "owner") || staff[0];
+    if (who) setMe(who);
+  };
+
   return (
     <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 16 }}>
       <div className="card" style={{ maxWidth: 440, width: "100%" }}>
         <header style={{ background: "linear-gradient(140deg,var(--emerald-dk),var(--emerald))", color: "#fff", borderRadius: "14px 14px 0 0" }}>
           <span className="mark">R</span><div><b style={{ font: "700 26px/1 var(--display)", color: "var(--gold-l)" }}>Rungnna</b><div className="xs" style={{ opacity: .7 }}>Jewellery &amp; Co · Shop OS</div></div></header>
         <div className="pad stack">
-          {!sync?.user && sync?.status !== "local" && (
-            <details open={!sync?.user} className="stack">
-              <summary className="b sm">1 · Connect this device to the shop (once)</summary>
-              <div className="xs mut" style={{ margin: "6px 0" }}>So everything recorded here is backed up and shows on every other phone. You can skip and connect later — nothing is lost.</div>
-              <ShopLogin />
-            </details>)}
-          <div className="b sm">{sync?.user ? "Connected ✓ — " : ""}Who is using this device?</div>
           {needsName ? (
             <div className="stack">
-              <label className="f">Owner's name<input className="in" value={owner} onChange={e => setOwner(e.target.value)} placeholder="e.g. Karan" /></label>
+              <div className="b sm">Welcome — who owns this shop?</div>
+              <label className="f">Owner's name<input className="in" autoFocus value={owner} onChange={e => setOwner(e.target.value)} placeholder="e.g. Karan" /></label>
               <button className="btn p" disabled={!owner.trim()} onClick={async () => { const s = { ...staff[0], name: owner.trim() }; await put("staff", s); setMe(s); }}>Start</button>
             </div>
           ) : pick ? (
@@ -216,12 +229,46 @@ export function WhoAreYou() {
               <input className="in mono" autoFocus inputMode="numeric" maxLength={4} value={pin} onChange={e => { const v = e.target.value.replace(/\D/g, ""); setPin(v); if (v.length === 4) { if (v === pick.pin) setMe(pick); else { toast("Wrong PIN", true); setPin(""); } } }} />
               <button className="btn" onClick={() => { setPick(null); setPin(""); }}>Back</button>
             </div>
-          ) : (
+          ) : people ? (
             <div className="stack" style={{ gap: 6 }}>
+              <div className="b sm">Who is using this device?</div>
               {staff.map(s => <button key={s.id} className="item" onClick={() => s.pin ? setPick(s) : setMe(s)}><span className="thumb" style={{ width: 36, height: 36 }}>{s.name.slice(0, 1)}</span><span className="grow b">{s.name}</span><span className="xs mut">{s.role}</span></button>)}
-            </div>)}
+              <button className="linkbtn" onClick={() => setPeople(false)}>Back</button>
+            </div>
+          ) : (
+            <form className="stack" onSubmit={open}>
+              <label className="f">Shop passcode
+                <input className="in" autoFocus type="password" autoComplete="current-password"
+                  placeholder="Type the shop passcode" value={code}
+                  onChange={e => { setCode(e.target.value); setBad(false); }} /></label>
+              {bad && <div className="note warn" role="alert">That is not the shop passcode. Ask the owner.</div>}
+              <button className="btn p" disabled={!code.trim()}>Open</button>
+              <button type="button" className="linkbtn" onClick={() => setPeople(true)}>Use a different person</button>
+              <div className="xs mut">Backing up to the cloud is set up once in Settings — the shop works fully without it.</div>
+            </form>
+          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* The phrase that opens the app on a counter (lib/openCode). */
+function OpenCodeSetting() {
+  const [code, setCode] = useState("");
+  const [show, setShow] = useState(false);
+  useEffect(() => { getOpenCode().then(setCode); }, []);
+  return (
+    <div className="stack">
+      <label className="f">Passcode
+        <input className="in" type={show ? "text" : "password"} value={code} onChange={e => setCode(e.target.value)} placeholder={DEFAULT_OPEN_CODE} /></label>
+      <div className="row">
+        <button className="btn" onClick={() => setShow(!show)}>{show ? "Hide" : "Show"}</button>
+        <button className="btn p" onClick={async () => { const saved = await setOpenCode(code); setCode(saved); toast("Passcode saved — it opens every counter after the next sync"); }}>Save passcode</button>
+        <span className="grow" />
+        <button className="btn sm" onClick={async () => { const saved = await setOpenCode(DEFAULT_OPEN_CODE); setCode(saved); toast("Back to " + DEFAULT_OPEN_CODE); }}>Reset</button>
+      </div>
+      <div className="xs mut">Spaces and capitals do not matter. Leaving it empty puts it back to “{DEFAULT_OPEN_CODE}”, so a counter can never lock the shop out.</div>
     </div>
   );
 }
