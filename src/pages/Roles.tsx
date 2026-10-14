@@ -4,6 +4,7 @@ import { db, put, now, uid, type Config, type Staff } from "../lib/db";
 import { Head } from "../components/common";
 import { useApp, toast } from "../lib/app";
 import { PERMISSION_GROUPS, BUILTIN, ROLE_NOTE, permLabel, customRoles, type CustomRole } from "../lib/roles";
+import { requirePerm } from "../lib/scope";
 
 /* Roles & permissions — granular, grouped control in the style of the reference console.
    The built-in roles keep the shop's original rules; the owner makes new roles from scratch
@@ -12,6 +13,7 @@ import { PERMISSION_GROUPS, BUILTIN, ROLE_NOTE, permLabel, customRoles, type Cus
 const BASES: Staff["role"][] = ["manager", "cashier", "salesman", "helper", "packer"];
 
 async function saveRoles(roles: CustomRole[]) {
+  requirePerm("staff.manage", "changing roles");
   await put("config", { id: "roles", value: { roles }, updated_at: now() } as Config);
 }
 

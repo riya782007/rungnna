@@ -3,7 +3,9 @@ import { blankProduct, saveProduct } from "./products";
 import { newPurchase, finalizePurchase } from "./stockin";
 import { getRule, priceFromCost } from "./pricing";
 import { requirePerm } from "./scope";
-import { uid } from "./db";
+import { assertLocation } from "./stores";
+import { assertUnlocked } from "./finance";
+import { uid, now } from "./db";
 
 /* ===========================================================================
    Add inventory — one design, many variants, in one go (the reference console's
@@ -54,11 +56,15 @@ export function validateDesign(d: DesignInput): string | null {
   return null;
 }
 
+/** Sizes are matched and stored through this one function, so "2.4 ", "2.4" and "Free Size"
+    can't fork one design into three products on three intakes. */
+export const normSize = (s = "") => s.trim().toUpperCase();
+
 /** The same variant already in the catalogue: style + colour + size + vendor. */
 async function existing(d: DesignInput, v: Variant): Promise<Product | undefined> {
-  const style = d.style.trim().toUpperCase(), color = v.color.trim().toUpperCase(), size = v.size.trim();
+  const style = d.style.trim().toUpperCase(), color = v.color.trim().toUpperCase(), size = normSize(v.size);
   const rows = await db.products.where("style").equals(style).toArray();
-  return rows.find(p => !p.deleted && (p.color || "").toUpperCase() === color && (p.size || "") === size && (p.vendor_id || "") === (d.vendor_id || ""));
+  return rows.find(p => !p.deleted && (p.color || "").toUpperCase() === color && normSize(p.size || "") === size && (p.vendor_id || "") === (d.vendor_id || ""));
 }
 
 export async function createDesign(d: DesignInput): Promise<{ products: Product[]; purchase?: Purchase }> {
@@ -66,17 +72,31 @@ export async function createDesign(d: DesignInput): Promise<{ products: Product[
   const why = validateDesign(d); if (why) throw new Error(why);
   if (d.variants.some(v => v.qty > 0)) requirePerm("stock.in", "stock in");
   const rule = await getRule();
+  /* Pre-flight the checks finalizePurchase would make LAST. It runs outside the product
+     transaction, so a locked period or a bad rack used to leave every variant created with
+     zero stock and no stock-in to match — a mess to unpick by hand. Fail before writing. */
+  if (d.variants.some(v => v.qty > 0)) { await assertLocation(d.rack); await assertUnlocked(now()); }
   const products: Product[] = [], lines: PurchaseLine[] = [];
+  const minted = new Set<string>();
   await db.transaction("rw", [db.products, db.outbox, db.config, db.settings], async () => {
     for (const v of d.variants) {
       const typed = v.rate || d.rate;
       const priced = d.cost ? priceFromCost(d.cost, rule, d.pack, d.type) : null;
-      const rate = typed || priced?.rate || 0;
-      if (!rate) throw new Error(`Enter a rate for ${v.color || d.style}`);
       const old = await existing(d, v);
+      // a hand-set rate stays hand-set: re-stocking must never quietly re-price it from the rule
+      const rate = typed || (old?.price_locked ? old.rate : priced?.rate) || 0;
+      if (!rate) throw new Error(`Enter a rate for ${v.color || d.style}`);
       const base: Product = old || { ...blankProduct(d.by), photo_id: d.photo_id };
+      // belt and braces on top of the counter in newCode: never hand out a code this device already uses
+      if (!old) {
+        for (let i = 0; minted.has(base.code) || await db.products.where("code").equals(base.code).count(); i++) {
+          if (i > 50) throw new Error("Could not make a unique product code — try again");
+          base.code = blankProduct(d.by).code;
+        }
+        minted.add(base.code);
+      }
       const p: Product = {
-        ...base, item: d.item, type: d.type || "PCS", style: d.style, model: d.style, color: v.color, size: v.size || undefined,
+        ...base, item: d.item, type: d.type || "PCS", style: d.style, model: d.style, color: v.color, size: normSize(v.size) || undefined,
         vendor_id: d.vendor_id || undefined, vendor_name: d.vendor_name || undefined,
         category: d.category ?? base.category, collection: d.collection || base.collection, material: d.material || base.material,
         hsn: d.hsn?.trim() || base.hsn, ...(d.gst_rate != null ? { gst_rate: d.gst_rate } : {}),

@@ -60,6 +60,7 @@ const ROUTE_PERM: Record<string, string> = {
   reports: "reports.view", ask: "ai.use", scan: "stock.in", stockin: "stock.in", recheck: "stock.count", rfid: "stock.count",
   labels: "labels.print", catalogue: "catalogue.share", racks: "racks.manage", move: "stock.move", products: "stock.view", product: "stock.view",
   activity: "stock.view", add: "products.edit", dealers: "dealers.manage", import: "import.data", bank: "bank.reconcile", stores: "stores.transfer", roles: "staff.manage",
+  settings: "settings.manage",
 };
 
 function useSync() {

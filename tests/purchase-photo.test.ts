@@ -64,7 +64,10 @@ describe("reviewed photo purchases", () => {
   it("restricts purchase-photo saves to owners and roles granted it", async () => {
     setScope(MAIN_STORE, "salesman"); setScopePerms(new Set());
     await expect(savePhotoPurchase([row], input)).rejects.toThrow("doesn't allow");
+    // purchases.photo alone is not enough: the save also creates the products it read off the bill
     setScopePerms(new Set(["purchases.photo"]));
+    await expect(savePhotoPurchase([row], input)).rejects.toThrow("adding or editing products");
+    setScopePerms(new Set(["purchases.photo", "products.edit", "stock.in"]));
     await expect(savePhotoPurchase([row], input)).resolves.toMatchObject({ status: "final" });
     setScopePerms(new Set());
   });

@@ -2,6 +2,7 @@ import { db, put, now, type Product, type Config } from "./db";
 import { api, blobToB64 } from "./ai";
 import { slugify } from "../../api/_listing";
 import type { ListingContent } from "../../api/_listing";
+import { requirePerm } from "./scope";
 
 /* Client side of the online catalogue: write a product page with AI, publish it,
    and manage the trade portal + shareable catalogues. The pages themselves are
@@ -61,6 +62,7 @@ export async function getTradePortal(): Promise<TradePortal | null> {
   return c && !c.deleted ? (c.value as TradePortal) : null;
 }
 export async function saveTradePortal(v: TradePortal) {
+  requirePerm("catalogue.share", "trade portal settings");
   await put("config", { id: "trade_portal", value: v, updated_at: now() } as Config);
 }
 
@@ -69,11 +71,13 @@ export async function listCatalogues(): Promise<CatalogueRow[]> {
   return rows.map(r => ({ ...(r.value as CatalogueRow), slug: r.id.slice(10) })).sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
 export async function saveCatalogue(c: CatalogueRow) {
+  requirePerm("catalogue.share", "sharing a catalogue");
   const v = { ...c, key: c.audience === "trade" ? c.key || randomKey() : undefined };
   await put("config", { id: "catalogue:" + c.slug, value: v, updated_at: now() } as Config);
   return v;
 }
 export async function deleteCatalogue(slug: string) {
+  requirePerm("catalogue.share", "removing a catalogue");
   const r = await db.config.get("catalogue:" + slug);
   if (r) await put("config", { ...r, deleted: 1 });
 }

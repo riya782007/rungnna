@@ -18,7 +18,8 @@ import {
    private trade portal link, and collections to send to any buyer. */
 export default function Catalogue() {
   const { me } = useApp();
-  const admin = can(me, "settings");
+  // this page publishes and rotates the trade link, so it is catalogue.share — not shop settings
+  const admin = can(me, "catalogue.share");
   const products = useLiveQuery(() => db.products.filter(p => !p.deleted).toArray(), [], [] as Product[]);
   const cfgStamp = useLiveQuery(() => db.config.filter(c => c.id === "trade_portal" || c.id.startsWith("catalogue:")).toArray().then(r => r.map(x => x.updated_at + (x.deleted || "")).join()), [], "");
   const [portal, setPortal] = useState<TradePortal | null>(null);

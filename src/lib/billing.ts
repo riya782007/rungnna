@@ -7,6 +7,7 @@ import { currentStore, inStore, assertStoreRow, storeLocations } from "./stores"
 import { fillBillNames } from "./billing-products";
 import { validatePosLines } from "./pos";
 import { isInterState } from "./states";
+import { requirePerm } from "./scope";
 
 /* ---------------- shop profile (synced to every device) ---------------- */
 export interface Shop {
@@ -22,7 +23,10 @@ export async function getShop(): Promise<Shop> {
   const c = await db.config.get("shop");
   return { ...DEFAULT_SHOP, ...(c?.value || {}) };
 }
-export async function saveShop(v: Shop) { await put("config", { id: "shop", value: v, updated_at: now() } as Config); }
+export async function saveShop(v: Shop) {
+  requirePerm("settings.manage", "changing shop settings");
+  await put("config", { id: "shop", value: v, updated_at: now() } as Config);
+}
 
 /* ---------------- numbering: each counter owns its own series, so offline numbers never clash ---------------- */
 export function fy(d = new Date()) {
@@ -277,6 +281,7 @@ export async function bumpStock(product_id: string, loc: string, delta: number) 
    A credit note being cancelled takes its returned pieces off the racks again.
    A merged invoice being cancelled gives its source bills / challans back (they hold their own stock). */
 export async function voidBill(b: Bill, reason: string, by: string) {
+  requirePerm("billing.void", "cancelling a bill");
   await assertStoreRow(b);
   if ([b.compliance?.irn, b.compliance?.ewb].some(r => r && !r.cancelled_at)) throw new Error("Cancel government registration before voiding this bill");
   await assertUnlocked(b.at);
@@ -316,6 +321,7 @@ export async function voidBill(b: Bill, reason: string, by: string) {
 
 /* Estimate → GST invoice: new GST number, same goods, estimate marked "converted" (never deleted). */
 export async function convertToGst(est: Bill, shop: Shop, by: string): Promise<Bill> {
+  requirePerm("billing.sell", "making a tax invoice");
   const g: Bill = { ...est, id: uid(), no: "", series: "", bill_type: "gst", status: "hold", gst_rate: shop.gst_rate, gst_mode: shop.gst_mode,
     converted_from: est.id, by_staff: by, at: now(), payments: est.payments };
   const fresh = await db.bills.get(est.id);
@@ -416,6 +422,7 @@ export async function lastBills(n = 50) { return db.bills.orderBy("at").reverse(
 /* Owner-only: remove estimates for good. The rows are emptied and marked deleted on every device and in the cloud.
    returnStock = the goods never left (a quotation) → pieces go back to the racks they came from. */
 export async function deleteEstimates(bills: Bill[], returnStock: boolean, by: string) {
+  requirePerm("estimates.delete", "deleting estimates");
   let n = 0;
   for (const b of bills) {
     if (b.bill_type !== "estimate" || b.deleted || b.status === "merged" || b.status === "converted") continue; // its goods live on in another invoice

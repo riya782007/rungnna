@@ -1,7 +1,7 @@
 import { db, put, uid, now, deviceId, type Bill, type BillLine, type BillType, type Movement, type Payment } from "./db";
 import { totals, fixLine, finalize, newBill, bumpStock, isSale, isChallan, type Shop } from "./billing";
 import { setTagsSold } from "./rfid";
-import { inStore } from "./scope";
+import { inStore, requirePerm } from "./scope";
 import { assertStoreRow } from "./stores";
 
 /* Documents made from other documents — all offline, all-or-nothing:
@@ -77,6 +77,7 @@ export function buildMerged(sources: Bill[], type: BillType, shop: Shop, by: str
 
 /* Save the merged invoice and mark every source "merged into <no>" in one go. */
 export async function mergeBills(sources: Bill[], type: BillType, shop: Shop, by: string): Promise<Bill> {
+  requirePerm("billing.merge", "merging bills");
   const why = canMerge(sources); if (why) throw new Error(why);
   // re-read: another device or tab may have touched them since they were ticked
   const fresh = (await db.bills.bulkGet(sources.map(s => s.id))).filter(Boolean) as Bill[];
@@ -95,6 +96,7 @@ export const splittable = (b: Bill) => inStore(b) && !b.compliance?.irn && !b.co
    the new one gets the next number of the same series, and the sale movements of the moved pieces are
    handed to the new bill (so cancelling either one returns exactly its own pieces). Payments stay on the original. */
 export async function splitBill(b0: Bill, lineIds: string[], shop: Shop, by: string): Promise<{ original: Bill; split: Bill }> {
+  requirePerm("billing.merge", "splitting a bill");
   const b = (await db.bills.get(b0.id)) || b0;
   if (!splittable(b)) throw new Error("This bill can't be split");
   const ids = new Set(lineIds);
@@ -174,6 +176,7 @@ export function buildReturn(bill: Bill, picks: { line_id: string; qty: number }[
 /* Save the credit note: number it (CN/ or ECN/), put each piece back on the rack it left from
    (fullest-first in the order it went out), free its RFID tags, and record any cash refunded. */
 export async function saveReturn(cn0: Bill, bill: Bill, shop: Shop, refund?: { mode: Payment["mode"]; amount: number }): Promise<Bill> {
+  requirePerm("billing.returns", "sales returns");
   await assertStoreRow(bill);
   if (!cn0.items.length) throw new Error("Pick at least one piece to return");
   const prev = await db.bills.where("return_of").equals(bill.id).toArray();

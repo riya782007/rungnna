@@ -1,6 +1,7 @@
 import { db, put, uid, now, deviceId, getSetting, setSetting, type ExpenseCategory, type MoneyMode, type Party, type Voucher, type VoucherType } from "./db";
 import { counterCode, fy } from "./billing";
 import { assertUnlocked } from "./finance";
+import { requirePerm } from "./scope";
 
 export const EXPENSES: ExpenseCategory[] = ["rent", "salary", "electricity", "transport", "tea", "other"];
 export const VOUCHER_MODES: MoneyMode[] = ["cash", "upi", "bank", "cheque"];
@@ -31,6 +32,7 @@ export async function saveVoucher(input: {
   debit_account?: string;
   credit_account?: string;
 }): Promise<Voucher> {
+  requirePerm("money.vouchers", "expenses and vouchers");
   await assertUnlocked(input.at || now());
   const d = input.at ? new Date(input.at) : new Date();
   const num = await nextSeries(voucherPrefix(input.type), d);

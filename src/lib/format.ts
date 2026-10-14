@@ -1,4 +1,7 @@
-export const rupees = (paise: number) => "₹" + (Math.round(paise) / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+/* Money always reads with both paise digits: a tax invoice must say ₹12.50, never ₹12.5.
+   (Sticker prices are deliberately different — see labelRate in lib/label-tspl.) */
+export const rupees = (paise: number) =>
+  "₹" + (Math.round(paise) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 export const toPaise = (v: string | number) => { const n = Number(String(v).replace(/[^\d.]/g, "")); return Number.isFinite(n) ? Math.round(n * 100) : 0; };
 export const when = (iso: string) => {
   const d = new Date(iso);

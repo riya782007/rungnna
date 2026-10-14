@@ -3,6 +3,7 @@ import { parseLabel, newCode, type Parsed, type Pattern } from "./parse";
 import { toPaise } from "./format";
 import { isRfidTag, normTag } from "./rfid";
 import { VERIFIED_ITEM_CODES } from "./verified-labels";
+import { requirePerm } from "./scope";
 
 export async function patterns(): Promise<Pattern[]> { return getSetting<Pattern[]>("patterns", []); }
 
@@ -222,8 +223,10 @@ export async function itemCodeFor(item: string) {
 }
 
 export async function saveProduct(p: Product) {
+  requirePerm("products.edit", "adding or editing products");
   p.item = p.item.trim().toUpperCase(); p.style = p.style.trim().toUpperCase(); p.color = p.color.trim().toUpperCase();
   p.type = (p.type || "PCS").trim().toUpperCase();
+  if (p.size != null) p.size = p.size.trim().toUpperCase() || undefined;   // same key as lib/inventory normSize, incl. legacy rows
   if (!p.barcodes.includes(p.code)) p.barcodes = [...p.barcodes, p.code];
   const saved = await put("products", p);
   // the first time a number gets a real name (e.g. typed on Scan & record), every later label learns it
