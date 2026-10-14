@@ -124,6 +124,9 @@ function Shell() {
   const cur = SECTIONS.find(s => s.key === sec)!;
   const hrefOf = (s: Sec) => "#/" + (s.tabs ? (ok(lastTab[s.key]) && lastTab[s.key]) || s.tabs.find(([k]) => ok(k))?.[0] || s.tabs[0][0] : s.key);
   const tabs = cur.tabs?.filter(([k]) => ok(k));
+  // what this person's role is hiding in this section, so a missing screen reads as
+  // "ask for the permission" instead of "the feature is gone"
+  const hidden = (cur.tabs || []).filter(([k]) => !ok(k)).map(([, label]) => label);
   const tabOn = (k: string) => route === k || (k === "products" && route === "product");
 
   let page: ReactNode;
@@ -188,6 +191,9 @@ function Shell() {
         {tabs && tabs.length > 1 && (
           <div className={"subnav" + (scrolled ? " scrolled" : "")}>
             <nav className="tabs">{tabs.map(([k, label]) => <a key={k} href={"#/" + k} className={tabOn(k) ? "on" : ""} ref={el => { if (el && tabOn(k)) el.scrollIntoView({ block: "nearest", inline: "center" }); }}>{t(label)}</a>)}</nav>
+            {!!hidden.length && <span className="xs mut tabs-hidden" title={hidden.join(", ")}>
+              {hidden.length} more {hidden.length === 1 ? "screen needs" : "screens need"} another role — tap your name to switch person
+            </span>}
             <span className="grow" /><Status />
           </div>)}
         <main className={"page" + (route === "bill" ? " wide" : "")}>

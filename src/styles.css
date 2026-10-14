@@ -731,3 +731,5 @@ html{scrollbar-gutter:stable}
 .add-inv aside .card{position:sticky;top:70px}
 .add-sum{margin:0}.add-sum b{font-size:22px!important}
 @media(max-width:860px){.add-inv .split{grid-template-columns:1fr}.add-inv aside .card{position:static}}
+.tabs-hidden{padding:0 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46ch}
+@media(max-width:900px){.tabs-hidden{display:none}}

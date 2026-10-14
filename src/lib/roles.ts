@@ -86,7 +86,7 @@ const COUNTER = ["billing.sell", "billing.returns", "billing.merge", "customers.
 export const BUILTIN: Record<Staff["role"], string[]> = {
   owner: ALL_PERMS,
   // a manager already runs suppliers and purchases, so reading a supplier's bill photo belongs here
-  manager: [...STOCK, ...COUNTER, "sales.today", "billing.rates", "billing.discount_over", "billing.void", "estimates.delete", "settings.manage", "rates.view", "suppliers.manage", "purchases.photo", "ai.use"],
+  manager: [...STOCK, ...COUNTER, "sales.today", "billing.rates", "billing.discount_over", "billing.void", "estimates.delete", "settings.manage", "rates.view", "suppliers.manage", "purchases.photo", "dealers.manage", "ai.use"],
   cashier: [...STOCK, ...COUNTER, "sales.today"],
   salesman: [...STOCK, ...COUNTER],
   helper: [...STOCK],
