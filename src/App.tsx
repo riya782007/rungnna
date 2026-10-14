@@ -104,6 +104,18 @@ function Shell() {
     };
     addEventListener("keydown", f); return () => removeEventListener("keydown", f);
   }, [route]);
+  /* A dealer's order used to wait until somebody happened to open Sell › Trade orders.
+     Count the orders and sign-ups that need a person, and badge the section.
+     Must stay ABOVE the early returns below — every hook runs on every render. */
+  const waiting = useLiveQuery(async () => {
+    if (!me || !can(me, "dealers.manage")) return 0;
+    const [orders, signups] = await Promise.all([
+      db.trade_orders.filter(o => !o.deleted && o.status === "new").count(),
+      db.dealers.filter(d => !d.deleted && d.status === "pending").count(),
+    ]);
+    return orders + signups;
+  }, [me?.id, me?.role, me?.role_id], 0);
+
   if (!ready) return null;
   if (!me) return <WhoAreYou />;
 
@@ -152,7 +164,7 @@ function Shell() {
         <div className="brand"><span className="mark">R</span><div><b>Rungnna</b><span>Jewellery &amp; Co</span></div></div>
         {can(me, "bill") && <a href="#/bill" className="newbill"><Icon n="plus" size={18} /><span className="t">{t("New bill")}</span><kbd style={{ background: "rgba(255,255,255,.15)", color: "#fff" }}>F2</kbd></a>}
         <button className="railsearch" onClick={() => setPal(true)}><Icon n="search" size={17} /><span className="grow">Search</span><kbd>Ctrl K</kbd></button>
-        {visible.map(s => <a key={s.key} href={hrefOf(s)} title={t(s.label)} aria-label={t(s.label)} className={"nav" + (sec === s.key ? " on" : "")}><Icon n={s.icon} /><span className="grow">{t(s.label)}</span></a>)}
+        {visible.map(s => <a key={s.key} href={hrefOf(s)} title={t(s.label)} aria-label={t(s.label) + (s.key === "sell" && waiting ? ` · ${waiting} waiting` : "")} className={"nav" + (sec === s.key ? " on" : "")}><Icon n={s.icon} /><span className="grow">{t(s.label)}</span>{s.key === "sell" && waiting > 0 && <span className="navbadge" title={`${waiting} trade order${waiting > 1 ? "s" : ""} / dealer sign-up${waiting > 1 ? "s" : ""} waiting`}>{waiting > 9 ? "9+" : waiting}</span>}</a>)}
         {me.role === "owner" && <label className="f store-switch">Store<select className="in" value={store} onChange={e => switchStore(e.target.value)}>{stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>}
         {can(me, "stores.transfer") && <a className="nav" href="#/stores" title="Transfers and stores" aria-label="Transfers and stores"><Icon n="stock" /><span>Transfers{me.role === "owner" ? " & stores" : ""}</span></a>}
         {can(me, "bank.reconcile") && <a className="nav" href="#/bank" title="Bank reconciliation" aria-label="Bank reconciliation"><Icon n="sales" /><span>Bank reconciliation</span></a>}

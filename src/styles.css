@@ -3,8 +3,12 @@
 :root{
   --bg:#FAF6EF; --surface:#FFFFFF; --ink:#241B2E; --ink-2:#3D3346; --muted:#6B6175; --line:#E7DBC6; --line-2:#F1E9DA; --fill:#F2EADA;
   --gold:#C8A24C; --gold-l:#F7EED8; --gold-d:#A07E2E;
+  /* readable-on-tint variants: --gold at 2.4:1 failed the 3:1 non-text floor for a focus ring,
+     and --gold-d on --gold-l was 3.3:1 for 11px pill text. Measured, not guessed. */
+  --gold-ink:#7A5E1E;        /* 5.3:1 on --gold-l */
+  --focus:var(--gold-d);     /* 3.8:1 on white */
   --emerald:#0F5C4D; --emerald-dk:#0A4034; --emerald-lt:#2E8573; --emerald-mist:#E6F0ED;
-  --ok:#0F5C4D; --ok-l:#E6F0ED; --bad:#B0506A; --bad-l:#F8E8ED; --warn:#94680A; --warn-l:#FBF1D9;
+  --ok:#0F5C4D; --ok-l:#E6F0ED; --bad:#9C3F57; --bad-l:#F8E8ED; --warn:#7D5708; --warn-l:#FBF1D9;
   /* legacy names used inline by pages */
   --ivory:var(--bg); --cream:var(--fill); --sand:var(--line); --white:#fff; --em:var(--emerald); --em-d:var(--emerald-dk); --em-m:var(--emerald-mist);
   --rose:var(--bad); --wine:#6E2238;
@@ -19,7 +23,7 @@ html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--fon
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
 a{color:inherit}
-:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 .sec-title{font-family:var(--display);font-size:19px;font-weight:700;letter-spacing:0}
 ::selection{background:var(--gold-l)}
 .mono{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
@@ -41,6 +45,7 @@ h1,h2,h3{margin:0;letter-spacing:-.01em}
 .nav.on{background:var(--emerald-mist);color:var(--emerald-dk);font-weight:600;box-shadow:inset 3px 0 0 var(--gold)}
 .nav svg{color:var(--muted)}.nav.on svg{color:var(--emerald)}
 .nav .grow{flex:1}
+.navbadge{flex:none;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--bad);color:#fff;font:700 11px/18px var(--font);text-align:center;font-variant-numeric:tabular-nums}
 .railsearch{display:flex;align-items:center;gap:10px;height:40px;padding:0 12px;margin:0 0 6px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--muted);text-align:left}
 .railfoot{margin-top:auto;display:flex;flex-direction:column;gap:6px;padding-top:12px;border-top:1px solid var(--line-2)}
 .me{display:flex;align-items:center;gap:10px;padding:8px;border-radius:12px;border:0;background:none;text-align:left;width:100%}
@@ -131,7 +136,7 @@ textarea.in{height:auto;padding:10px 14px;line-height:1.45}
 select.in{padding-right:8px}
 .in::placeholder,.wedge input::placeholder,.cell::placeholder{color:#B7B1BA}
 .pill{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:999px;background:var(--fill);color:var(--ink-2);white-space:nowrap}
-.pill.ok{background:var(--ok-l);color:var(--ok)} .pill.warn{background:var(--warn-l);color:var(--warn)} .pill.bad{background:var(--bad-l);color:var(--bad)} .pill.gold{background:var(--gold-l);color:var(--gold-d)}
+.pill.ok{background:var(--ok-l);color:var(--ok)} .pill.warn{background:var(--warn-l);color:var(--warn)} .pill.bad{background:var(--bad-l);color:var(--bad)} .pill.gold{background:var(--gold-l);color:var(--gold-ink)}
 .note{border-radius:12px;padding:12px 14px;font-size:13.5px;background:var(--ok-l);color:#155C45}
 .note.warn{background:var(--warn-l);color:#6B4A00}
 .note.bad{background:var(--bad-l);color:#8A2F2A}
@@ -597,15 +602,21 @@ html{scrollbar-gutter:stable}
 .grid>*,.split>*,.dash-grid>*,.row>.grow,.f{min-width:0}
 .subnav .tabs{min-width:0;flex-shrink:1}
 .page :is(.head,.f,.sumrow,.list b){overflow-wrap:anywhere}
-.billing-shell{--gold:#1A73E8;--gold-d:#1557B0;--gold-l:#E8F0FE}
+/* The POS keeps its deliberate Google-like blue. It used to get there by redefining --gold,
+   which also drove :focus-visible, ::selection, .tabs a.on and .pill.gold — so those flipped
+   blue on the one screen that is open all day. The accent now has its own name, and only the
+   things that should be blue are. */
+.billing-shell{--pos-accent:#1A73E8;--pos-accent-d:#1557B0;--pos-accent-l:#E8F0FE;--focus:#1A73E8}
+.billing-shell ::selection{background:var(--pos-accent-l)}
+.billing-shell .tabs a.on{box-shadow:inset 0 -2px 0 var(--pos-accent)}
 .billing-shell :is(.top,.subnav){background:#F8F9FA;backdrop-filter:none;-webkit-backdrop-filter:none}
 .billing-shell .pagein{animation:none}
 .billing-shell :is(.btn,.chip,.seg button,.pos-cust){transform:none;transition:background-color .12s,border-color .12s}
 .billing-shell :is(.btn,.in,.pos-cust,.seg,.seg button,.wedge,.card){border-radius:6px;box-shadow:none}
 .billing-shell :is(b,h1,h2,h3,.net b,.pos-title b){letter-spacing:0}
-.billing-shell .btn.p,.billing-shell .btn.g,.billing-shell .btn.dk{background:#1A73E8;border-color:#1A73E8;color:#fff}
-.billing-shell .btn:is(.p,.g,.dk):hover{background:#1557B0;border-color:#1557B0}
-.billing-shell .btn[aria-pressed="true"]{background:#E8F0FE;border-color:#A8C7FA;color:#174EA6}
+.billing-shell .btn.p,.billing-shell .btn.g,.billing-shell .btn.dk{background:var(--pos-accent);border-color:var(--pos-accent);color:#fff}
+.billing-shell .btn:is(.p,.g,.dk):hover{background:var(--pos-accent-d);border-color:var(--pos-accent-d)}
+.billing-shell .btn[aria-pressed="true"]{background:var(--pos-accent-l);border-color:#A8C7FA;color:#174EA6}
 .billing-shell .pos-top{border-radius:0;background:#fff;gap:10px;padding:10px 12px}
 .pos-workspace{min-height:0}
 .pos-entry,.pos-notes{background:#fff;border:1px solid var(--line);padding:12px}
@@ -698,6 +709,7 @@ html{scrollbar-gutter:stable}
 .perm-group-title{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-2)}
 .perm{display:flex;gap:8px;align-items:flex-start;font-size:14px;padding:4px 0;cursor:pointer}
 .perm input{margin-top:3px;accent-color:var(--em-d)}
+.perm-flag{margin-left:6px;vertical-align:1px;padding:0 6px;font-size:10px;letter-spacing:.02em;text-transform:uppercase}
 .perm-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
 .role-card summary{list-style:none;cursor:pointer}.role-card summary::-webkit-details-marker{display:none}
 .role-editor{box-shadow:none}

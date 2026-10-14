@@ -15,6 +15,13 @@ import type { Staff } from "./db";
 =========================================================================== */
 
 export type PermDef = { key: string; label: string; desc?: string };
+/* The permissions that move money, erase a trail, or hand over the shop. The Roles page flags
+   these so the owner never grants one by skimming a long list of checkboxes.
+   Recording an expense (money.vouchers) is deliberately NOT here: packing, labour and tea are
+   daily counter work in this shop, and flagging routine things makes the flag mean nothing. */
+export const SENSITIVE = new Set(["billing.void", "billing.discount_over", "billing.rates", "estimates.delete",
+  "rates.view", "settings.manage", "staff.manage", "import.data", "gst.register", "bank.reconcile"]);
+export const isSensitive = (k: string) => SENSITIVE.has(k);
 export type PermGroup = { key: string; label: string; perms: PermDef[] };
 
 export const PERMISSION_GROUPS: PermGroup[] = [

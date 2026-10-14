@@ -3,7 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, now, uid, type Config, type Staff } from "../lib/db";
 import { Head } from "../components/common";
 import { useApp, toast } from "../lib/app";
-import { PERMISSION_GROUPS, BUILTIN, ROLE_NOTE, permLabel, customRoles, type CustomRole } from "../lib/roles";
+import { PERMISSION_GROUPS, BUILTIN, ROLE_NOTE, permLabel, customRoles, isSensitive, type CustomRole } from "../lib/roles";
 import { requirePerm } from "../lib/scope";
 
 /* Roles & permissions — granular, grouped control in the style of the reference console.
@@ -70,23 +70,47 @@ export default function Roles() {
 }
 
 export function RoleEditor({ role, onSave, onCancel }: { role: CustomRole; onSave: (r: CustomRole) => void; onCancel?: () => void }) {
+  const { me } = useApp();
   const [name, setName] = useState(role.name);
   const [checked, setChecked] = useState(new Set(role.perms));
+  const [find, setFind] = useState("");
   const toggle = (k: string) => setChecked(s => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const group = (keys: string[], on: boolean) => setChecked(s => { const n = new Set(s); keys.forEach(k => (on ? n.add(k) : n.delete(k))); return n; });
+
+  const q = find.trim().toLowerCase();
+  const match = (p: { key: string; label: string; desc?: string }) =>
+    !q || [p.label, p.desc, p.key].filter(Boolean).join(" ").toLowerCase().includes(q);
+  const groups = PERMISSION_GROUPS
+    .map(g => ({ ...g, perms: g.perms.filter(match) }))
+    .filter(g => g.perms.length);
+
+  // what this role gains and loses against the built-in role it was copied from
+  const baseSet = new Set(BUILTIN[role.base] || []);
+  const added = [...checked].filter(k => !baseSet.has(k)).length;
+  const dropped = [...baseSet].filter(k => !checked.has(k)).length;
+
+  // the owner is never locked out, but a manager editing their OWN custom role can remove the
+  // very permission that lets them reach this page — and only the owner could undo it
+  const ownRole = !!me && me.role !== "owner" && me.role_id === role.id;
+  const lockout = ownRole && !checked.has("staff.manage");
+
   return <div className="card role-editor"><div className="pad stack">
     <input className="in" placeholder="Role name (e.g. Counter staff)" value={name} autoFocus={!role.name} onChange={e => setName(e.target.value)} />
-    <div className="perm-grid">{PERMISSION_GROUPS.map(g => {
+    <input className="in" placeholder="Find a permission…" value={find} onChange={e => setFind(e.target.value)} />
+    {lockout && <div className="note bad sm">This is your own role. Saving without “Staff, roles &amp; permissions” will lock you out of this page — only the owner could give it back.</div>}
+    {!groups.length && <div className="note sm">No permission matches “{find}”.</div>}
+    <div className="perm-grid">{groups.map(g => {
       const keys = g.perms.map(p => p.key), all = keys.every(k => checked.has(k));
       return <div key={g.key} className="perm-group">
         <div className="row"><b className="grow perm-group-title">{g.label}</b><button type="button" className="linkbtn" onClick={() => group(keys, !all)}>{all ? "Clear" : "All"}</button></div>
         {g.perms.map(p => <label key={p.key} className="perm">
           <input type="checkbox" checked={checked.has(p.key)} onChange={() => toggle(p.key)} />
-          <span>{p.label}{p.desc && <span className="xs mut"> · {p.desc}</span>}</span></label>)}
+          <span>{p.label}{isSensitive(p.key) && <span className="pill bad xs perm-flag">sensitive</span>}{p.desc && <span className="xs mut"> · {p.desc}</span>}</span></label>)}
       </div>;
     })}</div>
     <div className="row"><button className="btn p" onClick={() => onSave({ ...role, name, perms: [...checked] })}>Save role</button>
-      {onCancel && <button className="btn" onClick={onCancel}>Cancel</button>}<span className="xs mut">{checked.size} selected</span></div>
+      {onCancel && <button className="btn" onClick={onCancel}>Cancel</button>}
+      <span className="xs mut">{checked.size} selected{added || dropped ? ` · +${added} / −${dropped} vs ${role.base}` : ` · same as ${role.base}`}</span></div>
   </div></div>;
 }
 

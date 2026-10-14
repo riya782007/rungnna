@@ -36,3 +36,23 @@ describe("roles & permissions", () => {
     expect(can(null, "bill")).toBe(false);
   });
 });
+
+describe("the sensitive permissions are flagged", () => {
+  it("covers every permission that moves money, erases a trail, or hands over the shop", async () => {
+    const { SENSITIVE, isSensitive, ALL_PERMS: all } = await import("../src/lib/roles");
+    // every flagged key must be a real permission — a typo here would silently flag nothing
+    for (const k of SENSITIVE) expect(all, `${k} is flagged but is not a permission`).toContain(k);
+    for (const k of ["billing.void", "estimates.delete", "staff.manage", "settings.manage", "import.data"])
+      expect(isSensitive(k), `${k} should be flagged`).toBe(true);
+    // ordinary shop work must not be flagged, or the flag stops meaning anything
+    for (const k of ["billing.sell", "stock.move", "labels.print", "stock.view"])
+      expect(isSensitive(k), `${k} should not be flagged`).toBe(false);
+  });
+
+  it("no built-in role below manager carries a sensitive permission it should not", async () => {
+    const { SENSITIVE } = await import("../src/lib/roles");
+    for (const role of ["cashier", "salesman", "helper", "packer"] as Staff["role"][])
+      for (const k of BUILTIN[role])
+        expect(SENSITIVE.has(k), `${role} has sensitive permission ${k}`).toBe(false);
+  });
+});
