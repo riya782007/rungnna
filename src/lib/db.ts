@@ -184,6 +184,7 @@ export interface Staff extends Row {
   phone: string;
   pin: string;             // 4-digit, hashed later when auth moves server-side
   active: 0 | 1;
+  login?: "" | "role";     // "role": the sign-in behind a role's passcode, not a person (Roles page)
 }
 
 /* A retailer on the dealer portal (registers online, the shop approves). PIN never leaves the server. */

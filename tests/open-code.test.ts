@@ -15,12 +15,12 @@ describe("the shop passcode", () => {
   });
 
   it("forgives the way a tired thumb types it", () => {
-    for (const typed of ["Rungnna 2026", "RUNGNNA 2026", "  rungnna   2026  ", "rungnna  2026"])
+    for (const typed of ["Rungnna 2026", "RUNGNNA 2026", "  rungnna   2026  ", "rungnna  2026", "rungnna2026", "RUNGNNA2026"])
       expect(codeMatches(typed), typed).toBe(true);
   });
 
   it("does not open on a near miss, or on nothing at all", () => {
-    for (const typed of ["", "   ", "rungnna", "2026", "rungnna2026", "rungnna 2025", "rungna 2026"])
+    for (const typed of ["", "   ", "rungnna", "2026", "rungnna 2025", "rungna 2026", "rungnna20266"])
       expect(codeMatches(typed), JSON.stringify(typed)).toBe(false);
   });
 

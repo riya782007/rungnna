@@ -747,3 +747,10 @@ html{scrollbar-gutter:stable}
 /* the brand mark doubles as the desktop menu toggle */
 .markbtn{border:0;cursor:pointer;padding:0;font:inherit}
 .markbtn:focus-visible{outline:2px solid var(--gold-d);outline-offset:2px}
+/* Roles & Permissions: the passcode chip and banner, as on the reference console */
+.roles-banner{margin:0 0 16px}
+.passcode-label{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.passcode-chip{display:inline-flex;align-items:center;gap:4px;border-radius:8px;background:var(--line-2);padding:2px 4px 2px 10px;font-size:14px;letter-spacing:.18em;color:var(--ink)}
+.passcode-chip .iconbtn.xs{min-width:26px;width:auto;padding:0 5px;height:26px;letter-spacing:0;color:var(--muted);white-space:nowrap}
+.passcode-chip .iconbtn.xs:hover{color:var(--ink)}
+.bad-text{color:var(--bad)}

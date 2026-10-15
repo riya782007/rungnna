@@ -15,7 +15,7 @@ export default function DailyTasks() {
   const [printing, setPrinting] = useState(false);
   const key = `tasks:${currentStore()}:${day}`;
   const record = useLiveQuery(() => db.config.get(key), [key]);
-  const people = useLiveQuery(() => db.staff.filter(s => !!s.active && !s.deleted && inStore(s)).toArray(), [], []);
+  const people = useLiveQuery(() => db.staff.filter(s => !!s.active && !s.deleted && s.login !== "role" && inStore(s)).toArray(), [], []);
   const tasks: Task[] = Array.isArray(record?.value) ? record.value : [];
   const visible = me?.role === "owner" ? tasks : tasks.filter(t => !t.staff || t.staff === me?.id);
   usePrintJob(printing, () => setPrinting(false));

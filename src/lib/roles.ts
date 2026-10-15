@@ -97,7 +97,46 @@ export const ROLE_NOTE: Record<Staff["role"], string> = {
   salesman: "Billing only", helper: "Stock work only", packer: "Stock work only",
 };
 
-export type CustomRole = { id: string; name: string; perms: string[]; base: Staff["role"] };
+export type CustomRole = {
+  id: string; name: string; perms: string[]; base: Staff["role"];
+  /* As in the reference console, every role has its own passcode. Staff type it on the opening
+     screen and are signed in as that role, seeing only what it allows. */
+  passcode?: string;
+  /* The staff row that passcode signs in as. A new one is made whenever the passcode is
+     regenerated and the old row is retired, which signs out every device still using the old
+     code (a retired row ends its session, see lib/app). */
+  login_id?: string;
+};
+
+/* ---------------- role passcodes ---------------- */
+
+/** No 0/O, 1/I/L: the passcode is read out loud across a busy counter and typed on a phone. */
+export const PASS_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+export const PASS_LEN = 6;
+/** "abc 23d" and "ABC23D" are the same code to a tired thumb. */
+export const normPass = (s: string) => (s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+/** A fresh passcode that no other role is using. Cryptographic randomness, never Math.random. */
+export function newPasscode(taken: Iterable<string> = []): string {
+  const used = new Set([...taken].map(normPass));
+  const buf = new Uint32Array(PASS_LEN);
+  for (let tries = 0; tries < 50; tries++) {
+    crypto.getRandomValues(buf);
+    const code = Array.from(buf, n => PASS_ALPHABET[n % PASS_ALPHABET.length]).join("");
+    if (!used.has(code)) return code;
+  }
+  throw new Error("Could not make a unique passcode — try again");
+}
+
+/** The role a typed passcode opens, if any. Exact length only, so a half-typed code never matches. */
+export function roleForPasscode(typed: string, roles: CustomRole[] = ROLES): CustomRole | undefined {
+  const code = normPass(typed);
+  if (code.length !== PASS_LEN) return undefined;
+  return roles.find(r => !!r.passcode && normPass(r.passcode) === code && !!r.login_id);
+}
+
+/** A staff row that exists only so a role's passcode can sign in. It is not a person. */
+export const isRoleLogin = (s: { login?: string } | null | undefined) => s?.login === "role";
 let ROLES: CustomRole[] = [];
 /** Called by the app whenever the synced role list changes. */
 export function setRolesCache(r: unknown) { ROLES = Array.isArray(r) ? r.filter(x => x && typeof x.id === "string" && Array.isArray(x.perms)) : []; }

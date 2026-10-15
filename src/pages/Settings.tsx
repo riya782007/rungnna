@@ -8,7 +8,7 @@ import type { Pattern } from "../lib/parse";
 import { when } from "../lib/format";
 import { getShop, saveShop, counterCode, DEFAULT_SHOP, type Shop } from "../lib/billing";
 import { health, type Health } from "../lib/ai";
-import { can, ROLE_NOTE, roleName } from "../lib/roles";
+import { can, ROLE_NOTE, roleName, isRoleLogin, roleForPasscode, type CustomRole } from "../lib/roles";
 import { RoleSelect } from "./Roles";
 import { codeMatches, getOpenCode, setOpenCode, DEFAULT_OPEN_CODE } from "../lib/openCode";
 import { getPrivate, setCode, lockNow, usePrivate } from "../lib/privacy";
@@ -41,7 +41,8 @@ export default function Settings() {
             <div className="row"><span className="avatar" style={{ width: 44, height: 44, fontSize: 17 }}>{me?.name.slice(0, 1)}</span>
               <span className="grow"><b>{me?.name}</b><div className="xs mut">{roleName(me)}{me?.role_id ? "" : " · " + (me ? ROLE_NOTE[me.role] : "")}</div></span>
               <button className="btn sm" onClick={() => setMe(null)}>Switch person</button></div>
-            {me && <button className="btn sm" onClick={async () => {
+            {me && isRoleLogin(me) && <div className="xs mut">Signed in with this role's passcode. The owner changes it on Roles &amp; Permissions.</div>}
+            {me && !isRoleLogin(me) && <button className="btn sm" onClick={async () => {
               const p = prompt(me.pin ? "New 4-digit PIN (leave empty to remove)" : "Set a 4-digit PIN so nobody else can use your name") ?? null;
               if (p === null) return; if (p && !/^\d{4}$/.test(p)) return toast("PIN must be 4 digits", true);
               const u = { ...me, pin: p }; await put("staff", u); setMe(u); toast(p ? "PIN saved" : "PIN removed");
@@ -67,7 +68,7 @@ export default function Settings() {
 
           {boss && <div className="card"><header><h3>People</h3><span className="grow" /><a className="btn sm" href="#/roles">Roles &amp; permissions</a></header>
             <div className="list" style={{ border: 0, borderRadius: 0, boxShadow: "none" }}>
-              {staff.filter(s => !s.deleted).map(s => (
+              {staff.filter(s => !s.deleted && !isRoleLogin(s)).map(s => (
                 <div key={s.id} className="li">
                   <span className="grow"><b className="sm">{s.name}</b>{me?.id === s.id && <span className="pill ok" style={{ marginLeft: 6 }}>you</span>}
                     <div className="xs mut">{roleName(s)}{s.role_id ? "" : " · " + ROLE_NOTE[s.role]}{s.pin ? " · PIN set" : ""}{!s.active ? " · disabled" : ""}</div></span>
@@ -219,6 +220,7 @@ export function ShopLogin({ onDone }: { onDone?: () => void }) {
 export function WhoAreYou() {
   const { setMe } = useApp();
   const staff = useLiveQuery(() => db.staff.filter(s => !s.deleted && !!s.active).toArray(), [], []);
+  const persons = staff.filter(s => !isRoleLogin(s));
   const [code, setCode] = useState("");
   const [saved, setSaved] = useState<string | null>(null);
   const [bad, setBad] = useState(false);
@@ -227,14 +229,37 @@ export function WhoAreYou() {
   const [pin, setPin] = useState("");
   const [owner, setOwner] = useState("");
   useEffect(() => { getOpenCode().then(setSaved); }, []);
-  const needsName = staff.length === 1 && staff[0].name === "Owner";
+  const needsName = persons.length === 1 && persons[0].name === "Owner";
 
-  const open = (e?: React.FormEvent) => {
+  /* A wrong guess costs a little more each time after a few, so a role passcode can't be found by
+     trying codes at the counter. Kept on the device, so reloading the page doesn't reset it. */
+  const [wait, setWait] = useState(0);
+  useEffect(() => { getSetting<{ n: number; until: number }>("open_fails", { n: 0, until: 0 }).then(f => setWait(Math.max(0, f.until - Date.now()))); }, []);
+  useEffect(() => { if (wait <= 0) return; const t = setTimeout(() => setWait(w => Math.max(0, w - 1000)), 1000); return () => clearTimeout(t); }, [wait]);
+
+  const open = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!codeMatches(code, saved)) { setBad(true); setCode(""); return; }
-    // one phrase, straight in as the owner; a person can still be chosen below
-    const who = staff.find(s => s.role === "owner") || staff[0];
-    if (who) setMe(who);
+    if (wait > 0) return;
+    // the shop passcode: straight in as the owner; a person can still be chosen below
+    if (codeMatches(code, saved)) {
+      await setSetting("open_fails", { n: 0, until: 0 });
+      const who = staff.find(s => s.role === "owner" && !isRoleLogin(s)) || staff.find(s => !isRoleLogin(s));
+      if (who) setMe(who);
+      return;
+    }
+    // a role's passcode (Roles & Permissions): in as that role, seeing only what it allows
+    const rolesRow = await db.config.get("roles");
+    const role = roleForPasscode(code, ((rolesRow?.value as any)?.roles as CustomRole[]) || []);
+    const row = role?.login_id ? await db.staff.get(role.login_id) : undefined;
+    if (role && row && row.active && !row.deleted && isRoleLogin(row) && row.role !== "owner") {
+      await setSetting("open_fails", { n: 0, until: 0 });
+      setMe(row);
+      return;
+    }
+    const f = await getSetting<{ n: number; until: number }>("open_fails", { n: 0, until: 0 });
+    const n = f.n + 1, pause = n >= 5 ? Math.min(300_000, 15_000 * 2 ** (n - 5)) : 0;
+    await setSetting("open_fails", { n, until: Date.now() + pause });
+    setWait(pause); setBad(true); setCode("");
   };
 
   return (
@@ -247,7 +272,7 @@ export function WhoAreYou() {
             <div className="stack">
               <div className="b sm">Welcome — who owns this shop?</div>
               <label className="f">Owner's name<input className="in" autoFocus value={owner} onChange={e => setOwner(e.target.value)} placeholder="e.g. Karan" /></label>
-              <button className="btn p" disabled={!owner.trim()} onClick={async () => { const s = { ...staff[0], name: owner.trim() }; await put("staff", s); setMe(s); }}>Start</button>
+              <button className="btn p" disabled={!owner.trim()} onClick={async () => { const s = { ...persons[0], name: owner.trim() }; await put("staff", s); setMe(s); }}>Start</button>
             </div>
           ) : pick ? (
             <div className="stack">
@@ -258,17 +283,18 @@ export function WhoAreYou() {
           ) : people ? (
             <div className="stack" style={{ gap: 6 }}>
               <div className="b sm">Who is using this device?</div>
-              {staff.map(s => <button key={s.id} className="item" onClick={() => s.pin ? setPick(s) : setMe(s)}><span className="thumb" style={{ width: 36, height: 36 }}>{s.name.slice(0, 1)}</span><span className="grow b">{s.name}</span><span className="xs mut">{s.role}</span></button>)}
+              {persons.map(s => <button key={s.id} className="item" onClick={() => s.pin ? setPick(s) : setMe(s)}><span className="thumb" style={{ width: 36, height: 36 }}>{s.name.slice(0, 1)}</span><span className="grow b">{s.name}</span><span className="xs mut">{s.role}</span></button>)}
               <button className="linkbtn" onClick={() => setPeople(false)}>Back</button>
             </div>
           ) : (
             <form className="stack" onSubmit={open}>
-              <label className="f">Shop passcode
+              <label className="f">Shop or role passcode
                 <input className="in" autoFocus type="password" autoComplete="current-password"
-                  placeholder="Type the shop passcode" value={code}
+                  placeholder="Type your passcode" value={code}
                   onChange={e => { setCode(e.target.value); setBad(false); }} /></label>
-              {bad && <div className="note warn" role="alert">That is not the shop passcode. Ask the owner.</div>}
-              <button className="btn p" disabled={!code.trim()}>Open</button>
+              {bad && <div className="note warn" role="alert">That is not the shop passcode or a role passcode. Ask the owner.</div>}
+              {wait > 0 && <div className="note bad sm" role="status">Too many wrong passcodes — try again in {Math.ceil(wait / 1000)}s.</div>}
+              <button className="btn p" disabled={!code.trim() || wait > 0}>Open</button>
               <button type="button" className="linkbtn" onClick={() => setPeople(true)}>Use a different person</button>
               <div className="xs mut">Backing up to the cloud is set up once in Settings — the shop works fully without it.</div>
             </form>

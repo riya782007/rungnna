@@ -265,7 +265,7 @@ export default function Billing({ args }: { args: string[] }) {
     const offPct = list ? ((list - t.gross + t.discount) / list) * 100 : 0;
     if (offPct > (shop.max_disc ?? 10) + 0.01 && !can(me, "discount")) {
       const pin = prompt(`Discount is ${offPct.toFixed(1)}% — above the ${shop.max_disc ?? 10}% limit. Owner or manager PIN:`);
-      const ok = pin && (await db.staff.filter(x => !!x.active && !x.deleted && !!x.pin && x.pin === pin && can(x, "billing.discount_over")).count());
+      const ok = pin && (await db.staff.filter(x => !!x.active && !x.deleted && x.login !== "role" && !!x.pin && x.pin === pin && can(x, "billing.discount_over")).count());
       if (!ok) return toast("Discount not approved", true);
     }
     if (b.bill_type === "gst" && !shop.gstin) toast("Tip: add the shop GSTIN in Settings → Shop profile", true);

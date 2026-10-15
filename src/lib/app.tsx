@@ -82,7 +82,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     (async () => {
       await firstRun();
       const id = await getSetting<string>("me", "");
-      const staff = id ? await db.staff.get(id) : null;
+      const found = id ? await db.staff.get(id) : null;
+      /* a person switched off, or a role passcode regenerated or deleted, while this device was
+         closed: don't bring the session back on reload. The live check below only fires on change */
+      const staff = found && found.active && !found.deleted ? found : null;
+      if (found && !staff) await setSetting("me", "");
       const storeId = await initStores(staff); setScope(storeId, staff?.role || ""); setScopePerms(permsOf(staff)); setStore(storeId);
       if (staff) setMeS(staff);
       setReady(true);

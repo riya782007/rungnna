@@ -24,8 +24,10 @@ export const normCode = (s: string) => (s || "").trim().toLowerCase().replace(/\
 
 /** True when what was typed opens the shop. An empty phrase never opens it. */
 export function codeMatches(typed: string, saved?: string | null): boolean {
-  const want = normCode(saved || DEFAULT_OPEN_CODE);
-  const got = normCode(typed);
+  // spaces carry nothing here: "rungnna2026" is how the owner actually types it
+  const bare = (x: string) => normCode(x).replace(/ /g, "");
+  const want = bare(saved || DEFAULT_OPEN_CODE);
+  const got = bare(typed);
   return !!got && !!want && got === want;
 }
 
