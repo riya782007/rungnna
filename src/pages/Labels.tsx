@@ -17,6 +17,7 @@ import { purchaseLabelJobs, productForLabel } from "../lib/purchase-labels";
 import { toPaise } from "../lib/format";
 import { getRule, priceFromCost, type PricingRule } from "../lib/pricing";
 import { labelTSPL, labelRate } from "../lib/label-tspl";
+import { labelBatches, runsOf, DEFAULT_BATCH, type LabelBatch } from "../lib/labelBatches";
 import { printTSPL, directPrintSupported, connectSerial, connectUSB, serialSupported, usbSupported } from "../lib/tsc";
 
 /* Label settings — every number is in millimetres so what you see is what the printer gets. */
@@ -27,10 +28,15 @@ export type LabelCfg = {
   sheetW: number; sheetH: number; top: number; left: number; rows: number;
   qr: number; font: number; pad: number; offX: number; offY: number;
   shop: string; format: "shop" | "rungnna"; layout: "shop" | "stack"; show: { shop: boolean; item: boolean; style: boolean; color: boolean; rate: boolean; tk: boolean; code: boolean; qty: boolean; cost_code: boolean };
+  batch?: number;        // stickers handed to the printer at a time (0 = all at once) — see lib/labelBatches
+  testFirst?: boolean;   // a long run starts with one test row
 };
 
 export const PRESETS: { key: string; name: string; cfg: Partial<LabelCfg> }[] = [
-  { key: "rj", name: "Rungnna current sticker (50 × 20 mm)", cfg: { mode: "roll", w: 50, h: 20, cols: 1, gapX: 0, gapY: 0, qr: 15, font: 7.5 } },
+  /* The shop's actual stock (photographed 15 Oct 2026): a TSC roll three stickers across, each 33 × 15 mm,
+     ~2 mm apart. One printed "page" is one row of three: 103 × 15 mm. */
+  { key: "rj3", name: "Rungnna roll: 3 across, 33 × 15 mm", cfg: { mode: "roll", w: 33, h: 15, cols: 3, gapX: 2, gapY: 0, qr: 11, font: 5, pad: 0.8 } },
+  { key: "rj", name: "50 × 20 mm roll", cfg: { mode: "roll", w: 50, h: 20, cols: 1, gapX: 0, gapY: 0, qr: 15, font: 7.5, pad: 1.2 } },
   { key: "50x25", name: "50 × 25 mm roll (most common)", cfg: { mode: "roll", w: 50, h: 25, cols: 1, gapX: 0, gapY: 0, qr: 20, font: 6.5 } },
   { key: "38x25", name: "38 × 25 mm roll", cfg: { mode: "roll", w: 38, h: 25, cols: 1, gapX: 0, gapY: 0, qr: 18, font: 6 } },
   { key: "2up38", name: "2-up 38 × 25 mm roll (80 mm wide)", cfg: { mode: "roll", w: 38, h: 25, cols: 2, gapX: 2, gapY: 0, qr: 18, font: 6 } },
@@ -44,12 +50,26 @@ export const PRESETS: { key: string; name: string; cfg: Partial<LabelCfg> }[] = 
 
 export const DEFAULT_CFG: LabelCfg = {
   output: "browser",
-  preset: "rj", mode: "roll", w: 50, h: 20, cols: 1, gapX: 0, gapY: 0, sheetW: 210, sheetH: 297, top: 0, left: 0, rows: 1,
-  qr: 15, font: 7.5, pad: 1.2, offX: 0, offY: 0, shop: "RUNGNNA", format: "shop", layout: "shop",
+  preset: "rj3", mode: "roll", w: 33, h: 15, cols: 3, gapX: 2, gapY: 0, sheetW: 210, sheetH: 297, top: 0, left: 0, rows: 1,
+  qr: 11, font: 5, pad: 0.8, offX: 0, offY: 0, shop: "RUNGNNA", format: "shop", layout: "shop",
   show: { shop: true, item: true, style: true, color: true, rate: true, tk: false, code: false, qty: true, cost_code: false },
 };
 
 export type Job = { p: Product; qtyOnLabel: number; copies: number };
+/** One entry per sticker, in queue order (capped at 5000). */
+export const expandJobs = (jobs: Job[]) => jobs.flatMap(j => Array.from({ length: Math.max(0, Math.min(5000, j.copies)) }, () => j)).slice(0, 5000);
+
+/* Saved printer settings, brought up to date. The first default (50 × 20 mm, one across) was a guess made before
+   anyone measured the shop's roll; a device still on that untouched guess moves to the real 3-across stock. */
+export function upgradeLabelCfg(saved: Partial<LabelCfg> | null | undefined): LabelCfg {
+  const c = { ...DEFAULT_CFG, ...(saved || {}), show: { ...DEFAULT_CFG.show, ...(saved?.show || {}) } };
+  if (c.preset === "rj" && c.w === 50 && c.h === 20 && c.cols === 1) {
+    const rj3 = PRESETS.find(x => x.key === "rj3")!.cfg;
+    return { ...c, ...rj3, preset: "rj3" };
+  }
+  return c;
+}
+export const loadLabelCfg = () => getSetting<Partial<LabelCfg> | null>("label_cfg", null).then(upgradeLabelCfg);
 
 export function validateLabelPrint(cfg: LabelCfg, jobs: Job[]) {
   if (![cfg.w, cfg.h, cfg.qr, cfg.font].every(n => Number.isFinite(n) && n > 0) || cfg.w > 200 || cfg.h > 300 || ![cfg.gapX, cfg.gapY, cfg.pad].every(n => Number.isFinite(n) && n >= 0) || ![cfg.offX, cfg.offY].every(Number.isFinite) || !Number.isSafeInteger(cfg.cols) || cfg.cols < 1 || cfg.cols > 20) throw new Error("Check label size, gaps and columns in printer settings");
@@ -69,8 +89,7 @@ export default function Labels({ args }: { args: string[] }) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [addStock, setAddStock] = useState(false);
   const [loc, setLoc] = useState("");
-  const [printing, setPrinting] = useState(false);
-  const directLock = useRef(false), [directBusy, setDirectBusy] = useState(false);
+  const printer = useLabelPrint(cfg);
   const [printerReady, setPrinterReady] = useState(false), [loadedPurchase, setLoadedPurchase] = useState("");
   const autoPrinted = useRef("");
   const [rule, setRule] = useState<PricingRule | null>(null);
@@ -78,7 +97,7 @@ export default function Labels({ args }: { args: string[] }) {
   const vendors = useLiveQuery(() => db.parties.filter(p => p.kind === "supplier" && !p.deleted).toArray(), [], []);
   const items = useLiveQuery(() => distinct("item"), [], []);
 
-  useEffect(() => { getSetting<LabelCfg>("label_cfg", DEFAULT_CFG).then(c => { setCfg({ ...DEFAULT_CFG, ...c, show: { ...DEFAULT_CFG.show, ...c.show } }); setPrinterReady(true); }); }, []);
+  useEffect(() => { loadLabelCfg().then(c => { setCfg(c); setPrinterReady(true); }); }, []);
   useEffect(() => { getRule().then(setRule); }, []);
 
   /* Consistent pricing: the moment a cost is entered, the sell RATE and the
@@ -110,7 +129,7 @@ export default function Labels({ args }: { args: string[] }) {
   useEffect(() => {
     if (args[0] === "purchase" && args[2] === "print" && printerReady && loadedPurchase === args[1] && jobs.length && autoPrinted.current !== loadedPurchase) {
       autoPrinted.current = loadedPurchase;
-      if (cfg.output === "tspl") void doPrintTSC(false); else doPrint();
+      if (cfg.output === "tspl") doPrintTSC(false); else doPrint();
     }
   }, [args[0], args[1], args[2], printerReady, loadedPurchase, jobs]);
   const upd = (patch: Partial<LabelCfg>) => { const c = { ...cfg, ...patch }; setCfg(c); setSetting("label_cfg", c); };
@@ -146,45 +165,31 @@ export default function Labels({ args }: { args: string[] }) {
     return saved;
     });
     if (!saved) return;
-    setJobs(j => [...j, { p: saved, qtyOnLabel: Math.max(1, parseInt(qty) || 1), copies: n }]);
-    if (print) setPrinting(true);
+    const job = { p: saved, qtyOnLabel: Math.max(1, parseInt(qty) || 1), copies: n };
+    setJobs(j => [...j, job]);
+    if (print) printer.start(expandJobs([...jobs, job]));
     toast(`${n} labels queued · ${label(saved)}`);
     setForm(blankProduct(me?.id || "")); setQty("1"); setCost("");
     } catch (e: any) { toast(e.message || "Could not prepare labels", true); }
     finally { queueLock.current = false; setQueueBusy(false); }
   };
 
-  const flat = useMemo(() => jobs.flatMap(j => Array.from({ length: Math.max(0, Math.min(5000, j.copies)) }, () => j)).slice(0, 5000), [jobs]);
+  const flat = useMemo(() => expandJobs(jobs), [jobs]);
   const total = flat.length;
 
-  usePrintJob(printing, () => setPrinting(false), "", message => toast(message, true));
-  const doPrint = () => { try { validateLabelPrint(cfg, jobs); setPrinting(true); } catch (e: any) { toast(e.message, true); } };
+  const doPrint = () => { try { validateLabelPrint(cfg, jobs); printer.start(flat); } catch (e: any) { toast(e.message, true); } };
 
-  /* Direct-to-TSC: send TSPL for every queued label straight to the printer.
-     Falls back to the on-screen print sheet if the browser can't reach the printer. */
-  const doPrintTSC = async (prompt = true) => {
-    if (!flat.length || directLock.current) return;
-    directLock.current = true; setDirectBusy(true);
-    try {
-      validateLabelPrint(cfg, jobs);
-      if (cfg.mode !== "roll" || cfg.cols !== 1) throw new Error("Direct TSC printing requires a single-column roll. Use browser printing for sheets or 2-up labels.");
-      // same words and arrangement as the on-screen sticker (lib/label-tspl), built before anything is sent
-      const commands = jobs.map(j => {
-        const product = productForLabel(j.p, j.qtyOnLabel);
-        return labelTSPL(cfg, product, j.qtyOnLabel, j.copies, ownPayload(product, cfg.format || "shop"));
-      }).join("");
-      await printTSPL(commands, prompt);
-      toast(`Sent ${total} labels to the TSC printer`);
-    } catch (e: any) {
-      toast((e?.message || "Direct print failed") + " · Check the printer before retrying to avoid duplicate labels.", true);
-    } finally { directLock.current = false; setDirectBusy(false); }
+  /* Direct-to-TSC: TSPL straight to the printer, in the same stoppable batches. */
+  const doPrintTSC = (prompt = true) => {
+    try { validateLabelPrint(cfg, jobs); tscCommands(cfg, flat.slice(0, 1)); printer.start(flat, true, prompt); }
+    catch (e: any) { toast(e.message, true); }
   };
 
   return (
     <div className="label-counter">
       <Head eyebrow="Barcode print" title="QR labels" sub="Same fields as the old BARCODE PRINT screen. Every label carries its own details inside the QR, so it scans even on a phone with no internet.">
-        {directPrintSupported() && <button className="btn dk" disabled={!total || directBusy || printing} onClick={() => doPrintTSC()} title="Send straight to a compatible TSC label printer">{directBusy ? "Sending…" : `Print to TSC ${total || ""}`}</button>}
-        <button className="btn g" disabled={!total || directBusy || printing} onClick={doPrint}>Print {total || ""} labels</button>
+        {directPrintSupported() && <button className="btn dk" disabled={!total || printer.busy} onClick={() => doPrintTSC()} title="Send straight to a compatible TSC label printer">{`Print to TSC ${total || ""}`}</button>}
+        <button className="btn g" disabled={!total || printer.busy} onClick={doPrint}>Print {total || ""} labels</button>
       </Head>
       <div className="split">
         <div className="stack">
@@ -249,8 +254,7 @@ export default function Labels({ args }: { args: string[] }) {
         </div>
         <div className="stack"><div className="labelprev"><LabelView cfg={cfg} p={jobs[0]?.p || form} qtyOnLabel={jobs[0]?.qtyOnLabel || parseInt(qty) || 1} /></div><details><summary>Printer settings</summary><LabelSettings cfg={cfg} upd={upd} sample={jobs[0]?.p || { ...form, code: form.code }} qty={jobs[0]?.qtyOnLabel || parseInt(qty) || 1} /></details></div>
       </div>
-      {printing && createPortal(<PrintSheet cfg={cfg} jobs={flat} />, document.getElementById("printroot")!)}
-      {printing && <button className="btn print-notice" onClick={() => setPrinting(false)}>Close print</button>}
+      {printer.panel}
     </div>
   );
 }
@@ -314,9 +318,15 @@ function LabelSettings({ cfg, upd, sample, qty }: { cfg: LabelCfg; upd: (p: Part
         <div className="grid g3">
           {num("w", "Width mm")}{num("h", "Height mm")}{num("qr", "QR size mm")}
           {num("font", "Text size pt")}{num("offX", "Nudge right mm", 0.25)}{num("offY", "Nudge down mm", 0.25)}
-          {cfg.mode === "roll" ? <>{num("cols", "Across (2-up)", 1)}{num("gapX", "Gap across mm")}{num("gapY", "Gap between mm")}</>
+          {cfg.mode === "roll" ? <>{num("cols", "Stickers across", 1)}{num("gapX", "Gap across mm")}{num("gapY", "Gap between mm")}</>
             : <>{num("cols", "Columns", 1)}{num("rows", "Rows", 1)}{num("top", "Top margin mm")}{num("left", "Left margin mm")}{num("gapX", "Gap across mm")}{num("gapY", "Gap down mm")}</>}
         </div>
+        <div className="grid g2">
+          <label className="f">Stickers per batch (0 = all at once)
+            <input className="in mono" type="number" min={0} step={cfg.mode === "roll" ? cfg.cols : 1} value={cfg.batch ?? DEFAULT_BATCH} onChange={e => upd({ batch: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} /></label>
+          <label className="row sm"><input type="checkbox" checked={cfg.testFirst ?? true} onChange={e => upd({ testFirst: e.target.checked })} /> Long runs start with one test row</label>
+        </div>
+        <div className="xs mut">The app waits after each batch: <b>Print next</b> or <b>Stop</b>. Windows only ever holds one batch, so switching the printer off never brings back hundreds of stickers.</div>
         <label className="f">Shop name on label<input className="in" value={cfg.shop} onChange={e => upd({ shop: e.target.value })} /></label>
         <div className="grid g2">
           <label className="f">QR content
@@ -336,8 +346,95 @@ function LabelSettings({ cfg, upd, sample, qty }: { cfg: LabelCfg; upd: (p: Part
         </div>
       </div>
       <div className="labelprev"><LabelView cfg={cfg} p={demo} qtyOnLabel={qty} /></div>
-      <div className="pad xs mut">Tip: in the print window choose your label printer, set margins to “None” and scale to 100%. Use the nudge boxes if the print sits off-centre.</div>
+      <PrinterSetup cfg={cfg} />
     </div>
+  );
+}
+
+/* TSPL for a run of stickers (the direct-to-TSC path). Identical neighbours go as one PRINT n. */
+export function tscCommands(cfg: LabelCfg, list: Job[]) {
+  if (cfg.mode !== "roll" || cfg.cols !== 1) throw new Error(`Direct TSC printing does one sticker across. This roll is ${cfg.cols} across: choose "Browser / Windows printer driver" in Printer settings.`);
+  return runsOf(list).map(({ item: j, n }) => {
+    const product = productForLabel(j.p, j.qtyOnLabel);
+    return labelTSPL(cfg, product, j.qtyOnLabel, n, ownPayload(product, cfg.format || "shop"));
+  }).join("");
+}
+
+type Run = { list: Job[]; batches: LabelBatch[]; i: number; phase: "print" | "wait"; direct: boolean; prompt: boolean; n: number };
+
+/* Prints stickers a batch at a time and waits between batches, so a wrong print can be stopped.
+   Windows resumes a queued job after the printer is switched back on; a batch is all it ever holds. */
+export function useLabelPrint(cfg: LabelCfg) {
+  const [run, setRunState] = useState<Run | null>(null);
+  const ref = useRef<Run | null>(null), failed = useRef(false);
+  const setRun = (r: Run | null) => { ref.current = r; setRunState(r); };
+  const slice = (r: Run) => r.list.slice(r.batches[r.i].from, r.batches[r.i].to);
+  const finished = (r: Run) => {
+    if (r.i + 1 < r.batches.length) return setRun({ ...r, phase: "wait" });
+    setRun(null);
+    toast(`All ${r.list.length} sticker${r.list.length === 1 ? "" : "s"} sent to the printer`);
+  };
+  const go = async (r: Run) => {
+    setRun(r);
+    if (!r.direct) return;                             // browser: the print effect below takes it
+    try { await printTSPL(tscCommands(cfg, slice(r)), r.prompt); finished(r); }
+    catch (e: any) { toast((e?.message || "Direct print failed") + " · Check what came out before printing again.", true); setRun({ ...r, phase: "wait" }); }
+  };
+  const printing = !!run && run.phase === "print" && !run.direct;
+  usePrintJob(printing, () => {
+    const r = ref.current; if (!r) return;
+    if (failed.current) { failed.current = false; setRun({ ...r, phase: "wait" }); } else finished(r);
+  }, run ? `${run.i}.${run.n}` : "", m => { failed.current = true; toast(m, true); });
+
+  const start = (list: Job[], direct = false, prompt = true) => {
+    if (ref.current) return toast("Finish or stop the print already running first", true);
+    const unit = cfg.mode === "roll" ? cfg.cols : cfg.cols * cfg.rows;
+    const batches = labelBatches(list.length, unit, cfg.batch ?? DEFAULT_BATCH, cfg.testFirst ?? true);
+    if (batches.length) void go({ list, batches, i: 0, phase: "print", direct, prompt, n: 0 });
+  };
+  const stop = () => {
+    const r = ref.current; if (!r) return;
+    const sent = r.phase === "wait" ? r.batches[r.i].to : r.batches[r.i].from;
+    setRun(null);
+    if (r.batches.length > 1 || r.phase === "wait") toast(`Stopped. ${sent} of ${r.list.length} stickers were sent; the rest will not print.`);
+  };
+
+  const r = run, b = r?.batches[r.i];
+  const nextB = r && r.batches[r.i + 1];
+  const panel = r && b ? <>
+    {printing && createPortal(<PrintSheet cfg={cfg} jobs={slice(r)} />, document.getElementById("printroot")!)}
+    <div className="print-notice batch-panel" role="status">
+      {r.phase === "print" ? <>
+        <div><b>{r.batches.length > 1 ? `Batch ${r.i + 1} of ${r.batches.length}` : "Printing"}</b> · stickers {b.from + 1}–{b.to} of {r.list.length}{r.direct ? " · sending…" : ""}</div>
+        <button className="btn" onClick={stop}>{r.direct ? "Stop after this" : "Close print"}</button>
+      </> : <>
+        <div><b>{b.to} of {r.list.length} sent.</b> {r.i === 0 && r.batches.length > 2 ? "That was one test row: check size, position and the count before the rest." : "Check them before going on."}</div>
+        <div className="row">
+          {nextB && <button className="btn p" onClick={() => void go({ ...r, i: r.i + 1, phase: "print", n: r.n + 1 })}>Print next {nextB.to - nextB.from} ({nextB.from + 1}–{nextB.to})</button>}
+          <button className="btn" onClick={() => void go({ ...r, phase: "print", n: r.n + 1 })}>Print these {b.to - b.from} again</button>
+          <button className="btn bad" onClick={stop}>Stop: don't print the rest</button>
+        </div>
+      </>}
+      <div className="xs mut">Wrong print already coming out? Switch the printer off, then cancel the job in Windows (Settings › Printers › TSC › Open print queue › Cancel) before switching it on, or Windows sends it again.</div>
+    </div>
+  </> : null;
+  return { start, stop, busy: !!run, panel };
+}
+
+/* What this computer must be told once, so the sticker on screen is the sticker on the roll. */
+export function PrinterSetup({ cfg }: { cfg: LabelCfg }) {
+  const pageW = cfg.mode === "roll" ? cfg.cols * cfg.w + (cfg.cols - 1) * cfg.gapX : cfg.sheetW;
+  const pageH = cfg.mode === "roll" ? cfg.h : cfg.sheetH;
+  return (
+    <details className="pad sm">
+      <summary><b>Set up this computer once</b> (date, link or wrong size on stickers?)</summary>
+      <ol className="stack" style={{ paddingLeft: 18, margin: "8px 0" }}>
+        <li>Windows: <b>Settings › Printers &amp; scanners › TSC › Printing preferences</b> › Page Setup › Stock › <b>New</b>: name it “Rungnna {pageW}×{pageH}”, width <b>{pageW} mm</b>, height <b>{pageH} mm</b>, portrait. Stock tab: <b>Labels with gaps</b>, gap {cfg.mode === "roll" ? Math.max(cfg.gapY, 2) : 0} mm. Apply.</li>
+        <li>Print once from here. In Chrome's print window open <b>More settings</b>: Paper size <b>Rungnna {pageW}×{pageH}</b>, Margins <b>None</b>, Scale <b>Default/100</b>, and <b>untick “Headers and footers”</b> (that is what prints the date and the link). Chrome remembers these.</li>
+        <li>{cfg.mode === "roll" && cfg.cols > 1 ? `Each print page is one row of ${cfg.cols} stickers. ` : ""}If the print sits off the stickers, use the nudge boxes above, not the printer's settings.</li>
+        <li>Stuck or wrong print: switch the printer off, then <b>Printers &amp; scanners › TSC › Open print queue › Cancel all documents</b> before switching it on again. If a job will not go, restart the <b>Print Spooler</b> service.</li>
+      </ol>
+    </details>
   );
 }
 

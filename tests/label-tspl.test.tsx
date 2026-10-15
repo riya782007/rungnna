@@ -23,7 +23,7 @@ describe("sticker text", () => {
 describe("TSPL for the TSC printer", () => {
   const job = (cfg: LabelCfg, copies = 3) => { const pp = productForLabel(p, 12); return labelTSPL(cfg, pp, 12, copies, ownPayload(pp, cfg.format || "shop")); };
   it("prints the requested copies of a correctly sized label", () => {
-    const t = job(DEFAULT_CFG);
+    const t = job({ ...DEFAULT_CFG, ...PRESETS.find(x => x.key === "rj")!.cfg } as LabelCfg);
     expect(t).toMatch(/^SIZE 50 mm, 20 mm\r\n/); expect(t).toContain("PRINT 1,3\r\n"); expect(t).toContain("QRCODE ");
     expect(t).toContain('"Rs.24.50X12PCS"'); expect(t).toContain('"RUNGNNA"');
   });

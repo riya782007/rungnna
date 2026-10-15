@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Camera, Plus, Trash2 } from "lucide-react";
 import { db, put, getSetting, setSetting, type Product, type Purchase } from "../lib/db";
@@ -10,12 +9,9 @@ import {
   savePhotoPurchase, validatePhotoRows, pricePhotoRows, applyVendorTerms,
   autoArticle, autoArticleCount, draftLabelProducts, type PhotoRow,
 } from "../lib/purchase-photo";
-import { purchaseLabelJobs, productForLabel } from "../lib/purchase-labels";
-import { DEFAULT_CFG, LabelView, PrintSheet, validateLabelPrint, type LabelCfg, type Job } from "../pages/Labels";
-import { usePrintJob } from "../lib/printing";
-import { labelTSPL } from "../lib/label-tspl";
-import { printTSPL, directPrintSupported } from "../lib/tsc";
-import { ownPayload } from "../lib/parse";
+import { purchaseLabelJobs } from "../lib/purchase-labels";
+import { DEFAULT_CFG, LabelView, validateLabelPrint, loadLabelCfg, useLabelPrint, tscCommands, expandJobs, type LabelCfg, type Job } from "../pages/Labels";
+import { directPrintSupported } from "../lib/tsc";
 import { currentStore } from "../lib/scope";
 import { toast } from "../lib/app";
 import { LocationSelect } from "./common";
@@ -48,7 +44,7 @@ export default function PurchasePhoto({ by }: { by: string }) {
   const [pricing, setPricing] = useState<PricingRule | null>(null);
   const [cfg, setCfg] = useState<LabelCfg>(DEFAULT_CFG);
   const [jobs, setJobs] = useState<Job[]>([]);          // labels for the purchase just saved
-  const [printing, setPrinting] = useState(false);
+  const printer = useLabelPrint(cfg);
   const [saved, setSaved] = useState<Purchase | null>(null);
   const lock = useRef(false), file = useRef<HTMLInputElement>(null);
   const suppliers = useLiveQuery(() => db.parties.filter(p => p.kind === "supplier" && !p.deleted).toArray(), [], []);
@@ -56,7 +52,7 @@ export default function PurchasePhoto({ by }: { by: string }) {
   useEffect(() => { getSetting<Draft | null>("purchase_photo_draft", null).then(old => { if (old?.store === currentStore()) setD(old); setReady(true); }); }, []);
   useEffect(() => { if (ready) setSetting("purchase_photo_draft", d); }, [d, ready]);
   // the same printer settings the Labels page uses, so a sticker printed here is that sticker
-  useEffect(() => { getSetting<LabelCfg>("label_cfg", DEFAULT_CFG).then(c => setCfg({ ...DEFAULT_CFG, ...c, show: { ...DEFAULT_CFG.show, ...c.show } })); }, []);
+  useEffect(() => { loadLabelCfg().then(setCfg); }, []);
 
   const set = (patch: Partial<Draft>) => { setReviewed(false); setD(x => ({ ...x, ...patch })); };
   const row = (i: number, key: Field, value: string) =>
@@ -136,13 +132,10 @@ export default function PurchasePhoto({ by }: { by: string }) {
   const sendToPrinter = async (queue: Job[], prompt: boolean) => {
     validateLabelPrint(cfg, queue);
     const direct = cfg.output === "tspl" && directPrintSupported() && cfg.mode === "roll" && cfg.cols === 1;
-    if (!direct) { setPrinting(true); return "browser"; }
-    const commands = queue.map(j => {
-      const product = productForLabel(j.p, j.qtyOnLabel);
-      return labelTSPL(cfg, product, j.qtyOnLabel, j.copies, ownPayload(product, cfg.format || "shop"));
-    }).join("");
-    await printTSPL(commands, prompt);
-    return "tsc";
+    const list = expandJobs(queue);
+    if (direct) tscCommands(cfg, list.slice(0, 1));     // refuse before anything is sent
+    printer.start(list, direct, prompt);                 // in stoppable batches, either way
+    return direct ? "tsc" : "browser";
   };
 
   /* THE one approval: drafts the products, records the purchase, and sends the labels — one press. */
@@ -170,8 +163,6 @@ export default function PurchasePhoto({ by }: { by: string }) {
     catch (e: any) { toast((e.message || "Print failed") + " · Check the printer before retrying to avoid duplicate labels.", true); }
   };
 
-  usePrintJob(printing, () => setPrinting(false), "", message => toast(message, true));
-  const flat = useMemo(() => jobs.flatMap(j => Array.from({ length: Math.max(0, Math.min(5000, j.copies)) }, () => j)).slice(0, 5000), [jobs]);
 
   const vendor = suppliers.find(s => s.id === d.supplier);
   const invented = autoArticleCount(d.rows);
@@ -221,7 +212,7 @@ export default function PurchasePhoto({ by }: { by: string }) {
     {busy && !!d.rows.length && <div role="status">Working…</div>}
 
     {saved && !d.rows.length && <div className="note" role="status">
-      <b>Purchase {saved.no} saved.</b> {flat.length} label{flat.length === 1 ? "" : "s"} prepared.
+      <b>Purchase {saved.no} saved.</b> {expandJobs(jobs).length} label{expandJobs(jobs).length === 1 ? "" : "s"} prepared.
       {!!jobs.length && <> <button className="linkbtn" onClick={reprint}>Print again</button></>}
     </div>}
 
@@ -282,7 +273,6 @@ export default function PurchasePhoto({ by }: { by: string }) {
     </>}
 
     {error && <div className="note warn" role="alert" style={{ whiteSpace: "pre-line" }}>{error}</div>}
-    {printing && createPortal(<PrintSheet cfg={cfg} jobs={flat} />, document.getElementById("printroot")!)}
-    {printing && <button className="btn print-notice" onClick={() => setPrinting(false)}>Close print</button>}
+    {printer.panel}
   </section>;
 }
