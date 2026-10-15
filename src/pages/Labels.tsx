@@ -16,7 +16,7 @@ import { inStore } from "../lib/scope";
 import { purchaseLabelJobs, productForLabel } from "../lib/purchase-labels";
 import { toPaise } from "../lib/format";
 import { getRule, priceFromCost, type PricingRule } from "../lib/pricing";
-import { labelTSPL, labelRate } from "../lib/label-tspl";
+import { labelTSPL, labelRate, rateMark } from "../lib/label-tspl";
 import { labelBatches, runsOf, DEFAULT_BATCH, type LabelBatch } from "../lib/labelBatches";
 import { printTSPL, directPrintSupported, connectSerial, connectUSB, serialSupported, usbSupported } from "../lib/tsc";
 
@@ -30,14 +30,26 @@ export type LabelCfg = {
   shop: string; format: "shop" | "rungnna"; layout: "shop" | "stack"; show: { shop: boolean; item: boolean; style: boolean; color: boolean; rate: boolean; tk: boolean; code: boolean; qty: boolean; cost_code: boolean };
   batch?: number;        // stickers handed to the printer at a time (0 = all at once) — see lib/labelBatches
   testFirst?: boolean;   // a long run starts with one test row
+  edgeR?: number;        // sheet: page x (mm) where the printer stops printing; a sticker past it is laid out narrower
+  cur?: string;          // printed before the rate: "9" on the shop's old stickers, or ₹ / Rs. / nothing
 };
+
+/** Where one sticker goes on a sheet page, and how wide it can be before the printer's right edge. */
+export function cellBox(cfg: LabelCfg, c: number, r: number) {
+  const x = cfg.left + cfg.offX + c * (cfg.w + cfg.gapX), y = cfg.top + cfg.offY + r * (cfg.h + cfg.gapY);
+  const limit = cfg.edgeR ?? cfg.sheetW;
+  return { x, y, w: Math.min(cfg.w, Math.round((limit - x) * 100) / 100) };
+}
 
 export const PRESETS: { key: string; name: string; cfg: Partial<LabelCfg> }[] = [
   /* Fitted to the shop's printer exactly as it is already set up (screenshot, 15 Oct 2026): the TSC driver's
      paper is USER 101.6 × 152.4 mm (4 × 6 in). Nothing on that computer changes; the app lays its 33 × 15 mm
      stickers onto that page instead: 3 across × 9 down = 27 a page. 9 rows × 16.93 mm = 152.4 mm, so every
      page ends exactly where the next one starts and the rows stay on the stickers page after page. */
-  { key: "rjpage", name: "Rungnna printer as set: 4 × 6 in page, 27 stickers of 33 × 15 mm", cfg: { mode: "sheet", sheetW: 101.6, sheetH: 152.4, w: 33, h: 15, cols: 3, rows: 9, gapX: 1.3, gapY: 1.93, top: 0, left: 0, qr: 11, font: 5, pad: 0.8 } },
+  /* First real print (photo, 15 Oct night): rows sat right vertically, but the stickers start ~3.5 mm right of the
+     page's left edge (first letters cut off on the left column) and the head prints nothing past ~100 mm (shop name
+     cut on the right column). So: left 3.5, and the third sticker's content stops at 100 mm. */
+  { key: "rjpage", name: "Rungnna printer as set: 4 × 6 in page, 27 stickers of 33 × 15 mm", cfg: { mode: "sheet", sheetW: 101.6, sheetH: 152.4, w: 33, h: 15, cols: 3, rows: 9, gapX: 1.3, gapY: 1.93, top: 0, left: 3.5, edgeR: 100, qr: 8, font: 5, pad: 0.8 } },
   /* The shop's actual stock (photographed 15 Oct 2026): a TSC roll three stickers across, each 33 × 15 mm,
      ~2 mm apart. One printed "page" is one row of three: 103 × 15 mm. */
   { key: "rj3", name: "Rungnna roll: 3 across, 33 × 15 mm", cfg: { mode: "roll", w: 33, h: 15, cols: 3, gapX: 2, gapY: 0, qr: 11, font: 5, pad: 0.8 } },
@@ -55,9 +67,10 @@ export const PRESETS: { key: string; name: string; cfg: Partial<LabelCfg> }[] = 
 
 export const DEFAULT_CFG: LabelCfg = {
   output: "browser",
-  preset: "rjpage", mode: "sheet", w: 33, h: 15, cols: 3, gapX: 1.3, gapY: 1.93, sheetW: 101.6, sheetH: 152.4, top: 0, left: 0, rows: 9,
-  qr: 11, font: 5, pad: 0.8, offX: 0, offY: 0, shop: "RUNGNNA", format: "shop", layout: "shop",
-  show: { shop: true, item: true, style: true, color: true, rate: true, tk: false, code: false, qty: true, cost_code: false },
+  preset: "rjpage", mode: "sheet", w: 33, h: 15, cols: 3, gapX: 1.3, gapY: 1.93, sheetW: 101.6, sheetH: 152.4, top: 0, left: 3.5, edgeR: 100, rows: 9,
+  qr: 8, font: 5, pad: 0.8, offX: 0, offY: 0, shop: "RUNGNNA", format: "shop", layout: "shop",
+  show: { shop: true, item: true, style: true, color: true, rate: true, tk: false, code: false, qty: true, cost_code: true },
+  cur: "9",
 };
 
 export type Job = { p: Product; qtyOnLabel: number; copies: number };
@@ -71,14 +84,18 @@ export function upgradeLabelCfg(saved: Partial<LabelCfg> | null | undefined): La
   const c = { ...DEFAULT_CFG, ...(saved || {}), show: { ...DEFAULT_CFG.show, ...(saved?.show || {}) } };
   const old50 = c.preset === "rj" && c.w === 50 && c.h === 20 && c.cols === 1;
   const oldRow = c.preset === "rj3" && c.mode === "roll" && c.w === 33 && c.h === 15 && c.cols === 3;
-  if (old50 || oldRow) return { ...c, ...PRESETS.find(x => x.key === "rjpage")!.cfg, preset: "rjpage" };
+  // the first version of the page layout (left 0, no right edge), untouched: take the measured one
+  const firstPage = c.preset === "rjpage" && c.left === 0 && c.edgeR === undefined && c.offX === 0;
+  if (old50 || oldRow || firstPage) return { ...c, ...PRESETS.find(x => x.key === "rjpage")!.cfg, preset: "rjpage", show: { ...c.show, cost_code: true } };
+  // the measured page before it matched his old stickers (QR 11): same look as his now
+  if (c.preset === "rjpage" && c.qr === 11 && c.left === 3.5) return { ...c, qr: 8, show: { ...c.show, cost_code: true } };
   return c;
 }
 export const loadLabelCfg = () => getSetting<Partial<LabelCfg> | null>("label_cfg", null).then(upgradeLabelCfg);
 
 export function validateLabelPrint(cfg: LabelCfg, jobs: Job[]) {
   if (![cfg.w, cfg.h, cfg.qr, cfg.font].every(n => Number.isFinite(n) && n > 0) || cfg.w > 200 || cfg.h > 300 || ![cfg.gapX, cfg.gapY, cfg.pad].every(n => Number.isFinite(n) && n >= 0) || ![cfg.offX, cfg.offY].every(Number.isFinite) || !Number.isSafeInteger(cfg.cols) || cfg.cols < 1 || cfg.cols > 20) throw new Error("Check label size, gaps and columns in printer settings");
-  if (cfg.mode === "sheet" && (!Number.isSafeInteger(cfg.rows) || cfg.rows < 1 || cfg.rows > 100 || ![cfg.sheetW, cfg.sheetH].every(n => Number.isFinite(n) && n > 0) || ![cfg.top, cfg.left].every(n => Number.isFinite(n) && n >= 0) || cfg.left + cfg.cols * cfg.w + (cfg.cols - 1) * cfg.gapX > cfg.sheetW + 0.01 || cfg.top + cfg.rows * cfg.h + (cfg.rows - 1) * cfg.gapY > cfg.sheetH + 0.01)) throw new Error("Labels do not fit the selected sheet");
+  if (cfg.mode === "sheet" && (!Number.isSafeInteger(cfg.rows) || cfg.rows < 1 || cfg.rows > 100 || ![cfg.sheetW, cfg.sheetH].every(n => Number.isFinite(n) && n > 0) || ![cfg.top, cfg.left].every(n => Number.isFinite(n) && n >= 0) || cellBox(cfg, cfg.cols - 1, 0).w < cfg.qr + cfg.pad * 2 + 8 || (cfg.edgeR === undefined && cfg.left + cfg.cols * cfg.w + (cfg.cols - 1) * cfg.gapX > cfg.sheetW + 0.01) || cfg.top + cfg.rows * cfg.h + (cfg.rows - 1) * cfg.gapY > cfg.sheetH + 0.01)) throw new Error("Labels do not fit the selected sheet");
   if (cfg.pad * 2 >= Math.min(cfg.w, cfg.h) || cfg.qr + cfg.pad * 2 >= cfg.w) throw new Error("Leave room for the product name beside the QR");
   if (!jobs.length || jobs.some(j => !j.p.item.trim() || !Number.isSafeInteger(j.copies) || j.copies < 1 || !Number.isSafeInteger(j.qtyOnLabel) || j.qtyOnLabel < 1) || jobs.reduce((n, j) => n + j.copies, 0) > 5000) throw new Error("Review product names and print quantities (maximum 5000 labels)");
 }
@@ -95,6 +112,8 @@ export default function Labels({ args }: { args: string[] }) {
   const [addStock, setAddStock] = useState(false);
   const [loc, setLoc] = useState("");
   const printer = useLabelPrint(cfg);
+  const [aligning, setAligning] = useState(false);
+  usePrintJob(aligning, () => setAligning(false), "align", m => toast(m, true));
   const [printerReady, setPrinterReady] = useState(false), [loadedPurchase, setLoadedPurchase] = useState("");
   const autoPrinted = useRef("");
   const [rule, setRule] = useState<PricingRule | null>(null);
@@ -257,9 +276,10 @@ export default function Labels({ args }: { args: string[] }) {
             </div>
           )}
         </div>
-        <div className="stack"><div className="labelprev"><LabelView cfg={cfg} p={jobs[0]?.p || form} qtyOnLabel={jobs[0]?.qtyOnLabel || parseInt(qty) || 1} /></div><details><summary>Printer settings</summary><LabelSettings cfg={cfg} upd={upd} sample={jobs[0]?.p || { ...form, code: form.code }} qty={jobs[0]?.qtyOnLabel || parseInt(qty) || 1} /></details></div>
+        <div className="stack"><div className="labelprev"><LabelView cfg={cfg} p={jobs[0]?.p || form} qtyOnLabel={jobs[0]?.qtyOnLabel || parseInt(qty) || 1} /></div><details><summary>Printer settings</summary><LabelSettings cfg={cfg} upd={upd} onTest={() => { if (!printer.busy) setAligning(true); }} sample={jobs[0]?.p || { ...form, code: form.code }} qty={jobs[0]?.qtyOnLabel || parseInt(qty) || 1} /></details></div>
       </div>
       {printer.panel}
+      {aligning && createPortal(<AlignSheet cfg={cfg} />, document.getElementById("printroot")!)}
     </div>
   );
 }
@@ -269,20 +289,22 @@ export function LabelView({ cfg, p, qtyOnLabel = 1 }: { cfg: LabelCfg; p: Produc
   const { svg } = useMemo(() => qrSvg(ownPayload(pp, cfg.format || "shop")), [p.code, p.item, p.type, p.style, p.color, p.tk, p.rate, p.item_code, pp.pack, p.ref, cfg.format]);
   const s = cfg.show, fs = cfg.font;
   const q = Math.min(cfg.qr, cfg.h - cfg.pad * 2);
+  const cur = rateMark(cfg);
   if ((cfg.layout || "shop") === "shop") return (
-    // same arrangement as the stickers already on his packets: text | QR | shop name standing up
-    <div className="lbl" style={{ width: cfg.w + "mm", height: cfg.h + "mm", padding: cfg.pad + "mm", gap: cfg.pad + "mm", fontSize: fs + "pt", alignItems: "center" }}>
-      <div className="t" style={{ fontWeight: 600 }}>
+    /* As the stickers on his packets (photo, 15 Oct): item, style and cost code small on the left, the QR beside
+       them at the top, the rate big along the bottom ("9320X1PCS"), and RUNGNNA standing up at the right edge. */
+    <div className="lbl lbl-shop" style={{ width: cfg.w + "mm", height: cfg.h + "mm", padding: cfg.pad + "mm", columnGap: cfg.pad + "mm", fontSize: fs + "pt" }}>
+      <div className="t">
         {s.item && p.item && <div>{p.item}</div>}
         {s.style && p.style && <div>{p.style}</div>}
         {s.color && p.color && <div>{p.color}</div>}
         {s.tk && p.tk && <div>TK {p.tk}</div>}
-        {s.rate && p.rate > 0 && <div style={{ fontWeight: 800, fontSize: fs * 1.35 + "pt" }}>₹{labelRate(p.rate)}{s.qty ? `X${pp.pack}${p.type || "PCS"}` : ""}</div>}
-        {s.cost_code && pp.cost_code && <div style={{ fontFamily: "monospace", fontWeight: 700, fontSize: fs * 0.95 + "pt" }}>{pp.cost_code}</div>}
-        {s.code && <div style={{ fontFamily: "monospace", fontSize: fs * 0.8 + "pt" }}>{p.code}</div>}
+        {s.cost_code && pp.cost_code && <div>{pp.cost_code}</div>}
+        {s.code && <div style={{ fontSize: fs * 0.85 + "pt" }}>{p.code}</div>}
       </div>
       <div className="q" style={{ width: q + "mm", height: q + "mm" }} dangerouslySetInnerHTML={{ __html: svg }} />
-      {s.shop && cfg.shop && <div style={{ writingMode: "vertical-rl", fontWeight: 800, letterSpacing: ".12em", fontSize: fs * 0.95 + "pt", flex: "none" }}>{cfg.shop}</div>}
+      {s.rate && p.rate > 0 && <div className="r" style={{ fontSize: fs * 1.75 + "pt" }}>{cur}{labelRate(p.rate)}{s.qty ? `X${pp.pack}${p.type || "PCS"}` : ""}</div>}
+      {s.shop && cfg.shop && <div className="n" style={{ fontSize: fs * 0.95 + "pt" }}>{cfg.shop}</div>}
     </div>
   );
   return (
@@ -295,7 +317,7 @@ export function LabelView({ cfg, p, qtyOnLabel = 1 }: { cfg: LabelCfg; p: Produc
         {s.color && p.color && <div>{p.color}</div>}
         {s.tk && p.tk && <div>TK {p.tk}</div>}
         {s.qty && <div>{qtyOnLabel} {p.type || "PCS"}</div>}
-        {s.rate && p.rate > 0 && <div style={{ fontWeight: 800, fontSize: fs * 1.25 + "pt" }}>₹{labelRate(p.rate)}</div>}
+        {s.rate && p.rate > 0 && <div style={{ fontWeight: 800, fontSize: fs * 1.25 + "pt" }}>{cur}{labelRate(p.rate)}</div>}
         {s.cost_code && pp.cost_code && <div style={{ fontFamily: "monospace", fontWeight: 700, fontSize: fs * 0.95 + "pt" }}>{pp.cost_code}</div>}
         {s.code && <div style={{ fontFamily: "monospace", fontSize: fs * 0.85 + "pt" }}>{p.code}</div>}
       </div>
@@ -303,7 +325,7 @@ export function LabelView({ cfg, p, qtyOnLabel = 1 }: { cfg: LabelCfg; p: Produc
   );
 }
 
-function LabelSettings({ cfg, upd, sample, qty }: { cfg: LabelCfg; upd: (p: Partial<LabelCfg>) => void; sample: Product; qty: number }) {
+function LabelSettings({ cfg, upd, sample, qty, onTest }: { cfg: LabelCfg; upd: (p: Partial<LabelCfg>) => void; sample: Product; qty: number; onTest?: () => void }) {
   const num = (k: keyof LabelCfg, lab: string, step = 0.5) => (
     <label className="f">{lab}
       <input className="in mono" type="number" step={step} value={cfg[k] as number} onChange={e => upd({ [k]: Number(e.target.value) } as any)} /></label>);
@@ -324,7 +346,8 @@ function LabelSettings({ cfg, upd, sample, qty }: { cfg: LabelCfg; upd: (p: Part
           {num("w", "Width mm")}{num("h", "Height mm")}{num("qr", "QR size mm")}
           {num("font", "Text size pt")}{num("offX", "Nudge right mm", 0.25)}{num("offY", "Nudge down mm", 0.25)}
           {cfg.mode === "roll" ? <>{num("cols", "Stickers across", 1)}{num("gapX", "Gap across mm")}{num("gapY", "Gap between mm")}</>
-            : <>{num("sheetW", "Page width mm", 0.1)}{num("sheetH", "Page height mm", 0.1)}{num("cols", "Across", 1)}{num("rows", "Down", 1)}{num("top", "Top margin mm")}{num("left", "Left margin mm")}{num("gapX", "Gap across mm")}{num("gapY", "Gap down mm")}</>}
+            : <>{num("sheetW", "Page width mm", 0.1)}{num("sheetH", "Page height mm", 0.1)}{num("cols", "Across", 1)}{num("rows", "Down", 1)}{num("top", "Top margin mm")}{num("left", "Left margin mm")}{num("gapX", "Gap across mm")}{num("gapY", "Gap down mm")}
+              <label className="f">Printer stops at mm<input className="in mono" type="number" step={0.5} value={cfg.edgeR ?? cfg.sheetW} onChange={e => upd({ edgeR: Number(e.target.value) || undefined })} /></label></>}
         </div>
         <div className="grid g2">
           <label className="f">Stickers per batch (0 = all at once)
@@ -332,7 +355,16 @@ function LabelSettings({ cfg, upd, sample, qty }: { cfg: LabelCfg; upd: (p: Part
           <label className="row sm"><input type="checkbox" checked={cfg.testFirst ?? true} onChange={e => upd({ testFirst: e.target.checked })} /> Long runs start with one test row</label>
         </div>
         <div className="xs mut">The app waits after each batch: <b>Print next</b> or <b>Stop</b>. Windows only ever holds one batch, so switching the printer off never brings back hundreds of stickers.</div>
-        <label className="f">Shop name on label<input className="in" value={cfg.shop} onChange={e => upd({ shop: e.target.value })} /></label>
+        <div className="grid g2">
+          <label className="f">Shop name on label<input className="in" value={cfg.shop} onChange={e => upd({ shop: e.target.value })} /></label>
+          <label className="f">Before the rate
+            <select className="in" value={rateMark(cfg)} onChange={e => upd({ cur: e.target.value })}>
+              <option value="9">9 — like the old stickers (9320X1PCS)</option>
+              <option value="₹">₹ (₹320X1PCS)</option>
+              <option value="Rs.">Rs. (Rs.320X1PCS)</option>
+              <option value="">Nothing (320X1PCS)</option>
+            </select></label>
+        </div>
         <div className="grid g2">
           <label className="f">QR content
             <select className="in" value={cfg.format || "shop"} onChange={e => upd({ format: e.target.value as any })}>
@@ -351,7 +383,7 @@ function LabelSettings({ cfg, upd, sample, qty }: { cfg: LabelCfg; upd: (p: Part
         </div>
       </div>
       <div className="labelprev"><LabelView cfg={cfg} p={demo} qtyOnLabel={qty} /></div>
-      <PrinterSetup cfg={cfg} />
+      <PrinterSetup cfg={cfg} onTest={onTest} />
     </div>
   );
 }
@@ -427,7 +459,7 @@ export function useLabelPrint(cfg: LabelCfg) {
 }
 
 /* What this computer must be told once, so the sticker on screen is the sticker on the roll. */
-export function PrinterSetup({ cfg }: { cfg: LabelCfg }) {
+export function PrinterSetup({ cfg, onTest }: { cfg: LabelCfg; onTest?: () => void }) {
   const pageW = cfg.mode === "roll" ? cfg.cols * cfg.w + (cfg.cols - 1) * cfg.gapX : cfg.sheetW;
   const pageH = cfg.mode === "roll" ? cfg.h : cfg.sheetH;
   // the page his TSC driver is already set to: nothing to change on that computer
@@ -443,10 +475,41 @@ export function PrinterSetup({ cfg }: { cfg: LabelCfg }) {
           : <li>Windows: <b>Settings › Printers &amp; scanners › TSC › Printing preferences</b> › Page Setup › Stock › <b>New</b>: name it “{paper}”, width <b>{pageW} mm</b>, height <b>{pageH} mm</b>, portrait. Stock tab: <b>Labels with gaps</b>. Apply.</li>}
         <li>Print once from here. In Chrome's print window open <b>More settings</b>: Paper size <b>{paper}</b>, Margins <b>None</b>, Scale <b>Default/100</b>, and <b>untick “Headers and footers”</b> (that is what prints the date and the link). Chrome remembers these.</li>
         <li>Each printed page is {per} sticker{per === 1 ? "" : "s"}{cfg.mode === "sheet" ? ` (${cfg.cols} across × ${cfg.rows} down)` : ""}. If the print sits off the stickers, use <b>Nudge right / Nudge down</b>; if it drifts further down the page, change <b>Gap down</b>; across, <b>Gap across</b>. Not the printer's settings.</li>
+        {onTest && <li><button className="btn" onClick={onTest}>Print alignment test (1 page)</button> Prints a box where the app puts each sticker, with a millimetre ruler. Send a photo of it: the ruler shows exactly which number to change.</li>}
         <li>Stuck or wrong print: switch the printer off, then <b>Printers &amp; scanners › TSC › Open print queue › Cancel all documents</b> before switching it on again. If a job will not go, restart the <b>Print Spooler</b> service.</li>
       </ol>
     </details>
   );
+}
+
+/* One page that shows where the app thinks every sticker is, against a millimetre ruler. A photo of it says
+   exactly which number to change: the ruler reading at a sticker's left edge is its "Left margin", and so on. */
+export function AlignSheet({ cfg }: { cfg: LabelCfg }) {
+  const W = cfg.mode === "sheet" ? cfg.sheetW : cfg.cols * cfg.w + (cfg.cols - 1) * cfg.gapX;
+  const H = cfg.mode === "sheet" ? cfg.sheetH : cfg.h;
+  const rows = cfg.mode === "sheet" ? cfg.rows : 1;
+  const boxes = Array.from({ length: rows * cfg.cols }, (_, k) => {
+    const c = k % cfg.cols, r = Math.floor(k / cfg.cols);
+    return cfg.mode === "sheet" ? { ...cellBox(cfg, c, r), c, r } : { x: cfg.offX + c * (cfg.w + cfg.gapX), y: cfg.offY, w: cfg.w, c, r };
+  });
+  const ticks = (n: number) => Array.from({ length: Math.floor(n) + 1 }, (_, i) => i);
+  const across = (y: number) => <g key={"a" + y}>{ticks(W).map(i => <line key={i} x1={i} x2={i} y1={y} y2={y + (i % 10 ? i % 5 ? 0.8 : 1.4 : 2.2)} stroke="#000" strokeWidth={0.15} />)}
+    {ticks(W).filter(i => i % 10 === 0).map(i => <text key={"t" + i} x={i + 0.3} y={y + 4.2} fontSize={2.4} fontWeight={700}>{i}</text>)}</g>;
+  // the up-and-down ruler runs in the gap after the first column, so it never covers a box's label
+  const midX = cfg.mode === "sheet" && cfg.cols > 1 ? cellBox(cfg, 0, 0).x + cfg.w + cfg.gapX / 2 : W / 2;
+  return (<>
+    <style>{`@page{size:${W}mm ${H}mm;margin:0}`}</style>
+    <svg width={W + "mm"} height={H + "mm"} viewBox={`0 0 ${W} ${H}`} style={{ display: "block" }} fontFamily="Arial, sans-serif">
+      {boxes.map((b, i) => <g key={i}>
+        <rect x={b.x} y={b.y} width={b.w} height={cfg.h} fill="none" stroke="#000" strokeWidth={0.25} />
+        <text x={b.x + b.w / 2} y={b.y + cfg.h - 1.5} fontSize={2.2} textAnchor="middle">{`row ${b.r + 1} · col ${b.c + 1}`}</text>
+      </g>)}
+      {across(cfg.mode === "sheet" ? cellBox(cfg, 0, 0).y + 2 : cfg.offY + 2)}
+      {rows > 4 && across(cellBox(cfg, 0, 4).y + 2)}
+      {ticks(H).map(i => <line key={"v" + i} y1={i} y2={i} x1={midX} x2={midX + (i % 10 ? i % 5 ? 0.8 : 1.4 : 2.2)} stroke="#000" strokeWidth={0.15} />)}
+      {ticks(H).filter(i => i % 10 === 0 && i > 0).map(i => <text key={"vt" + i} x={midX + 2.6} y={i + 0.8} fontSize={2.4} fontWeight={700}>{i}</text>)}
+    </svg>
+  </>);
 }
 
 /* Exported so the Stock-in bill reader prints through exactly this renderer.
@@ -470,9 +533,9 @@ export function PrintSheet({ cfg, jobs }: { cfg: LabelCfg; jobs: Job[] }) {
     {pages.map((pg, i) => (
       <div key={i} style={{ width: cfg.sheetW + "mm", height: cfg.sheetH + "mm", position: "relative", pageBreakAfter: i === pages.length - 1 ? "auto" : "always", breakAfter: i === pages.length - 1 ? "auto" : "page", overflow: "hidden" }}>
         {pg.map((j, k) => {
-          const c = k % cfg.cols, r = Math.floor(k / cfg.cols);
-          return <div key={k} style={{ position: "absolute", left: cfg.left + cfg.offX + c * (cfg.w + cfg.gapX) + "mm", top: cfg.top + cfg.offY + r * (cfg.h + cfg.gapY) + "mm" }}>
-            <LabelView cfg={cfg} p={j.p} qtyOnLabel={j.qtyOnLabel} /></div>;
+          const b = cellBox(cfg, k % cfg.cols, Math.floor(k / cfg.cols));
+          return <div key={k} style={{ position: "absolute", left: b.x + "mm", top: b.y + "mm" }}>
+            <LabelView cfg={b.w < cfg.w ? { ...cfg, w: b.w } : cfg} p={j.p} qtyOnLabel={j.qtyOnLabel} /></div>;
         })}
       </div>))}
   </>);

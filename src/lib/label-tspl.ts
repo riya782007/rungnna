@@ -13,14 +13,16 @@ import { qrSvg } from "./qr";
 =========================================================================== */
 
 export type LabelShow = { shop: boolean; item: boolean; style: boolean; color: boolean; rate: boolean; tk: boolean; code: boolean; qty: boolean; cost_code: boolean };
-export type LabelLook = { w: number; h: number; qr: number; font: number; pad: number; offX: number; offY: number; gapY: number; shop: string; layout?: "shop" | "stack"; show: LabelShow };
+export type LabelLook = { w: number; h: number; qr: number; font: number; pad: number; offX: number; offY: number; gapY: number; shop: string; layout?: "shop" | "stack"; show: LabelShow; cur?: string };
 export type LabelLine = { text: string; big?: boolean; bold?: boolean; small?: boolean; optional?: boolean };   // optional = may be left off a crowded label (the QR carries it anyway)
 
 /** Sticker rate: whole rupees stay whole (₹24), paise always show two places (₹12.50). */
 export const labelRate = (paise: number) => { const r = Math.round(paise) / 100; return Number.isInteger(r) ? String(r) : r.toFixed(2); };
 
 /** The words on one sticker, top to bottom, exactly as LabelView shows them. `pack` is the quantity on this label. */
-export function labelLines(look: Pick<LabelLook, "shop" | "layout" | "show">, p: Product, pack: number, rupee = "₹"): LabelLine[] {
+/** What goes before the rate. The shop's old stickers print "9" there ("9320X1PCS" = ₹320): their own code. */
+export const rateMark = (look: { cur?: string }) => look.cur ?? "₹";
+export function labelLines(look: Pick<LabelLook, "shop" | "layout" | "show" | "cur">, p: Product, pack: number, rupee = rateMark(look)): LabelLine[] {
   const s = look.show, out: LabelLine[] = [];
   const push = (on: boolean, text: string | undefined | false, o: Omit<LabelLine, "text"> = {}) => { if (on && text) out.push({ text, ...o }); };
   if ((look.layout || "shop") === "shop") {
@@ -54,7 +56,7 @@ export function labelTSPL(look: LabelLook, p: Product, pack: number, copies: num
   const { w, h, pad } = look;
   if (![w, h, pad, look.qr, look.font, look.offX, look.offY].every(Number.isFinite) || w < 10 || w > 200 || h < 8 || h > 300) throw new Error("Check label size in printer settings");
   if (!Number.isSafeInteger(copies) || copies < 1 || copies > 5000) throw new Error("Print quantity must be 1–5000");
-  const lines = labelLines(look, p, pack, "Rs.");
+  const lines = labelLines(look, p, pack, /^[\x20-\x7e]*$/.test(rateMark(look)) ? rateMark(look) : "Rs.");
   if ([...lines.map(l => l.text), look.shop].some(s => /[^\x00-\x7f]/.test(s || ""))) throw new Error("Hindi / Unicode text can't go to the TSC printer directly — use browser printing for this label");
   const ox = dots(look.offX), oy = dots(look.offY), W = dots(w), H = dots(h), P = dots(pad);
   const qrMm = Math.min(look.qr, h - pad * 2), qrDots = dots(qrMm);

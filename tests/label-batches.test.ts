@@ -35,7 +35,7 @@ describe("printing stickers in batches that can be stopped", () => {
   });
 });
 
-import { DEFAULT_CFG, upgradeLabelCfg, validateLabelPrint } from "../src/pages/Labels";
+import { DEFAULT_CFG, upgradeLabelCfg, validateLabelPrint, cellBox } from "../src/pages/Labels";
 describe("the shop's printer, as it is already set up", () => {
   it("defaults to the page his TSC driver uses: 101.6 × 152.4 mm, 3 × 9 stickers of 33 × 15", () => {
     expect(DEFAULT_CFG).toMatchObject({ mode: "sheet", sheetW: 101.6, sheetH: 152.4, w: 33, h: 15, cols: 3, rows: 9 });
@@ -44,7 +44,14 @@ describe("the shop's printer, as it is already set up", () => {
   it("nine rows fill the page exactly, so page after page stays on the stickers", () => {
     const c = DEFAULT_CFG;
     expect(c.rows * (c.h + c.gapY)).toBeCloseTo(c.sheetH, 0);
-    expect(c.cols * c.w + (c.cols - 1) * c.gapX).toBeLessThanOrEqual(c.sheetW + 0.01);
+    // nothing is drawn past where the printer stops; the third sticker is laid out narrower instead
+    for (let col = 0; col < c.cols; col++) { const b = cellBox(c, col, 0); expect(b.x + b.w).toBeLessThanOrEqual(c.edgeR! + 0.01); }
+    expect(cellBox(c, 0, 0).x).toBe(3.5);
+    expect(cellBox(c, 2, 0).w).toBeGreaterThan(c.qr + 2 * c.pad + 8);
+  });
+  it("the first page layout (left 0) moves to the measured one, a hand-tuned one does not", () => {
+    expect(upgradeLabelCfg({ ...DEFAULT_CFG, left: 0, edgeR: undefined })).toMatchObject({ left: 3.5, edgeR: 100 });
+    expect(upgradeLabelCfg({ ...DEFAULT_CFG, left: 0, edgeR: undefined, offX: 1 })).toMatchObject({ left: 0, offX: 1 });
   });
   it("batches whole pages: the test is one page of 27", () => {
     const b = labelBatches(344, DEFAULT_CFG.cols * DEFAULT_CFG.rows);
