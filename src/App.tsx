@@ -11,6 +11,7 @@ import Home from "./pages/Home";
 import { WhoAreYou } from "./pages/Settings";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "./lib/db";
+const StockAI = lazy(() => import("./components/StockAI"));
 import { OwnerGate } from "./components/OwnerSecurity";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { getSetting, setSetting } from "./lib/db";
@@ -197,7 +198,10 @@ function Shell() {
             <span className="grow" /><Status />
           </div>)}
         <main className={"page" + (route === "bill" ? " wide" : "")}>
-          <Guard key={store + route + (args[0] || "")}><Suspense fallback={<Loading />}><div className="pagein">{page}</div></Suspense></Guard>
+          <Guard key={store + route + (args[0] || "")}>
+            {sec === "stock" && <Suspense fallback={null}><StockAI /></Suspense>}
+            <Suspense fallback={<Loading />}><div className="pagein">{page}</div></Suspense>
+          </Guard>
         </main>
       </div>
       <nav className="tabbar">

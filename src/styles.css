@@ -733,3 +733,11 @@ html{scrollbar-gutter:stable}
 @media(max-width:860px){.add-inv .split{grid-template-columns:1fr}.add-inv aside .card{position:static}}
 .tabs-hidden{padding:0 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46ch}
 @media(max-width:900px){.tabs-hidden{display:none}}
+
+/* Stock › the AI strip that rides above every tab */
+.stock-ai{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh);margin-bottom:14px;overflow:hidden}
+.stock-ai-head{display:flex;align-items:center;gap:10px;width:100%;padding:10px 14px;background:none;border:0;text-align:left;color:inherit}
+.stock-ai-head:hover{background:var(--line-2)}
+.stock-ai-head svg{color:var(--gold-d)}
+.stock-ai .bar-track{display:block;height:8px;border-radius:99px;background:var(--line-2);overflow:hidden}
+.stock-ai .bar-fill{display:block;height:100%;background:linear-gradient(90deg,var(--gold),var(--emerald));transition:width .2s var(--ease)}
