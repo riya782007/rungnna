@@ -5,7 +5,7 @@ import { db, type Product } from "../lib/db";
 import { Modal } from "./common";
 import { api } from "../lib/ai";
 import { useApp, toast } from "../lib/app";
-import { can } from "../lib/roles";
+import { can, roleName } from "../lib/roles";
 import {
   writePages, pickForListing, planPublish, publishAll, describePlan,
   type BulkProgress, type BulkResult, type BulkTarget,
@@ -31,7 +31,7 @@ const HAS_READER = ["labels", "stockin"];
 =========================================================================== */
 
 export default function StockAI({ route = "" }: { route?: string }) {
-  const { me } = useApp();
+  const { me, setMe } = useApp();
   const [bill, setBill] = useState(false);
   const [open, setOpen] = useState(false);
   const [target, setTarget] = useState<BulkTarget>("missing");
@@ -58,7 +58,6 @@ export default function StockAI({ route = "" }: { route?: string }) {
       .catch(e => setChain(/sign in|login/i.test(e.message) ? "needs the shop login — Settings › Cloud backup" : e.message));
   }, [open]);
 
-  if (!mayWrite && !mayPublish && !mayBill) return null;
 
   async function run() {
     const list = await pickForListing(target);
@@ -93,6 +92,11 @@ export default function StockAI({ route = "" }: { route?: string }) {
 
   const pct = prog && prog.total ? Math.round((prog.done / prog.total) * 100) : 0;
 
+  const Locked = () => <span className="row" style={{ gap: 8 }}>
+    <span className="xs mut">Not allowed for {roleName(me) || "this person"}</span>
+    <button className="btn sm" onClick={() => setMe(null)}>Switch person</button>
+  </span>;
+
   return (
     <div className="stock-ai">
       <button className="stock-ai-head" onClick={() => setOpen(!open)} aria-expanded={open}>
@@ -111,13 +115,15 @@ export default function StockAI({ route = "" }: { route?: string }) {
         </div>}
 
         {!busy && <>
-          {mayBill && <div className="row">
+          <div className="row">
             <span className="sm grow">Read a purchase bill — photo or PDF page</span>
-            {HAS_READER.includes(route)
-              ? <span className="xs mut">Open “Purchase bill photos” below ↓</span>
-              : <button className="btn p" onClick={() => setBill(true)}><Camera size={15} />Upload bill</button>}
-          </div>}
+            {!mayBill ? <Locked />
+              : HAS_READER.includes(route)
+                ? <span className="xs mut">Open “From a purchase bill” below ↓</span>
+                : <button className="btn p" onClick={() => setBill(true)}><Camera size={15} />Upload bill</button>}
+          </div>
 
+          {!mayWrite && <div className="row"><span className="sm grow">Write product pages with AI</span><Locked /></div>}
           {mayWrite && <div className="row">
             <label className="f" style={{ margin: 0 }}>Write pages for
               <select className="in" value={target} onChange={e => setTarget(e.target.value as BulkTarget)}>

@@ -11,7 +11,7 @@ import { blankProduct, saveProduct, findByScan, distinct, DEFAULT_ITEMS, DEFAULT
 import { Head, LocationSelect, DeadToggle , MoneyInput } from "../components/common";
 import { WedgeInput } from "../components/Scanner";
 import { useApp, toast } from "../lib/app";
-import { can } from "../lib/roles";
+import { can, roleName } from "../lib/roles";
 import { inStore } from "../lib/scope";
 import { purchaseLabelJobs, productForLabel } from "../lib/purchase-labels";
 import { toPaise } from "../lib/format";
@@ -59,7 +59,7 @@ export function validateLabelPrint(cfg: LabelCfg, jobs: Job[]) {
 }
 
 export default function Labels({ args }: { args: string[] }) {
-  const { me } = useApp();
+  const { me, setMe } = useApp();
   const [cfg, setCfg] = useState<LabelCfg>(DEFAULT_CFG);
   const [form, setForm] = useState<Product>(() => blankProduct(""));
   const [qty, setQty] = useState("1");
@@ -188,12 +188,15 @@ export default function Labels({ args }: { args: string[] }) {
       </Head>
       <div className="split">
         <div className="stack">
-          {can(me, "purchases.photo") && <details className="card purchase-import" open={args[0] === "bill"}>
+          {can(me, "purchases.photo") ? <details className="card purchase-import" open={args[0] === "bill"}>
             <summary className="pad b">From a purchase bill — upload the photo, get the labels</summary>
             <div style={{ borderTop: "1px solid var(--line-2)" }} className="pad">
               <Suspense fallback={<div role="status">Loading bill reader…</div>}><PurchasePhoto by={me?.id || ""} /></Suspense>
             </div>
-          </details>}
+          </details>
+          /* shown even when not allowed, so the owner can see it exists and how to reach it */
+          : <div className="card pad row"><span className="grow sm"><b>From a purchase bill</b> — needs “Read purchase bill photos”, which {roleName(me) || "this person"} does not have.</span>
+              <button className="btn sm" onClick={() => setMe(null)}>Switch person</button></div>}
           <div className="card">
             <header><h3>Barcode print</h3><span className="xs mut">scan an existing label to copy its details</span></header>
             <div className="pad stack">
