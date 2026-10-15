@@ -38,10 +38,22 @@ export async function sb(): Promise<SupabaseClient | null> {
 }
 export function resetClient() { client = null; }
 
+/* Supabase's own words, turned into what to actually do. Each of these was hit for real. */
+export function authHelp(msg: string): string {
+  const m = msg || "";
+  if (/email address .* is invalid|email_address_invalid/i.test(m))
+    return "Supabase refused that email: it can't receive mail. Use a real address you can open, such as the owner's Gmail.";
+  if (/rate limit|over_email_send_rate_limit/i.test(m))
+    return "Supabase is trying to send a confirmation email and has hit its hourly limit. Switch it off once: Supabase → Authentication → Sign In / Providers → Email → turn off “Confirm email” → Save. Then press this button again.";
+  if (/email not confirmed/i.test(m))
+    return "This login is waiting for its confirmation email. Open that email, or switch off “Confirm email” in Supabase → Authentication → Sign In / Providers → Email, then sign in again.";
+  return "";
+}
+
 export async function signIn(email: string, password: string) {
   const c = await sb(); if (!c) throw new Error("Cloud is not connected yet");
   const { error } = await c.auth.signInWithPassword({ email, password });
-  if (error) throw error;
+  if (error) throw new Error(authHelp(error.message) || error.message);
   syncNow();
 }
 export async function signOut() { const c = await sb(); await c?.auth.signOut(); emit({ user: undefined }); }
@@ -56,6 +68,8 @@ export async function createShopLogin(email: string, password: string): Promise<
   if (password.length < 8) throw new Error("Use at least 8 characters, and keep it somewhere safe — it is the shop's own login");
   const { data, error } = await c.auth.signUp({ email, password });
   if (error) {
+    const why = authHelp(error.message);
+    if (why) throw new Error(why);
     // already made on another device (or an earlier try): this is simply a sign-in
     if (/already registered|already exists|user already/i.test(error.message)) { await signIn(email, password); return "ready"; }
     if (/signups? not allowed|disabled/i.test(error.message))

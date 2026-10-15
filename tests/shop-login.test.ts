@@ -46,6 +46,17 @@ describe("making the shop login from the app", () => {
     await expect(createShopLogin("shop@rungnna.in", "rungnna-2026")).rejects.toThrow(/Authentication/);
   });
 
+  /* the two answers Supabase actually gave on 15 Oct, word for word */
+  it("explains an address Supabase refuses, instead of 'invalid'", async () => {
+    auth.signUp.mockResolvedValue({ data: {}, error: { message: 'Email address "shop@rungnna.in" is invalid' } });
+    await expect(createShopLogin("shop@rungnna.in", "rungnna-2026")).rejects.toThrow(/real address.*Gmail/);
+  });
+
+  it("says which switch to turn off when the confirmation email hits its limit", async () => {
+    auth.signUp.mockResolvedValue({ data: {}, error: { message: "email rate limit exceeded" } });
+    await expect(createShopLogin("owner@gmail.com", "rungnna-2026")).rejects.toThrow(/Confirm email/);
+  });
+
   it("refuses a short password before anything is sent", async () => {
     await expect(createShopLogin("shop@rungnna.in", "1234")).rejects.toThrow(/8 characters/);
     expect(auth.signUp).not.toHaveBeenCalled();

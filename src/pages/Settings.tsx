@@ -173,7 +173,8 @@ function OperationsCard({ by }: { by: string }) {
 }
 
 export function ShopLogin({ onDone }: { onDone?: () => void }) {
-  const [email, setEmail] = useState("shop@rungnna.in");
+  // no made-up default: Supabase only accepts an address that can really receive mail
+  const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
   const [busy, setBusy] = useState(false);
   /* The shop login has to be made once before any of this works. Until it exists,
@@ -204,14 +205,15 @@ export function ShopLogin({ onDone }: { onDone?: () => void }) {
       }
       finally { setBusy(false); }
     }}>
-      <label className="f">Shop login email<input className="in" type="email" value={email} onChange={e => setEmail(e.target.value)} /></label>
+      <div className="xs mut">The shop's cloud account, made once by the owner. It keeps all three floors and every device on the same stock and bills, backs everything up, puts product photos online, and lets the AI read purchase bills. The AI checks it so nobody outside the shop can spend the AI credit.</div>
+      <label className="f">Owner's email<input className="in" type="email" inputMode="email" autoComplete="username" placeholder="a real address, e.g. the owner's Gmail" value={email} onChange={e => setEmail(e.target.value)} /></label>
       <label className="f">Password<input className="in" type="password" value={pw} onChange={e => setPw(e.target.value)} autoComplete={first ? "new-password" : "current-password"} /></label>
       <label className="row sm" style={{ gap: 8 }}>
         <input type="checkbox" checked={first} onChange={e => setFirst(e.target.checked)} />
         <span>First time — make the shop login now</span>
       </label>
       {first && <div className="xs mut">Choose a password of at least 8 characters and keep it with the shop papers. Every device and the bill reader use this one login.</div>}
-      <button className="btn p" disabled={busy || !pw}>{busy ? (first ? "Making…" : "Connecting…") : first ? "Make the shop login" : "Connect this device"}</button>
+      <button className="btn p" disabled={busy || !pw || !/^\S+@\S+\.\S+$/.test(email.trim())}>{busy ? (first ? "Making…" : "Connecting…") : first ? "Make the shop login" : "Connect this device"}</button>
     </form>
   );
 }
