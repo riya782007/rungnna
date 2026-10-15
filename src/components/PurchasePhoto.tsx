@@ -188,6 +188,14 @@ export default function PurchasePhoto({ by }: { by: string }) {
     [d.rows, pricing, by]);
 
   const ready4 = !busy && reviewed && !validation && !!d.supplier && !!d.rack && !!d.billNo.trim();
+  /* a grey button with no reason sends the owner hunting: say exactly what is still missing */
+  const missing = [
+    !d.supplier && (d.supplierName ? `add or choose the supplier (tap “+ Add ${d.supplierName.trim().toUpperCase()}”)` : "choose the supplier"),
+    !d.rack && "choose the location",
+    !d.billNo.trim() && "enter the supplier bill no.",
+    validation && validation.replace(/\.$/, "").replace(/^./, c => c.toLowerCase()),
+    !reviewed && "tick the box above",
+  ].filter(Boolean) as string[];
 
   const notReady = !!connection && !connection.startsWith("Ready");
   return <section className="purchase-photo stack">
@@ -269,6 +277,7 @@ export default function PurchasePhoto({ by }: { by: string }) {
       <button className="btn p" disabled={!ready4} onClick={approve}>
         {busy ? "Working…" : `Approve: draft ${d.rows.length} product${d.rows.length === 1 ? "" : "s"} & print ${labelCount || ""} label${labelCount === 1 ? "" : "s"}`}
       </button>
+      {!busy && !!missing.length && <div className="sm bad-text" role="status">To approve: {missing.join(" · ")}</div>}
       <div className="xs mut">One press records the purchase, drafts the products onto {d.rack ? "the chosen rack" : "the rack"} and sends the labels. Nothing is printed before you press it.</div>
     </>}
 
