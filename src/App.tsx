@@ -165,7 +165,10 @@ function Shell() {
   return (
     <div className={"shell" + (compact ? " compact-menu" : "") + (route === "bill" ? " billing-shell" : "")}>
       <aside className="rail">
-        <div className="brand"><span className="mark">R</span><div><b>Rungnna</b><span>Jewellery &amp; Co</span></div></div>
+        {/* the R mark is what people tap first, so it opens and closes the menu: on a desktop the
+            collapsed rail had no other way back, the toggle lives in the phone-only top bar */}
+        <div className="brand"><button type="button" className="mark markbtn" onClick={() => { setCompact(!compact); setSetting("compact_menu", !compact); }}
+          title={compact ? "Show menu" : "Hide menu"} aria-label={compact ? "Show menu" : "Hide menu"} aria-expanded={!compact}>R</button><div><b>Rungnna</b><span>Jewellery &amp; Co</span></div></div>
         {can(me, "bill") && <a href="#/bill" className="newbill"><Icon n="plus" size={18} /><span className="t">{t("New bill")}</span><kbd style={{ background: "rgba(255,255,255,.15)", color: "#fff" }}>F2</kbd></a>}
         <button className="railsearch" onClick={() => setPal(true)}><Icon n="search" size={17} /><span className="grow">Search</span><kbd>Ctrl K</kbd></button>
         {visible.map(s => <a key={s.key} href={hrefOf(s)} title={t(s.label)} aria-label={t(s.label) + (s.key === "sell" && waiting ? ` · ${waiting} waiting` : "")} className={"nav" + (sec === s.key ? " on" : "")}><Icon n={s.icon} /><span className="grow">{t(s.label)}</span>{s.key === "sell" && waiting > 0 && <span className="navbadge" title={`${waiting} trade order${waiting > 1 ? "s" : ""} / dealer sign-up${waiting > 1 ? "s" : ""} waiting`}>{waiting > 9 ? "9+" : waiting}</span>}</a>)}
@@ -193,7 +196,7 @@ function Shell() {
           <div className={"subnav" + (scrolled ? " scrolled" : "")}>
             <nav className="tabs">{tabs.map(([k, label]) => <a key={k} href={"#/" + k} className={tabOn(k) ? "on" : ""} ref={el => { if (el && tabOn(k)) el.scrollIntoView({ block: "nearest", inline: "center" }); }}>{t(label)}</a>)}</nav>
             {!!hidden.length && <span className="xs mut tabs-hidden" title={hidden.join(", ")}>
-              {hidden.length} more {hidden.length === 1 ? "screen needs" : "screens need"} another role — tap your name to switch person
+              {hidden.length} more {hidden.length === 1 ? "screen needs" : "screens need"} another role — <button type="button" className="linkbtn" onClick={() => setMe(null)}>switch person</button>
             </span>}
             <span className="grow" /><Status />
           </div>)}

@@ -374,7 +374,9 @@ tr.click{cursor:pointer}tr.click:hover td{background:var(--bg)}
 @media(min-width:861px){
   .compact-menu.shell{grid-template-columns:64px minmax(0,1fr)}
   .compact-menu .rail{padding:10px 6px}
-  .compact-menu .rail :is(.grow,.t,kbd,.brand>div,.store-switch,.railfoot,.nav>span){display:none}
+  /* collapsed: hide the words, never the switch-person button (it was the only way out) */
+  .compact-menu .rail :is(.grow,.t,kbd,.brand>div,.store-switch,.railfoot>:not(.me),.me>svg,.nav>span){display:none}
+  .compact-menu .me{justify-content:center;padding:8px 0}
   .compact-menu :is(.nav,.newbill,.railsearch){justify-content:center;padding:12px 6px}
   .pos .card{border-radius:3px;box-shadow:none}
   .pos-main{gap:8px}
@@ -741,3 +743,7 @@ html{scrollbar-gutter:stable}
 .stock-ai-head svg{color:var(--gold-d)}
 .stock-ai .bar-track{display:block;height:8px;border-radius:99px;background:var(--line-2);overflow:hidden}
 .stock-ai .bar-fill{display:block;height:100%;background:linear-gradient(90deg,var(--gold),var(--emerald));transition:width .2s var(--ease)}
+
+/* the brand mark doubles as the desktop menu toggle */
+.markbtn{border:0;cursor:pointer;padding:0;font:inherit}
+.markbtn:focus-visible{outline:2px solid var(--gold-d);outline-offset:2px}
