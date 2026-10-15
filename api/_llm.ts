@@ -75,6 +75,7 @@ export async function chat(p: Provider, a: ChatArgs): Promise<string> {
 
 /* Parse model JSON, tolerating a stray code fence or preamble. */
 export function parseJsonLoose(text: string): any {
+  text = text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
   try { return JSON.parse(text); } catch { /* fall through */ }
   const m = text.match(/\{[\s\S]*\}/);
   if (m) return JSON.parse(m[0]);
@@ -121,7 +122,11 @@ export const DEFAULT_ORDER: AIProvider[] = ["openai", "gemini", "groq"];
 
 export const geminiConfigured = () => !!env("GEMINI_API_KEY");
 export const geminiModel = () => env("GEMINI_MODEL") || "gemini-2.5-flash";
-export const groqVisionModel = () => env("GROQ_VISION_MODEL") || "";
+/* Groq's one model that reads images (console.groq.com/docs/vision, checked Oct 2026). The model
+   that used to fill this role, Llama 4 Scout, was shut down on 17 Jul 2026. Groq retires models
+   often, so GROQ_VISION_MODEL overrides this without a deploy, and "off" turns photos off for Groq. */
+export const GROQ_VISION_DEFAULT = "qwen/qwen3.8-27b";
+export const groqVisionModel = () => { const v = env("GROQ_VISION_MODEL").trim(); return v.toLowerCase() === "off" ? "" : v || GROQ_VISION_DEFAULT; };
 
 const hasImage = (parts: AIPart[]) => parts.some(p => "image" in p);
 
@@ -147,17 +152,27 @@ async function chatOpenAIDialect(p: "openai" | "groq", parts: AIPart[], o: { sys
   };
   if (o.json) body.response_format = { type: "json_object" };
   if (p === "groq") body.temperature = o.temperature ?? 0.2;
-  let r: Response;
-  try {
-    r = await fetch(ENDPOINT[p], {
-      method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-      body: JSON.stringify(body), signal: AbortSignal.timeout(o.timeoutMs ?? 45_000),
-    });
-  } catch (e: any) {
-    const t = /timeout|abort/i.test(String(e?.name || e?.message));
-    throw new ProviderError(p, 504, t ? "timeout" : "error", t ? `${p} took too long` : `${p} unreachable: ${e?.message || e}`);
+  if (p === "groq" && /^qwen\//i.test(body.model)) body.reasoning_format = "hidden";
+  const send = async (b: any) => {
+    try {
+      return await fetch(ENDPOINT[p], {
+        method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+        body: JSON.stringify(b), signal: AbortSignal.timeout(o.timeoutMs ?? 45_000),
+      });
+    } catch (e: any) {
+      const t = /timeout|abort/i.test(String(e?.name || e?.message));
+      throw new ProviderError(p, 504, t ? "timeout" : "error", t ? `${p} took too long` : `${p} unreachable: ${e?.message || e}`);
+    }
+  };
+  let r = await send(body);
+  let j: any = await r.json().catch(() => ({}));
+  // a parameter this particular model doesn't take (Groq says which): drop it and ask once more.
+  // The prompt itself demands JSON and parseJsonLoose reads it, so nothing is lost.
+  if (p === "groq" && r.status === 400 && /reasoning_format|response_format|json/i.test(String(j?.error?.message || ""))) {
+    const { reasoning_format: _r, response_format: _f, ...plain } = body;
+    r = await send(plain);
+    j = await r.json().catch(() => ({}));
   }
-  const j: any = await r.json().catch(() => ({}));
   if (!r.ok) throw new ProviderError(p, r.status, classify(r.status, j), j?.error?.message || `${p} error ${r.status}`);
   const text = j?.choices?.[0]?.message?.content;
   if (typeof text !== "string" || !text.trim()) throw new ProviderError(p, 502, "error", `${p} returned an empty answer`);
@@ -206,7 +221,8 @@ export async function askAI(
   let asked = 0;
   for (const p of order) {
     if (!canServe(p, parts)) {
-      attempts.push({ provider: p, ok: false, skipped: true, message: hasImage(parts) && p === "groq" ? "no vision model configured" : "no API key" });
+      const keyed = p === "openai" ? openaiConfigured() : p === "gemini" ? geminiConfigured() : groqConfigured();
+      attempts.push({ provider: p, ok: false, skipped: true, message: !keyed ? "no API key" : "no vision model configured" });
       continue;
     }
     asked++;
@@ -219,9 +235,24 @@ export async function askAI(
       attempts.push({ provider: p, ok: false, kind: e instanceof ProviderError ? e.kind : "error", message: String(e?.message || e).slice(0, 200) });
     }
   }
-  const why = attempts.map(a => `${a.provider}: ${a.skipped ? "skipped — " : ""}${a.message || "failed"}`).join(" · ");
-  throw Object.assign(
-    new Error(asked ? `Every AI provider failed. ${why}` : `No AI provider can do this yet. ${why}`),
-    { status: asked ? 502 : 503, attempts },
-  );
+  throw Object.assign(new Error(explainFailure(attempts, asked)), { status: asked ? 502 : 503, attempts });
+}
+
+/* Three raw provider errors, with billing URLs and quota jargon, told the owner nothing he could act
+   on. Each line now says what happened and the one thing that fixes it. */
+const NAME: Record<AIProvider, string> = { openai: "OpenAI", gemini: "Gemini", groq: "Groq" };
+export function explainFailure(attempts: AIAttempt[], asked = attempts.filter(a => !a.skipped).length): string {
+  const line = (a: AIAttempt) => {
+    const n = NAME[a.provider], m = a.message || "";
+    if (a.skipped) return `${n}: ${/vision/.test(m) ? "can't read photos (set GROQ_VISION_MODEL in Vercel)" : "no key added in Vercel"}`;
+    if (a.kind === "quota" && a.provider === "openai") return "OpenAI: out of credit. Add credit at platform.openai.com → Billing";
+    if (a.kind === "quota" && a.provider === "gemini") return "Gemini: free quota used up. It refills daily, or turn on billing in Google AI Studio";
+    if (a.kind === "quota") return `${n}: out of credit or quota`;
+    if (a.kind === "rate_limit") return `${n}: busy (too many requests), try again in a minute`;
+    if (a.kind === "timeout") return `${n}: took too long`;
+    if (a.kind === "no_key") return `${n}: no key added in Vercel`;
+    return `${n}: ${m.slice(0, 120) || "failed"}`;
+  };
+  const head = asked ? "No AI could read this. Nothing was saved." : "No AI is set up for this yet.";
+  return [head, ...attempts.map(a => "• " + line(a))].join("\n");
 }

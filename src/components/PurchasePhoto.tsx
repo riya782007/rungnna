@@ -259,7 +259,7 @@ export default function PurchasePhoto({ by }: { by: string }) {
       <div className="xs mut">One press records the purchase, drafts the products onto {d.rack ? "the chosen rack" : "the rack"} and sends the labels. Nothing is printed before you press it.</div>
     </>}
 
-    {error && <div className="note warn" role="alert">{error}</div>}
+    {error && <div className="note warn" role="alert" style={{ whiteSpace: "pre-line" }}>{error}</div>}
     {printing && createPortal(<PrintSheet cfg={cfg} jobs={flat} />, document.getElementById("printroot")!)}
     {printing && <button className="btn print-notice" onClick={() => setPrinting(false)}>Close print</button>}
   </section>;
