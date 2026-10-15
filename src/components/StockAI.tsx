@@ -116,7 +116,7 @@ export default function StockAI({ route = "" }: { route?: string }) {
 
         {!busy && <>
           <div className="row">
-            <span className="sm grow">Read a purchase bill — photo or PDF page</span>
+            <span className="sm grow">Read a purchase bill from its photo</span>
             {!mayBill ? <Locked />
               : HAS_READER.includes(route)
                 ? <span className="xs mut">Open “From a purchase bill” below ↓</span>

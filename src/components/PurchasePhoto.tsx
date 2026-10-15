@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Camera, Plus, Trash2 } from "lucide-react";
-import { db, getSetting, setSetting, type Product, type Purchase } from "../lib/db";
+import { db, put, getSetting, setSetting, type Product, type Purchase } from "../lib/db";
 import { api, blobToB64 } from "../lib/ai";
 import { compress, savePhoto } from "../lib/image";
 import { getRule, type PricingRule } from "../lib/pricing";
@@ -19,13 +19,19 @@ import { ownPayload } from "../lib/parse";
 import { currentStore } from "../lib/scope";
 import { toast } from "../lib/app";
 import { LocationSelect } from "./common";
+import { checkBill, checkSummary, matchSupplier, fallbackBillNo, type LineFix } from "../lib/billCheck";
+import { newParty } from "../lib/billing";
 
 const blank = (): PhotoRow => ({ item: "", style: "", color: "", unit: "PCS", hsn: "", qty: "", cost: "", rate: "" });
 const captions: Record<string, string> = { item: "Item", style: "Style/article", color: "Colour", unit: "Unit", hsn: "HSN", qty: "Qty", cost: "Cost ₹", rate: "Rate ₹" };
 const FIELDS = ["item", "style", "color", "unit", "hsn", "qty", "cost", "rate"] as const;
 type Field = (typeof FIELDS)[number];
 
-type Draft = { store: string; rows: PhotoRow[]; supplier: string; billNo: string; rack: string; photoId?: string; warnings: string; total: string };
+type Draft = { store: string; rows: PhotoRow[]; supplier: string; billNo: string; rack: string; photoId?: string; warnings: string; total: string;
+  /* what the bill's own arithmetic said: shown so the owner checks only what is in doubt */
+  check?: { summary: string; ok: boolean; fixes: LineFix[]; doubts: { line: number; why: string }[] };
+  supplierName?: string;   // as read from the bill, for one-tap "add this supplier"
+  autoBillNo?: boolean };  // the bill printed no number; one was made from its date and total
 
 export default function PurchasePhoto({ by }: { by: string }) {
   const [d, setD] = useState<Draft>({ store: currentStore(), rows: [], supplier: "", billNo: "", rack: "", warnings: "", total: "" });
@@ -48,6 +54,7 @@ export default function PurchasePhoto({ by }: { by: string }) {
   const row = (i: number, key: Field, value: string) =>
     set({ rows: d.rows.map((r, k) => k === i ? { ...r, [key]: value, ...(key === "style" ? { autoStyle: false } : {}) } : r) });
 
+  useEffect(() => { void check(); }, []);
   const check = async () => {
     setChecking(true);
     try {
@@ -62,7 +69,10 @@ export default function PurchasePhoto({ by }: { by: string }) {
   const read = async (files: File[]) => {
     if (!files.length || lock.current) return;
     if (files.length > 3) return setError("Choose up to three pages of one bill");
-    if (!confirm("Send these purchase bill photos to the configured AI provider for reading?")) return;
+    if (!(await getSetting<boolean>("bill_ai_ok", false))) {
+      if (!confirm("Bill photos are sent to the AI (OpenAI, then Gemini, then Groq) to be read. Nothing is saved until you approve.\n\nAllow this from now on, on this device?")) return;
+      await setSetting("bill_ai_ok", true);
+    }
     lock.current = true; setBusy(true); setError(""); setJobs([]); setSaved(null);
     try {
       const images = [];
@@ -70,18 +80,26 @@ export default function PurchasePhoto({ by }: { by: string }) {
       const out = await api<any>("purchase-photo", { images });
       const rule = await getRule(); setPricing(rule);
       const text = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v) : "");
-      const read: PhotoRow[] = out.rows.map((r: any) => ({
+      const raw = out.rows.map((r: any) => ({
         item: text(r.item), style: text(r.style), color: text(r.color), unit: text(r.unit) || "PCS",
-        hsn: text(r.hsn), qty: text(r.qty), cost: text(r.cost), rate: text(r.rate),
+        hsn: text(r.hsn), qty: text(r.qty), cost: text(r.cost), rate: text(r.rate), amount: text(r.amount), box: text(r.box),
       }));
+      // the bill checked against itself: ditto marks written out, each line's amount, the Net
+      const checked = checkBill(raw, text(out.invoice_total));
+      const read: PhotoRow[] = checked.rows.map(({ amount: _a, box: _b, ...r }) => r);
       // bills that print no article get one built from item + rate, so the lines neither collide nor merge
       const rows = pricePhotoRows(autoArticle(read), rule);
       const boxes = out.rows.filter((r: any) => r?.box && String(r.box).trim() && String(r.box).trim() !== "0").length;
       const readBy = out.read_by ? String(out.read_by) : "";
       const fellBack = Array.isArray(out.attempts) && out.attempts.some((a: any) => a && a.ok === false && !a.skipped);
-      const supplier = suppliers.find(s => s.name.toLowerCase() === String(out.supplier || "").toLowerCase())?.id || "";
+      const supplierName = text(out.supplier).trim();
+      const supplier = matchSupplier(supplierName, suppliers)?.id || "";
+      const printedNo = text(out.bill_no).trim();
       set({
-        rows, supplier, billNo: String(out.bill_no || ""), total: String(out.invoice_total || ""),
+        rows, supplier, supplierName, total: text(out.invoice_total),
+        billNo: printedNo || fallbackBillNo(text(out.bill_date), checked.net),
+        autoBillNo: !printedNo,
+        check: { summary: checkSummary(checked), ok: checked.addsUp === true && !checked.doubts.length, fixes: checked.fixes, doubts: checked.doubts },
         warnings: [
           ...(Array.isArray(out.warnings) ? out.warnings.map(String) : []),
           boxes ? `${boxes} line(s) showed a box/packet count. Labels print one per piece; set packet sizes on the product if you want packet stickers.` : "",
@@ -163,14 +181,23 @@ export default function PurchasePhoto({ by }: { by: string }) {
 
   const ready4 = !busy && reviewed && !validation && !!d.supplier && !!d.rack && !!d.billNo.trim();
 
+  const notReady = !!connection && !connection.startsWith("Ready");
   return <section className="purchase-photo stack">
-    <div className="row"><b className="grow">Purchase bill photos</b>
-      <button className="btn" disabled={checking || busy} onClick={check}>{checking ? "Checking…" : "Check AI"}</button>
-      <button className="btn" disabled={busy} onClick={() => file.current?.click()}><Camera size={17} />Read bill</button>
-      <button className="btn" disabled={busy} onClick={() => set({ rows: [...d.rows, blank()] })}><Plus size={17} />Line</button></div>
-    {connection && <div role="status" className="note">{connection}</div>}
+    {!d.rows.length && <div className="bill-drop stack">
+      <button className="btn p bill-drop-btn" disabled={busy} onClick={() => file.current?.click()}>
+        <Camera size={22} />{busy ? "Reading the bill…" : "Photo of the bill"}</button>
+      <div className="xs mut">Up to 3 pages of one bill. Then check what is highlighted, and approve: the products are drafted and the labels print.</div>
+      <div className="row xs" style={{ justifyContent: "center", gap: 14 }}>
+        <span className={notReady ? "bad-text" : "mut"}>{checking ? "Checking the AI…" : connection || ""}</span>
+        <button className="linkbtn" disabled={busy} onClick={() => set({ rows: [blank()] })}>Type the lines instead</button>
+      </div>
+    </div>}
+    {!!d.rows.length && <div className="row"><b className="grow">{d.supplierName || "Purchase bill"}{d.billNo ? <span className="xs mut"> · {d.billNo}</span> : null}</b>
+      <button className="btn sm" disabled={busy} onClick={() => file.current?.click()}><Camera size={15} />Another photo</button>
+      <button className="btn sm" disabled={busy} onClick={() => set({ rows: [...d.rows, blank()] })}><Plus size={15} />Line</button>
+      <button className="linkbtn" disabled={busy} onClick={() => { if (confirm("Clear this bill and start again? Nothing has been saved.")) set({ rows: [], billNo: "", total: "", warnings: "", check: undefined, supplierName: "", photoId: undefined }); }}>Start over</button></div>}
     <input ref={file} type="file" hidden accept="image/jpeg,image/png,image/webp" multiple onChange={e => { void read(Array.from(e.target.files || [])); e.target.value = ""; }} />
-    {busy && <div role="status">Processing…</div>}
+    {busy && !!d.rows.length && <div role="status">Working…</div>}
 
     {saved && !d.rows.length && <div className="note" role="status">
       <b>Purchase {saved.no} saved.</b> {flat.length} label{flat.length === 1 ? "" : "s"} prepared.
@@ -178,18 +205,30 @@ export default function PurchasePhoto({ by }: { by: string }) {
     </div>}
 
     {!!d.rows.length && <>
+      {d.check && <div className={"note " + (d.check.ok ? "ok" : "warn")} role="status">
+        <b>{d.check.ok ? "✓ " : ""}{d.check.summary}</b>
+        {d.check.fixes.map(f => <div key={"f" + f.line} className="sm">Line {f.line}: {f.field === "qty" ? "quantity" : "cost"} read as {f.from}, set to <b>{f.to}</b>, because {f.why}.</div>)}
+        {d.check.doubts.map(x => <div key={"d" + x.line} className="sm">Line {x.line}: {x.why}. Check it against the bill.</div>)}
+      </div>}
       <div className="grid g3">
-        <label className="f">Supplier<select className="in" value={d.supplier} onChange={e => set({ supplier: e.target.value })}><option value="">Select supplier</option>{suppliers.map(s => <option key={s.id} value={s.id}>{s.vendor_code ? s.vendor_code + " · " : ""}{s.name}</option>)}</select></label>
-        <label className="f">Supplier bill no.<input className="in" value={d.billNo} onChange={e => set({ billNo: e.target.value })} /></label>
+        <label className="f">Supplier<select className="in" value={d.supplier} onChange={e => set({ supplier: e.target.value })}><option value="">Select supplier</option>{suppliers.map(s => <option key={s.id} value={s.id}>{s.vendor_code ? s.vendor_code + " · " : ""}{s.name}</option>)}</select>
+          {!d.supplier && !!d.supplierName && <button type="button" className="linkbtn xs" style={{ textAlign: "left" }} onClick={async () => {
+            const name = d.supplierName!.trim().toUpperCase();
+            const sup = { ...newParty(name), kind: "supplier" as const };
+            await put("parties", sup); set({ supplier: sup.id }); toast(`${name} added as a supplier`);
+          }}>+ Add “{d.supplierName.trim().toUpperCase()}” as a new supplier</button>}</label>
+        <label className="f">Supplier bill no.<input className={"in" + (d.autoBillNo ? " auto-filled" : "")} value={d.billNo}
+          title={d.autoBillNo ? "The bill printed no number, so its date and total stand in for one. That still stops the same bill being saved twice." : undefined}
+          onChange={e => set({ billNo: e.target.value, autoBillNo: false })} /></label>
         <LocationSelect value={d.rack} onChange={rack => set({ rack })} buckets={false} /></div>
 
       <div className="tw"><table className="pos-t"><thead><tr>{[...FIELDS.map(f => captions[f]), ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
         {d.rows.map((r, i) => <tr key={i}>
           {FIELDS.map(k => <td key={k} data-l={captions[k]}>
-            <input className={"in" + (k === "style" && r.autoStyle ? " auto-filled" : "")} aria-label={`${k} line ${i + 1}`}
+            <input className={"in" + ((k === "style" && r.autoStyle) || d.check?.fixes.some(f => f.line === i + 1 && f.field === k) ? " auto-filled" : "")} aria-label={`${k} line ${i + 1}`}
               title={k === "style" && r.autoStyle ? "The bill printed no article number — this was built from the item and its rate. Edit it if you have the supplier's own code." : undefined}
               value={r[k] ?? ""} onChange={e => row(i, k, e.target.value)}
-              style={{ minWidth: k === "item" || k === "style" ? 110 : 65 }} /></td>)}
+              style={{ minWidth: k === "item" ? 190 : k === "style" ? 140 : 65 }} /></td>)}
           <td><button className="iconbtn" title="Remove line" aria-label="Remove line" onClick={() => set({ rows: d.rows.filter((_, k) => k !== i) })}><Trash2 size={16} /></button></td>
         </tr>)}</tbody></table></div>
 
@@ -212,7 +251,8 @@ export default function PurchasePhoto({ by }: { by: string }) {
       {validation && <div className="note warn" role="status">{validation}</div>}
       {d.warnings && <div className="note warn" style={{ whiteSpace: "pre-wrap" }}>{d.warnings}</div>}
 
-      <label className="row"><input type="checkbox" checked={reviewed} onChange={e => setReviewed(e.target.checked)} />I checked quantities, units, costs, selling rates and tax/freight differences.</label>
+      <label className="row"><input type="checkbox" checked={reviewed} onChange={e => setReviewed(e.target.checked)} />
+        {d.check?.ok ? "The lines add up to the bill. I checked the highlighted cells and the selling rates." : "I checked quantities, units, costs, selling rates and tax/freight differences."}</label>
       <button className="btn p" disabled={!ready4} onClick={approve}>
         {busy ? "Working…" : `Approve: draft ${d.rows.length} product${d.rows.length === 1 ? "" : "s"} & print ${labelCount || ""} label${labelCount === 1 ? "" : "s"}`}
       </button>

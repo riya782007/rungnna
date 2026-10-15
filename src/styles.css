@@ -754,3 +754,6 @@ html{scrollbar-gutter:stable}
 .passcode-chip .iconbtn.xs{min-width:26px;width:auto;padding:0 5px;height:26px;letter-spacing:0;color:var(--muted);white-space:nowrap}
 .passcode-chip .iconbtn.xs:hover{color:var(--ink)}
 .bad-text{color:var(--bad)}
+/* bill reader: one obvious action before a bill is read */
+.bill-drop{align-items:center;text-align:center;padding:22px 12px;border:1.5px dashed var(--line);border-radius:16px;background:var(--bg)}
+.bill-drop-btn{min-height:56px;padding:0 28px;font-size:17px;gap:10px}
