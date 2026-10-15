@@ -757,3 +757,4 @@ html{scrollbar-gutter:stable}
 /* bill reader: one obvious action before a bill is read */
 .bill-drop{align-items:center;text-align:center;padding:22px 12px;border:1.5px dashed var(--line);border-radius:16px;background:var(--bg)}
 .bill-drop-btn{min-height:56px;padding:0 28px;font-size:17px;gap:10px}
+.ok-text{color:var(--ok, #1f7a4d)}

@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { env, json } from "./_lib.js";
-import { askAI, canServe, openaiConfigured, geminiConfigured, groqConfigured, openaiModel, geminiModel, DEFAULT_ORDER } from "./_llm.js";
+import { askAI, canServe, openaiConfigured, geminiConfigured, groqConfigured, openaiModel, geminiModel, DEFAULT_ORDER, probeAll } from "./_llm.js";
+import { PROBE_PNG, PROBE_ANSWER } from "./_probe.js";
 
 async function photoAccess(req: Request): Promise<Response | null> {
     const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
@@ -33,6 +34,8 @@ export async function POST(req: Request) {
   try {
     const denied = await photoAccess(req); if (denied) return denied;
     const b = await req.json();
+    // "Test each AI": a fixed picture, never the caller's, so this can't be used to run arbitrary jobs
+    if (b?.probe === true) return json({ results: await probeAll(PROBE_PNG, PROBE_ANSWER) });
     if (!Array.isArray(b?.images) || !b.images.length || b.images.length > 3 || b.images.some((i: any) => !i || !/^image\/(jpeg|png|webp)$/.test(i.mime) || typeof i.data !== "string" || !i.data.length || i.data.length > 1500000)) return json({ error: "Upload up to three JPG, PNG or WebP bill photos" }, 400);
     if (b.images.reduce((n: number, i: any) => n + i.data.length, 0) > 3300000) return json({ error: "Bill photos are too large" }, 400);
     const asked = await askAI([

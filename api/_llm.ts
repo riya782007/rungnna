@@ -246,17 +246,56 @@ export async function askAI(
    on. Each line now says what happened and the one thing that fixes it. */
 const NAME: Record<AIProvider, string> = { openai: "OpenAI", gemini: "Gemini", groq: "Groq" };
 export function explainFailure(attempts: AIAttempt[], asked = attempts.filter(a => !a.skipped).length): string {
-  const line = (a: AIAttempt) => {
-    const n = NAME[a.provider], m = a.message || "";
-    if (a.skipped) return `${n}: ${/vision/.test(m) ? "can't read photos (set GROQ_VISION_MODEL in Vercel)" : "no key added in Vercel"}`;
-    if (a.kind === "quota" && a.provider === "openai") return "OpenAI: out of credit. Add credit at platform.openai.com → Billing";
-    if (a.kind === "quota" && a.provider === "gemini") return "Gemini: free quota used up. It refills daily, or turn on billing in Google AI Studio";
-    if (a.kind === "quota") return `${n}: out of credit or quota`;
-    if (a.kind === "rate_limit") return `${n}: busy (too many requests), try again in a minute`;
-    if (a.kind === "timeout") return `${n}: took too long`;
-    if (a.kind === "no_key") return `${n}: no key added in Vercel`;
-    return `${n}: ${m.slice(0, 120) || "failed"}`;
-  };
   const head = asked ? "No AI could read this. Nothing was saved." : "No AI is set up for this yet.";
-  return [head, ...attempts.map(a => "• " + line(a))].join("\n");
+  return [head, ...attempts.map(a => "• " + explainAttempt(a))].join("\n");
+}
+
+/** One provider's failure, in the owner's words. */
+export function explainAttempt(a: AIAttempt): string {
+  const n = NAME[a.provider], m = a.message || "";
+  if (a.skipped) return `${n}: ${/vision/.test(m) ? "can't read photos (set GROQ_VISION_MODEL in Vercel)" : "no key added in Vercel"}`;
+  if (a.kind === "quota" && a.provider === "openai") return "OpenAI: out of credit. Add credit at platform.openai.com → Billing";
+  if (a.kind === "quota" && a.provider === "gemini") return "Gemini: free quota used up. It refills daily, or turn on billing in Google AI Studio";
+  if (a.kind === "quota") return `${n}: out of credit or quota`;
+  if (a.kind === "rate_limit") return `${n}: busy (too many requests), try again in a minute`;
+  if (a.kind === "timeout") return `${n}: took too long`;
+  if (a.kind === "no_key") return `${n}: no key added in Vercel`;
+  return `${n}: ${m.slice(0, 120) || "failed"}`;
+}
+
+/* ---- "Test each AI": every provider on its own, at once ---- */
+
+export type ProbeResult = { provider: AIProvider; model: string; ok: boolean; read?: string; ms?: number; skipped?: boolean; kind?: string; plain: string };
+
+/** Which model a provider would use for a photo, so the owner sees exactly what was tested. */
+export const visionModelOf = (p: AIProvider) => p === "openai" ? openaiModel() : p === "gemini" ? geminiModel() : groqVisionModel();
+
+/** Ask every provider to read one small picture of a number. Nothing is saved; each costs a fraction of a paisa. */
+export async function probeAll(png: string, answer: string): Promise<ProbeResult[]> {
+  const parts: AIPart[] = [
+    { image: { mime: "image/png", data: png } },
+    { text: `This image shows a number. Reply only with JSON {"text":"<the number exactly as shown>"}.` },
+  ];
+  return Promise.all(DEFAULT_ORDER.map(async (p): Promise<ProbeResult> => {
+    const model = visionModelOf(p);
+    if (!canServe(p, parts)) {
+      const keyed = p === "openai" ? openaiConfigured() : p === "gemini" ? geminiConfigured() : groqConfigured();
+      const a: AIAttempt = { provider: p, ok: false, skipped: true, message: keyed ? "no vision model configured" : "no API key" };
+      return { provider: p, model, ok: false, skipped: true, plain: explainAttempt(a) };
+    }
+    const t0 = Date.now();
+    try {
+      const text = await askOne(p, parts, { json: true, temperature: 0, timeoutMs: 25_000 });
+      const ms = Date.now() - t0;
+      const read = String(parseJsonLoose(text)?.text ?? "").replace(/[^0-9]/g, "");
+      const ok = read === answer;
+      console.warn(`[ai-test] ${p} (${model}) ${ok ? "ok" : "misread"} "${read}" in ${ms}ms`);
+      return { provider: p, model, ok, read, ms, plain: ok ? `${NAME[p]}: working, read ${read} in ${(ms / 1000).toFixed(1)}s` : `${NAME[p]}: answered but read "${read || "nothing"}" instead of ${answer}` };
+    } catch (e: any) {
+      const kind = e instanceof ProviderError ? e.kind : "error";
+      const message = String(e?.message || e).slice(0, 300);
+      console.warn(`[ai-test] ${p} (${model}) failed (${kind}): ${message}`);
+      return { provider: p, model, ok: false, ms: Date.now() - t0, kind, plain: explainAttempt({ provider: p, ok: false, kind, message }) };
+    }
+  }));
 }

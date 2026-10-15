@@ -37,6 +37,14 @@ export default function PurchasePhoto({ by }: { by: string }) {
   const [d, setD] = useState<Draft>({ store: currentStore(), rows: [], supplier: "", billNo: "", rack: "", warnings: "", total: "" });
   const [ready, setReady] = useState(false), [busy, setBusy] = useState(false), [reviewed, setReviewed] = useState(false), [error, setError] = useState("");
   const [connection, setConnection] = useState(""), [checking, setChecking] = useState(false);
+  const [probe, setProbe] = useState<{ provider: string; model: string; ok: boolean; plain: string }[] | null>(null), [probing, setProbing] = useState(false);
+  /* Each AI on its own, on a tiny picture of a number: tells the owner exactly which account works */
+  const testEach = async () => {
+    setProbing(true); setProbe(null);
+    try { setProbe((await api<{ results: any[] }>("purchase-photo", { probe: true })).results); }
+    catch (e: any) { setConnection(e.message); }
+    finally { setProbing(false); }
+  };
   const [pricing, setPricing] = useState<PricingRule | null>(null);
   const [cfg, setCfg] = useState<LabelCfg>(DEFAULT_CFG);
   const [jobs, setJobs] = useState<Job[]>([]);          // labels for the purchase just saved
@@ -189,8 +197,13 @@ export default function PurchasePhoto({ by }: { by: string }) {
       <div className="xs mut">Up to 3 pages of one bill. Then check what is highlighted, and approve: the products are drafted and the labels print.</div>
       <div className="row xs" style={{ justifyContent: "center", gap: 14 }}>
         <span className={notReady ? "bad-text" : "mut"}>{checking ? "Checking the AI…" : connection || ""}</span>
+        <button className="linkbtn" disabled={busy || probing} onClick={testEach}>{probing ? "Testing…" : "Test each AI"}</button>
         <button className="linkbtn" disabled={busy} onClick={() => set({ rows: [blank()] })}>Type the lines instead</button>
       </div>
+      {probe && <div className="note sm ai-probe" role="status" style={{ textAlign: "left" }}>
+        {probe.map(r => <div key={r.provider}><b className={r.ok ? "ok-text" : "bad-text"}>{r.ok ? "✓" : "✗"}</b> {r.plain} <span className="xs mut mono">{r.model}</span></div>)}
+        <div className="xs mut">{probe.some(r => r.ok) ? "Bills are read by the first working AI, in this order." : "No AI can read a bill right now: fix one of the accounts above."}</div>
+      </div>}
     </div>}
     {!!d.rows.length && <div className="row"><b className="grow">{d.supplierName || "Purchase bill"}{d.billNo ? <span className="xs mut"> · {d.billNo}</span> : null}</b>
       <button className="btn sm" disabled={busy} onClick={() => file.current?.click()}><Camera size={15} />Another photo</button>

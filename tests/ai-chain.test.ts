@@ -197,3 +197,34 @@ describe("telling a speed limit from an empty wallet", () => {
     expect(classify(429, { error: { code: "insufficient_quota", message: "You have no credits remaining." } })).toBe("quota");
   });
 });
+
+describe("Test each AI", () => {
+  it("tests every provider on its own and says plainly which one works", async () => {
+    ENV.OPENAI_API_KEY = "o"; ENV.GEMINI_API_KEY = "g"; ENV.GROQ_API_KEY = "k";
+    const seen: string[] = [];
+    vi.spyOn(globalThis, "fetch" as any).mockImplementation(async (url: any, init: any) => {
+      const host = String(url).includes("openai.com") ? "openai" : String(url).includes("groq.com") ? "groq" : "gemini";
+      seen.push(host);
+      if (host === "openai") return { ok: false, status: 429, json: async () => ({ error: { message: "You have no credits remaining." } }) } as any;
+      if (host === "gemini") return { ok: false, status: 429, json: async () => ({ error: { message: "You exceeded your current quota" } }) } as any;
+      expect(JSON.parse(init.body).model).toBe("qwen/qwen3.8-27b");
+      return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: '<think>a number</think>{"text":"4,271"}' } }] }) } as any;
+    });
+    const { probeAll } = await load();
+    const r = await probeAll("AAAA", "4271");
+    expect(seen.sort()).toEqual(["gemini", "groq", "openai"]);          // all three asked, not a chain that stops early
+    expect(r.map(x => [x.provider, x.ok])).toEqual([["openai", false], ["gemini", false], ["groq", true]]);
+    expect(r[0].plain).toBe("OpenAI: out of credit. Add credit at platform.openai.com → Billing");
+    expect(r[2].plain).toMatch(/^Groq: working, read 4271 in \d+\.\ds$/);
+    expect(r[2].model).toBe("qwen/qwen3.8-27b");
+  });
+
+  it("catches an AI that answers but reads the number wrong", async () => {
+    ENV.GROQ_API_KEY = "k";
+    vi.spyOn(globalThis, "fetch" as any).mockResolvedValue({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: '{"text":"4721"}' } }] }) } as any);
+    const { probeAll } = await load();
+    const groq = (await probeAll("AAAA", "4271")).find(x => x.provider === "groq")!;
+    expect(groq.ok).toBe(false);
+    expect(groq.plain).toBe('Groq: answered but read "4721" instead of 4271');
+  });
+});
