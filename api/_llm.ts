@@ -39,6 +39,8 @@ const ENDPOINT: Record<Provider, string> = {
 export function classify(status: number, body: any): ProviderError["kind"] {
   const code = String(body?.error?.code || body?.error?.type || "").toLowerCase();
   const msg = String(body?.error?.message || "").toLowerCase();
+  // Groq's per-minute limits say "Rate limit reached … upgrade at …/billing": that's a speed limit, not money
+  if (/rate limit reached|tokens per minute|requests per minute|\(tpm\)|\(rpm\)/.test(msg)) return "rate_limit";
   if (code.includes("insufficient_quota") || /quota|billing|credit|exceeded your current/.test(msg) || status === 402) return "quota";
   if (status === 429) return "rate_limit";
   return "error";
@@ -97,6 +99,8 @@ export async function chainJson<T>(a: ChatArgs, accept: (raw: any) => T, order: 
       return { data, provider: p, attempts };
     } catch (e: any) {
       attempts.push({ provider: p, ok: false, kind: e instanceof ProviderError ? e.kind : "error", message: String(e?.message || e).slice(0, 200) });
+      // the provider's own words, in Vercel's runtime log: the screen shows the plain version
+      console.warn(`[ai] ${p} failed (${e instanceof ProviderError ? e.kind : "error"}): ${String(e?.message || e).slice(0, 300)}`);
     }
   }
   return { data: null, attempts };

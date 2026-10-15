@@ -188,3 +188,12 @@ describe("when OpenAI and Gemini are both out (15 Oct 2026, as the owner saw it)
     expect(e.message).not.toMatch(/https?:\/\//);                 // no raw billing URLs dumped on the counter
   });
 });
+
+describe("telling a speed limit from an empty wallet", () => {
+  it("reads Groq's per-minute limit as busy, even though its message mentions billing", async () => {
+    const { classify } = await load();
+    expect(classify(429, { error: { message: "Rate limit reached for model `qwen/qwen3.8-27b` on tokens per minute (TPM): Limit 6000, Used 5100, Requested 3200. Please try again in 23s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing" } })).toBe("rate_limit");
+    expect(classify(429, { error: { message: "You exceeded your current quota, please check your plan and billing details." } })).toBe("quota");
+    expect(classify(429, { error: { code: "insufficient_quota", message: "You have no credits remaining." } })).toBe("quota");
+  });
+});
