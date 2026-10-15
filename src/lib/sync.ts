@@ -46,6 +46,27 @@ export async function signIn(email: string, password: string) {
 }
 export async function signOut() { const c = await sb(); await c?.auth.signOut(); emit({ user: undefined }); }
 
+/* The shop's cloud login has to exist before anything can sync, and before the AI
+   can read a purchase bill — the bill reader checks this session before it spends a
+   single rupee of AI credit. Making it from inside the app means the password is
+   typed once, here, by the owner: it never goes through a dashboard, a message or
+   anyone else's hands. First time only; afterwards this is an ordinary sign-in. */
+export async function createShopLogin(email: string, password: string): Promise<"ready" | "confirm"> {
+  const c = await sb(); if (!c) throw new Error("Cloud is not connected yet");
+  if (password.length < 8) throw new Error("Use at least 8 characters, and keep it somewhere safe — it is the shop's own login");
+  const { data, error } = await c.auth.signUp({ email, password });
+  if (error) {
+    // already made on another device (or an earlier try): this is simply a sign-in
+    if (/already registered|already exists|user already/i.test(error.message)) { await signIn(email, password); return "ready"; }
+    if (/signups? not allowed|disabled/i.test(error.message))
+      throw new Error("This project does not allow creating a login from the app. Turn on sign-ups in Supabase → Authentication → Sign In / Providers, or add the user there.");
+    throw error;
+  }
+  if (!data.session) return "confirm";          // e-mail confirmation is switched on
+  syncNow();
+  return "ready";
+}
+
 async function pendingCount() { const n = await db.outbox.count(); emit({ pending: n }); return n; }
 
 /* ---------- push ---------- */

@@ -199,7 +199,7 @@ function Shell() {
           </div>)}
         <main className={"page" + (route === "bill" ? " wide" : "")}>
           <Guard key={store + route + (args[0] || "")}>
-            {sec === "stock" && <Suspense fallback={null}><StockAI /></Suspense>}
+            {sec === "stock" && <Suspense fallback={null}><StockAI route={route} /></Suspense>}
             <Suspense fallback={<Loading />}><div className="pagein">{page}</div></Suspense>
           </Guard>
         </main>

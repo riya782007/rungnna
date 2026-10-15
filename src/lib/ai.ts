@@ -13,7 +13,10 @@ export async function api<T = any>(path: string, body?: unknown): Promise<T> {
     headers: { "content-type": "application/json", authorization: "Bearer " + (await token()) },
     body: body ? JSON.stringify(body) : undefined,
   });
-  const j = await r.json().catch(() => ({ error: "Server error " + r.status }));
+  // a page that is not JSON (an HTML fallback, a proxy error) is never an answer, even with a 200:
+  // treating it as one turned "the server is unreachable" into "no AI key yet"
+  const j = await r.json().catch(() => null);
+  if (!j || typeof j !== "object") throw new Error(`The AI service did not answer (server ${r.status}). Check the internet, or that the latest version is deployed.`);
   if (!r.ok) throw new Error(j.error || "Failed");
   return j as T;
 }

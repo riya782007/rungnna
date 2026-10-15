@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Sparkles } from "lucide-react";
+import { Camera, Sparkles } from "lucide-react";
 import { db, type Product } from "../lib/db";
+import { Modal } from "./common";
 import { api } from "../lib/ai";
 import { useApp, toast } from "../lib/app";
 import { can } from "../lib/roles";
@@ -9,6 +10,13 @@ import {
   writePages, pickForListing, planPublish, publishAll, describePlan,
   type BulkProgress, type BulkResult, type BulkTarget,
 } from "../lib/bulkListing";
+
+const PurchasePhoto = lazy(() => import("./PurchasePhoto"));
+
+/* The two pages that already carry the bill reader in full. Opening a second copy
+   there would give two editors the same saved draft, so the strip points at the one
+   that is already on screen instead. */
+const HAS_READER = ["labels", "stockin"];
 
 /* ===========================================================================
    The AI commands, on every Stock screen.
@@ -22,8 +30,9 @@ import {
    (scan, stock in, labels) below the fold.
 =========================================================================== */
 
-export default function StockAI() {
+export default function StockAI({ route = "" }: { route?: string }) {
   const { me } = useApp();
+  const [bill, setBill] = useState(false);
   const [open, setOpen] = useState(false);
   const [target, setTarget] = useState<BulkTarget>("missing");
   const [busy, setBusy] = useState(false);
@@ -39,16 +48,17 @@ export default function StockAI() {
 
   const mayWrite = can(me, "products.edit") && can(me, "ai.use");
   const mayPublish = can(me, "catalogue.share");
+  const mayBill = can(me, "purchases.photo") && can(me, "ai.use");
 
   // every hook runs on every render: this must stay ABOVE the permission return below
   useEffect(() => {
     if (!open || chain) return;
     api<{ provider: string; configured: boolean }>("purchase-photo")
       .then(r => setChain(r.configured ? r.provider : "no AI key yet"))
-      .catch(e => setChain(e.message));
+      .catch(e => setChain(/sign in|login/i.test(e.message) ? "needs the shop login — Settings › Cloud backup" : e.message));
   }, [open]);
 
-  if (!mayWrite && !mayPublish) return null;
+  if (!mayWrite && !mayPublish && !mayBill) return null;
 
   async function run() {
     const list = await pickForListing(target);
@@ -101,6 +111,13 @@ export default function StockAI() {
         </div>}
 
         {!busy && <>
+          {mayBill && <div className="row">
+            <span className="sm grow">Read a purchase bill — photo or PDF page</span>
+            {HAS_READER.includes(route)
+              ? <span className="xs mut">Open “Purchase bill photos” below ↓</span>
+              : <button className="btn p" onClick={() => setBill(true)}><Camera size={15} />Upload bill</button>}
+          </div>}
+
           {mayWrite && <div className="row">
             <label className="f" style={{ margin: 0 }}>Write pages for
               <select className="in" value={target} onChange={e => setTarget(e.target.value as BulkTarget)}>
@@ -118,7 +135,7 @@ export default function StockAI() {
           </div>}
 
           <div className="xs mut">
-            {chain ? `AI order: ${chain}. ` : ""}
+            {chain ? `AI: ${chain.replace(/\.+$/, "")}. ` : ""}
             Pages are saved one by one, so stopping never loses work. {plan.total - plan.withPhoto > 0 ? `${plan.total - plan.withPhoto} design${plan.total - plan.withPhoto === 1 ? " still needs a photo before it can" : "s still need a photo before they can"} go live.` : ""}
           </div>
         </>}
@@ -131,6 +148,12 @@ export default function StockAI() {
           </ul>
         </details>}
       </div>}
+
+      {bill && <Modal title="Read a purchase bill" onClose={() => setBill(false)}>
+        <Suspense fallback={<div role="status">Loading bill reader…</div>}>
+          <PurchasePhoto by={me?.id || ""} />
+        </Suspense>
+      </Modal>}
     </div>
   );
 }

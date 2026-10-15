@@ -3,7 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, deviceId, type Staff } from "../lib/db";
 import { Head } from "../components/common";
 import { useApp, toast, newStaff } from "../lib/app";
-import { onSync, signIn, signOut, syncNow, exportAll, importAll, type SyncState } from "../lib/sync";
+import { onSync, signIn, signOut, syncNow, exportAll, importAll, createShopLogin, type SyncState } from "../lib/sync";
 import type { Pattern } from "../lib/parse";
 import { when } from "../lib/format";
 import { getShop, saveShop, counterCode, DEFAULT_SHOP, type Shop } from "../lib/billing";
@@ -175,16 +175,42 @@ export function ShopLogin({ onDone }: { onDone?: () => void }) {
   const [email, setEmail] = useState("shop@rungnna.in");
   const [pw, setPw] = useState("");
   const [busy, setBusy] = useState(false);
+  /* The shop login has to be made once before any of this works. Until it exists,
+     signing in can only ever answer "Invalid login credentials", which reads like a
+     typed-wrong password and sends the owner looking in the wrong place. */
+  const [first, setFirst] = useState(false);
   return (
     <form className="stack" onSubmit={async e => {
       e.preventDefault(); setBusy(true);
-      try { await signIn(email.trim(), pw); toast("Device connected — stock will back up automatically"); onDone?.(); }
-      catch (x: any) { toast(navigator.onLine ? (x.message || "Could not sign in") : "No internet — you can connect later", true); }
+      try {
+        if (first) {
+          const r = await createShopLogin(email.trim(), pw);
+          toast(r === "confirm"
+            ? "Login made — open the confirmation e-mail, then sign in here"
+            : "Shop login made and this device is connected — stock, photos and the bill reader are on", r === "confirm");
+        } else {
+          await signIn(email.trim(), pw);
+          toast("Device connected — stock will back up automatically");
+        }
+        onDone?.();
+      }
+      catch (x: any) {
+        const m = String(x?.message || "");
+        toast(!navigator.onLine ? "No internet — you can connect later"
+          : /invalid login credentials/i.test(m) && !first ? "No login yet with that e-mail. Tick “First time” below to make it."
+          : m || "Could not sign in", true);
+        if (/invalid login credentials/i.test(m) && !first) setFirst(true);
+      }
       finally { setBusy(false); }
     }}>
       <label className="f">Shop login email<input className="in" type="email" value={email} onChange={e => setEmail(e.target.value)} /></label>
-      <label className="f">Password<input className="in" type="password" value={pw} onChange={e => setPw(e.target.value)} autoComplete="current-password" /></label>
-      <button className="btn p" disabled={busy || !pw}>{busy ? "Connecting…" : "Connect this device"}</button>
+      <label className="f">Password<input className="in" type="password" value={pw} onChange={e => setPw(e.target.value)} autoComplete={first ? "new-password" : "current-password"} /></label>
+      <label className="row sm" style={{ gap: 8 }}>
+        <input type="checkbox" checked={first} onChange={e => setFirst(e.target.checked)} />
+        <span>First time — make the shop login now</span>
+      </label>
+      {first && <div className="xs mut">Choose a password of at least 8 characters and keep it with the shop papers. Every device and the bill reader use this one login.</div>}
+      <button className="btn p" disabled={busy || !pw}>{busy ? (first ? "Making…" : "Connecting…") : first ? "Make the shop login" : "Connect this device"}</button>
     </form>
   );
 }
