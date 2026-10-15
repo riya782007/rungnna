@@ -33,6 +33,11 @@ export type LabelCfg = {
 };
 
 export const PRESETS: { key: string; name: string; cfg: Partial<LabelCfg> }[] = [
+  /* Fitted to the shop's printer exactly as it is already set up (screenshot, 15 Oct 2026): the TSC driver's
+     paper is USER 101.6 × 152.4 mm (4 × 6 in). Nothing on that computer changes; the app lays its 33 × 15 mm
+     stickers onto that page instead: 3 across × 9 down = 27 a page. 9 rows × 16.93 mm = 152.4 mm, so every
+     page ends exactly where the next one starts and the rows stay on the stickers page after page. */
+  { key: "rjpage", name: "Rungnna printer as set: 4 × 6 in page, 27 stickers of 33 × 15 mm", cfg: { mode: "sheet", sheetW: 101.6, sheetH: 152.4, w: 33, h: 15, cols: 3, rows: 9, gapX: 1.3, gapY: 1.93, top: 0, left: 0, qr: 11, font: 5, pad: 0.8 } },
   /* The shop's actual stock (photographed 15 Oct 2026): a TSC roll three stickers across, each 33 × 15 mm,
      ~2 mm apart. One printed "page" is one row of three: 103 × 15 mm. */
   { key: "rj3", name: "Rungnna roll: 3 across, 33 × 15 mm", cfg: { mode: "roll", w: 33, h: 15, cols: 3, gapX: 2, gapY: 0, qr: 11, font: 5, pad: 0.8 } },
@@ -50,7 +55,7 @@ export const PRESETS: { key: string; name: string; cfg: Partial<LabelCfg> }[] = 
 
 export const DEFAULT_CFG: LabelCfg = {
   output: "browser",
-  preset: "rj3", mode: "roll", w: 33, h: 15, cols: 3, gapX: 2, gapY: 0, sheetW: 210, sheetH: 297, top: 0, left: 0, rows: 1,
+  preset: "rjpage", mode: "sheet", w: 33, h: 15, cols: 3, gapX: 1.3, gapY: 1.93, sheetW: 101.6, sheetH: 152.4, top: 0, left: 0, rows: 9,
   qr: 11, font: 5, pad: 0.8, offX: 0, offY: 0, shop: "RUNGNNA", format: "shop", layout: "shop",
   show: { shop: true, item: true, style: true, color: true, rate: true, tk: false, code: false, qty: true, cost_code: false },
 };
@@ -59,21 +64,21 @@ export type Job = { p: Product; qtyOnLabel: number; copies: number };
 /** One entry per sticker, in queue order (capped at 5000). */
 export const expandJobs = (jobs: Job[]) => jobs.flatMap(j => Array.from({ length: Math.max(0, Math.min(5000, j.copies)) }, () => j)).slice(0, 5000);
 
-/* Saved printer settings, brought up to date. The first default (50 × 20 mm, one across) was a guess made before
-   anyone measured the shop's roll; a device still on that untouched guess moves to the real 3-across stock. */
+/* Saved printer settings, brought up to date. Two earlier defaults were set before the shop's printer was
+   seen: 50 × 20 mm one across, then 103 × 15 mm rows (which needed a new paper size in Windows). A device still
+   on either, untouched, moves to the page the printer is already set to. Anything set by hand is left alone. */
 export function upgradeLabelCfg(saved: Partial<LabelCfg> | null | undefined): LabelCfg {
   const c = { ...DEFAULT_CFG, ...(saved || {}), show: { ...DEFAULT_CFG.show, ...(saved?.show || {}) } };
-  if (c.preset === "rj" && c.w === 50 && c.h === 20 && c.cols === 1) {
-    const rj3 = PRESETS.find(x => x.key === "rj3")!.cfg;
-    return { ...c, ...rj3, preset: "rj3" };
-  }
+  const old50 = c.preset === "rj" && c.w === 50 && c.h === 20 && c.cols === 1;
+  const oldRow = c.preset === "rj3" && c.mode === "roll" && c.w === 33 && c.h === 15 && c.cols === 3;
+  if (old50 || oldRow) return { ...c, ...PRESETS.find(x => x.key === "rjpage")!.cfg, preset: "rjpage" };
   return c;
 }
 export const loadLabelCfg = () => getSetting<Partial<LabelCfg> | null>("label_cfg", null).then(upgradeLabelCfg);
 
 export function validateLabelPrint(cfg: LabelCfg, jobs: Job[]) {
   if (![cfg.w, cfg.h, cfg.qr, cfg.font].every(n => Number.isFinite(n) && n > 0) || cfg.w > 200 || cfg.h > 300 || ![cfg.gapX, cfg.gapY, cfg.pad].every(n => Number.isFinite(n) && n >= 0) || ![cfg.offX, cfg.offY].every(Number.isFinite) || !Number.isSafeInteger(cfg.cols) || cfg.cols < 1 || cfg.cols > 20) throw new Error("Check label size, gaps and columns in printer settings");
-  if (cfg.mode === "sheet" && (!Number.isSafeInteger(cfg.rows) || cfg.rows < 1 || cfg.rows > 100 || ![cfg.sheetW, cfg.sheetH].every(n => Number.isFinite(n) && n > 0) || ![cfg.top, cfg.left].every(n => Number.isFinite(n) && n >= 0) || cfg.left + cfg.cols * cfg.w + (cfg.cols - 1) * cfg.gapX > cfg.sheetW || cfg.top + cfg.rows * cfg.h + (cfg.rows - 1) * cfg.gapY > cfg.sheetH)) throw new Error("Labels do not fit the selected sheet");
+  if (cfg.mode === "sheet" && (!Number.isSafeInteger(cfg.rows) || cfg.rows < 1 || cfg.rows > 100 || ![cfg.sheetW, cfg.sheetH].every(n => Number.isFinite(n) && n > 0) || ![cfg.top, cfg.left].every(n => Number.isFinite(n) && n >= 0) || cfg.left + cfg.cols * cfg.w + (cfg.cols - 1) * cfg.gapX > cfg.sheetW + 0.01 || cfg.top + cfg.rows * cfg.h + (cfg.rows - 1) * cfg.gapY > cfg.sheetH + 0.01)) throw new Error("Labels do not fit the selected sheet");
   if (cfg.pad * 2 >= Math.min(cfg.w, cfg.h) || cfg.qr + cfg.pad * 2 >= cfg.w) throw new Error("Leave room for the product name beside the QR");
   if (!jobs.length || jobs.some(j => !j.p.item.trim() || !Number.isSafeInteger(j.copies) || j.copies < 1 || !Number.isSafeInteger(j.qtyOnLabel) || j.qtyOnLabel < 1) || jobs.reduce((n, j) => n + j.copies, 0) > 5000) throw new Error("Review product names and print quantities (maximum 5000 labels)");
 }
@@ -319,7 +324,7 @@ function LabelSettings({ cfg, upd, sample, qty }: { cfg: LabelCfg; upd: (p: Part
           {num("w", "Width mm")}{num("h", "Height mm")}{num("qr", "QR size mm")}
           {num("font", "Text size pt")}{num("offX", "Nudge right mm", 0.25)}{num("offY", "Nudge down mm", 0.25)}
           {cfg.mode === "roll" ? <>{num("cols", "Stickers across", 1)}{num("gapX", "Gap across mm")}{num("gapY", "Gap between mm")}</>
-            : <>{num("cols", "Columns", 1)}{num("rows", "Rows", 1)}{num("top", "Top margin mm")}{num("left", "Left margin mm")}{num("gapX", "Gap across mm")}{num("gapY", "Gap down mm")}</>}
+            : <>{num("sheetW", "Page width mm", 0.1)}{num("sheetH", "Page height mm", 0.1)}{num("cols", "Across", 1)}{num("rows", "Down", 1)}{num("top", "Top margin mm")}{num("left", "Left margin mm")}{num("gapX", "Gap across mm")}{num("gapY", "Gap down mm")}</>}
         </div>
         <div className="grid g2">
           <label className="f">Stickers per batch (0 = all at once)
@@ -408,7 +413,7 @@ export function useLabelPrint(cfg: LabelCfg) {
         <div><b>{r.batches.length > 1 ? `Batch ${r.i + 1} of ${r.batches.length}` : "Printing"}</b> · stickers {b.from + 1}–{b.to} of {r.list.length}{r.direct ? " · sending…" : ""}</div>
         <button className="btn" onClick={stop}>{r.direct ? "Stop after this" : "Close print"}</button>
       </> : <>
-        <div><b>{b.to} of {r.list.length} sent.</b> {r.i === 0 && r.batches.length > 2 ? "That was one test row: check size, position and the count before the rest." : "Check them before going on."}</div>
+        <div><b>{b.to} of {r.list.length} sent.</b> {r.i === 0 && r.batches.length > 2 ? `That was one test ${cfg.mode === "roll" ? "row" : "page"}: check size, position and the count before the rest.` : "Check them before going on."}</div>
         <div className="row">
           {nextB && <button className="btn p" onClick={() => void go({ ...r, i: r.i + 1, phase: "print", n: r.n + 1 })}>Print next {nextB.to - nextB.from} ({nextB.from + 1}–{nextB.to})</button>}
           <button className="btn" onClick={() => void go({ ...r, phase: "print", n: r.n + 1 })}>Print these {b.to - b.from} again</button>
@@ -425,13 +430,19 @@ export function useLabelPrint(cfg: LabelCfg) {
 export function PrinterSetup({ cfg }: { cfg: LabelCfg }) {
   const pageW = cfg.mode === "roll" ? cfg.cols * cfg.w + (cfg.cols - 1) * cfg.gapX : cfg.sheetW;
   const pageH = cfg.mode === "roll" ? cfg.h : cfg.sheetH;
+  // the page his TSC driver is already set to: nothing to change on that computer
+  const asSet = cfg.mode === "sheet" && Math.abs(cfg.sheetW - 101.6) < 0.05 && Math.abs(cfg.sheetH - 152.4) < 0.05;
+  const paper = asSet ? "USER (101.6 mm × 152.4 mm)" : `Rungnna ${pageW}×${pageH}`;
+  const per = cfg.mode === "roll" ? cfg.cols : cfg.cols * cfg.rows;
   return (
     <details className="pad sm">
       <summary><b>Set up this computer once</b> (date, link or wrong size on stickers?)</summary>
       <ol className="stack" style={{ paddingLeft: 18, margin: "8px 0" }}>
-        <li>Windows: <b>Settings › Printers &amp; scanners › TSC › Printing preferences</b> › Page Setup › Stock › <b>New</b>: name it “Rungnna {pageW}×{pageH}”, width <b>{pageW} mm</b>, height <b>{pageH} mm</b>, portrait. Stock tab: <b>Labels with gaps</b>, gap {cfg.mode === "roll" ? Math.max(cfg.gapY, 2) : 0} mm. Apply.</li>
-        <li>Print once from here. In Chrome's print window open <b>More settings</b>: Paper size <b>Rungnna {pageW}×{pageH}</b>, Margins <b>None</b>, Scale <b>Default/100</b>, and <b>untick “Headers and footers”</b> (that is what prints the date and the link). Chrome remembers these.</li>
-        <li>{cfg.mode === "roll" && cfg.cols > 1 ? `Each print page is one row of ${cfg.cols} stickers. ` : ""}If the print sits off the stickers, use the nudge boxes above, not the printer's settings.</li>
+        {asSet
+          ? <li>The TSC driver stays exactly as it is: <b>USER (101.6 mm × 152.4 mm)</b>, the page the shop already uses. Nothing to change in Windows.</li>
+          : <li>Windows: <b>Settings › Printers &amp; scanners › TSC › Printing preferences</b> › Page Setup › Stock › <b>New</b>: name it “{paper}”, width <b>{pageW} mm</b>, height <b>{pageH} mm</b>, portrait. Stock tab: <b>Labels with gaps</b>. Apply.</li>}
+        <li>Print once from here. In Chrome's print window open <b>More settings</b>: Paper size <b>{paper}</b>, Margins <b>None</b>, Scale <b>Default/100</b>, and <b>untick “Headers and footers”</b> (that is what prints the date and the link). Chrome remembers these.</li>
+        <li>Each printed page is {per} sticker{per === 1 ? "" : "s"}{cfg.mode === "sheet" ? ` (${cfg.cols} across × ${cfg.rows} down)` : ""}. If the print sits off the stickers, use <b>Nudge right / Nudge down</b>; if it drifts further down the page, change <b>Gap down</b>; across, <b>Gap across</b>. Not the printer's settings.</li>
         <li>Stuck or wrong print: switch the printer off, then <b>Printers &amp; scanners › TSC › Open print queue › Cancel all documents</b> before switching it on again. If a job will not go, restart the <b>Print Spooler</b> service.</li>
       </ol>
     </details>

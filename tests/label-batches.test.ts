@@ -35,17 +35,28 @@ describe("printing stickers in batches that can be stopped", () => {
   });
 });
 
-import { DEFAULT_CFG, upgradeLabelCfg } from "../src/pages/Labels";
-describe("the shop's sticker roll", () => {
-  it("defaults to the roll Karan actually uses: 3 across, 33 × 15 mm", () => {
-    expect(DEFAULT_CFG).toMatchObject({ mode: "roll", w: 33, h: 15, cols: 3 });
+import { DEFAULT_CFG, upgradeLabelCfg, validateLabelPrint } from "../src/pages/Labels";
+describe("the shop's printer, as it is already set up", () => {
+  it("defaults to the page his TSC driver uses: 101.6 × 152.4 mm, 3 × 9 stickers of 33 × 15", () => {
+    expect(DEFAULT_CFG).toMatchObject({ mode: "sheet", sheetW: 101.6, sheetH: 152.4, w: 33, h: 15, cols: 3, rows: 9 });
+    expect(() => validateLabelPrint(DEFAULT_CFG, [{ p: { item: "KADA" } as any, qtyOnLabel: 1, copies: 1 }])).not.toThrow();
   });
-  it("moves a device still on the old 50 × 20 guess to the real roll, keeping its other choices", () => {
-    const c = upgradeLabelCfg({ ...DEFAULT_CFG, preset: "rj", w: 50, h: 20, cols: 1, shop: "RJ", offX: 1 });
-    expect(c).toMatchObject({ preset: "rj3", w: 33, h: 15, cols: 3, shop: "RJ", offX: 1 });
+  it("nine rows fill the page exactly, so page after page stays on the stickers", () => {
+    const c = DEFAULT_CFG;
+    expect(c.rows * (c.h + c.gapY)).toBeCloseTo(c.sheetH, 0);
+    expect(c.cols * c.w + (c.cols - 1) * c.gapX).toBeLessThanOrEqual(c.sheetW + 0.01);
+  });
+  it("batches whole pages: the test is one page of 27", () => {
+    const b = labelBatches(344, DEFAULT_CFG.cols * DEFAULT_CFG.rows);
+    expect(b[0]).toEqual({ from: 0, to: 27 });
+    expect(b[1]).toEqual({ from: 27, to: 108 });
+  });
+  it("moves a device on either earlier default to it, keeping its other choices", () => {
+    for (const old of [{ preset: "rj", mode: "roll", w: 50, h: 20, cols: 1 }, { preset: "rj3", mode: "roll", w: 33, h: 15, cols: 3, gapX: 2 }] as const)
+      expect(upgradeLabelCfg({ ...DEFAULT_CFG, ...old, shop: "RJ", offX: 1 })).toMatchObject({ preset: "rjpage", mode: "sheet", sheetH: 152.4, rows: 9, shop: "RJ", offX: 1 });
   });
   it("leaves a size someone set by hand alone", () => {
-    expect(upgradeLabelCfg({ ...DEFAULT_CFG, preset: "custom", w: 40, h: 25, cols: 2 })).toMatchObject({ w: 40, h: 25, cols: 2 });
-    expect(upgradeLabelCfg(null)).toMatchObject({ w: 33, cols: 3 });
+    expect(upgradeLabelCfg({ ...DEFAULT_CFG, preset: "custom", mode: "roll", w: 40, h: 25, cols: 2 })).toMatchObject({ w: 40, h: 25, cols: 2 });
+    expect(upgradeLabelCfg(null)).toMatchObject({ preset: "rjpage" });
   });
 });
