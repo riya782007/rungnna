@@ -68,3 +68,22 @@ describe("the shop's stickers, printed as the old software prints them", () => {
     expect(upgradeLabelCfg(null)).toMatchObject({ preset: "rjrow" });
   });
 });
+
+import { runBatches, printerSig } from "../src/pages/Labels";
+describe("a computer can never waste more than one row before someone checks it", () => {
+  it("unchecked: one row first, even for a short run, then the rest in normal batches", () => {
+    expect(runBatches(9, 3, 60, true, false)).toEqual([{ from: 0, to: 3 }, { from: 3, to: 9 }]);
+    const b = runBatches(344, 3, 60, true, false);
+    expect(b[0]).toEqual({ from: 0, to: 3 });
+    expect(b[b.length - 1].to).toBe(344);
+    expect(b.every((x, i) => i === 0 || x.from === b[i - 1].to)).toBe(true);
+    expect(runBatches(2, 3, 60, true, false)).toEqual([{ from: 0, to: 2 }]);
+  });
+  it("checked: prints as before", () => {
+    expect(runBatches(9, 3, 60, true, true)).toEqual([{ from: 0, to: 9 }]);
+  });
+  it("any change to where the ink lands needs a new check; the shop name does not", () => {
+    expect(printerSig({ ...DEFAULT_CFG, offX: 3 })).not.toBe(printerSig(DEFAULT_CFG));
+    expect(printerSig({ ...DEFAULT_CFG, shop: "RJ" })).toBe(printerSig(DEFAULT_CFG));
+  });
+});

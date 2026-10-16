@@ -426,13 +426,28 @@ export function tscCommands(cfg: LabelCfg, list: Job[]) {
   }).join("");
 }
 
-type Run = { list: Job[]; batches: LabelBatch[]; i: number; phase: "print" | "wait"; direct: boolean; prompt: boolean; n: number };
+type Run = { list: Job[]; batches: LabelBatch[]; i: number; phase: "print" | "wait"; direct: boolean; prompt: boolean; n: number; verify?: boolean };
+
+/* Everything that decides where ink lands on the roll. If any of it changes, the computer has to be checked again. */
+export const printerSig = (c: LabelCfg) => [c.output || "browser", c.preset, c.mode, c.w, c.h, c.cols, c.gapX, c.gapY, c.offX, c.offY, c.driverPaper ? 1 : 0, c.edgeR ?? "", c.sheetW, c.sheetH, c.rows, c.left, c.top].join("|");
+
+/** Batches for a run. Until this computer has printed one row (or page) that someone said came out right, a run
+    starts with exactly that one row and goes no further without a yes: a wrong paper size or position can never
+    cost more than one row of stickers, and nothing else about the shop's printing changes. */
+export function runBatches(total: number, unit: number, perBatch: number, testFirst: boolean, verified: boolean): LabelBatch[] {
+  if (verified || total <= unit) return labelBatches(total, unit, perBatch, testFirst);
+  return [{ from: 0, to: unit }, ...labelBatches(total - unit, unit, perBatch, false).map(b => ({ from: b.from + unit, to: b.to + unit }))];
+}
 
 /* Prints stickers a batch at a time and waits between batches, so a wrong print can be stopped.
    Windows resumes a queued job after the printer is switched back on; a batch is all it ever holds. */
 export function useLabelPrint(cfg: LabelCfg) {
   const [run, setRunState] = useState<Run | null>(null);
   const ref = useRef<Run | null>(null), failed = useRef(false);
+  const [okSig, setOkSig] = useState<string | null>(null);
+  useEffect(() => { getSetting<string>("label_printer_ok", "").then(setOkSig).catch(() => setOkSig("")); }, []);
+  const verified = okSig === printerSig(cfg);
+  const markOk = () => { const s = printerSig(cfg); setOkSig(s); void setSetting("label_printer_ok", s); };
   const setRun = (r: Run | null) => { ref.current = r; setRunState(r); };
   const slice = (r: Run) => r.list.slice(r.batches[r.i].from, r.batches[r.i].to);
   const finished = (r: Run) => {
@@ -458,8 +473,9 @@ export function useLabelPrint(cfg: LabelCfg) {
     // a page is always fed out whole: say how many stickers will come out blank before any are used
     const blank = cfg.mode === "sheet" && list.length % unit ? unit - (list.length % unit) : 0;
     if (blank && !confirm(`The printer feeds a whole page of ${unit} stickers at a time.\n\n${list.length} label${list.length === 1 ? "" : "s"} leave${list.length === 1 ? "s" : ""} ${blank} sticker${blank === 1 ? "" : "s"} blank on the last page (they can't be printed later).\n\nPrint anyway? (Cancel to change the quantity: ${Math.ceil(list.length / unit) * unit} fills the page.)`)) return;
-    const batches = labelBatches(list.length, unit, cfg.batch ?? DEFAULT_BATCH, cfg.testFirst ?? true);
-    if (batches.length) void go({ list, batches, i: 0, phase: "print", direct, prompt, n: 0 });
+    if (!verified && cfg.mode === "roll" && cfg.driverPaper && !direct && !confirm(`First label print on this computer with these settings.\n\nOnly ONE row (${Math.min(unit, list.length)} stickers) will print, and nothing more until you say it came out right.\n\nBefore printing: in Chrome's print window choose Paper size "Rungnna row", Margins "None". (If that paper size isn't there yet, press Cancel and see Printer settings › Set up this computer once — or keep using the old software for now.)`)) return;
+    const batches = runBatches(list.length, unit, cfg.batch ?? DEFAULT_BATCH, cfg.testFirst ?? true, verified);
+    if (batches.length) void go({ list, batches, i: 0, phase: "print", direct, prompt, n: 0, verify: !verified });
   };
   const stop = () => {
     const r = ref.current; if (!r) return;
@@ -476,6 +492,13 @@ export function useLabelPrint(cfg: LabelCfg) {
       {r.phase === "print" ? <>
         <div><b>{r.batches.length > 1 ? `Batch ${r.i + 1} of ${r.batches.length}` : "Printing"}</b> · stickers {b.from + 1}–{b.to} of {r.list.length}{r.direct ? " · sending…" : ""}</div>
         <button className="btn" onClick={stop}>{r.direct ? "Stop after this" : "Close print"}</button>
+      </> : r.verify && r.i === 0 ? <>
+        <div><b>Check the {b.to - b.from} sticker{b.to - b.from === 1 ? "" : "s"} that just printed.</b> Right only if: all on ONE row of stickers, nothing cut off at the edges or top, and no blank stickers fed out after.</div>
+        <div className="row">
+          <button className="btn p" onClick={() => { markOk(); if (nextB) void go({ ...r, i: 1, phase: "print", n: r.n + 1, verify: false }); else { setRun(null); toast("This computer is set: labels will now print straight away"); } }}>{nextB ? `Yes, right: print the other ${r.list.length - b.to}` : "Yes, it came out right"}</button>
+          <button className="btn" onClick={() => void go({ ...r, phase: "print", n: r.n + 1 })}>Print this row again</button>
+          <button className="btn bad" onClick={() => { setRun(null); toast("Nothing more will print. Fix it in Printer settings › Set up this computer once (or use the old software meanwhile).", true); }}>No, it's wrong: stop</button>
+        </div>
       </> : <>
         <div><b>{b.to} of {r.list.length} sent.</b> {r.i === 0 && r.batches.length > 2 ? `That was one test ${cfg.mode === "roll" ? "row" : "page"}: check size, position and the count before the rest.` : "Check them before going on."}</div>
         <div className="row">
