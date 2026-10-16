@@ -33,6 +33,11 @@ export async function unlock(code: string): Promise<boolean> {
   if ((await sha(c.salt + code)) !== c.hash) return false;
   arm(c.minutes || 10); return true;
 }
+/** Is this the estimate code? (checks only: opens nothing) */
+export async function codeIs(code: string): Promise<boolean> {
+  const c = await getPrivate(); if (!c || !code) return false;
+  return (await sha(c.salt + code)) === c.hash;
+}
 /* any tap or key while open keeps it open (idle lock, not a hard timer) */
 let lastPoke = 0;
 if (typeof window !== "undefined") {

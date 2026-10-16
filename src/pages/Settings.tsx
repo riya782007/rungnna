@@ -12,6 +12,7 @@ import { can, ROLE_NOTE, roleName, isRoleLogin, roleForPasscode, type CustomRole
 import { RoleSelect } from "./Roles";
 import { codeMatches, getOpenCode, setOpenCode, DEFAULT_OPEN_CODE } from "../lib/openCode";
 import { getPrivate, setCode, lockNow, usePrivate } from "../lib/privacy";
+import { DeleteEstimates } from "../components/DeleteEstimates";
 import { getRule, saveRule, validateKey, priceFromCost, DEFAULT_RULE, type PricingRule, type RoundTo } from "../lib/pricing";
 import { rupees, toPaise } from "../lib/format";
 import { getTaxonomy, addTo, removeFrom, addColour, removeColour, colourCodeFor, type Taxonomy } from "../lib/taxonomy";
@@ -552,6 +553,7 @@ function PrivateCard() {
   const open = usePrivate();
   const [has, setHas] = useState<boolean | null>(null);
   const [code, setCodeV] = useState(""); const [again, setAgain] = useState(""); const [hint, setHint] = useState(""); const [min, setMin] = useState(10);
+  const { me } = useApp(); const [delAll, setDelAll] = useState(false);
   useEffect(() => { getPrivate().then(c => { setHas(!!c); if (c) { setHint(c.hint); setMin(c.minutes || 10); } }); }, []);
   return (
     <div className="card"><header><h3>Private estimates</h3><span className="grow" /><span className={"pill " + (open ? "warn" : "ok")}>{open ? "open on this device" : "hidden"}</span></header>
@@ -570,8 +572,11 @@ function PrivateCard() {
             await setCode(code, hint.trim(), Math.max(1, Math.min(120, min))); setCodeV(""); setAgain(""); setHas(true); lockNow(); toast("Code saved on every counter");
           }}>{has ? "Change code" : "Set code"}</button>
           {open && <button className="btn" onClick={() => lockNow()}>Lock now</button>}
+          {open && can(me, "estimates.delete") && <button className="btn bad" onClick={() => setDelAll(true)}>Delete all estimates</button>}
         </div>
-      </div></div>
+      </div>
+      {delAll && <DeleteEstimates all onClose={() => setDelAll(false)} />}
+    </div>
   );
 }
 

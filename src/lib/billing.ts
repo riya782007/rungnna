@@ -8,6 +8,7 @@ import { fillBillNames } from "./billing-products";
 import { validatePosLines } from "./pos";
 import { isInterState } from "./states";
 import { requirePerm } from "./scope";
+import { purgeEstimates } from "./estimatePurge";
 
 /* ---------------- shop profile (synced to every device) ---------------- */
 export interface Shop {
@@ -445,27 +446,8 @@ export async function shareBill(b: Bill, shop: Shop) {
 
 export async function lastBills(n = 50) { return db.bills.orderBy("at").reverse().filter(b => !b.deleted).limit(n).toArray(); }
 
-/* Owner-only: remove estimates for good. The rows are emptied and marked deleted on every device and in the cloud.
+/* Owner-only: remove estimates for good, from everywhere (see lib/estimatePurge.ts).
    returnStock = the goods never left (a quotation) → pieces go back to the racks they came from. */
 export async function deleteEstimates(bills: Bill[], returnStock: boolean, by: string) {
-  requirePerm("estimates.delete", "deleting estimates");
-  let n = 0;
-  for (const b of bills) {
-    if (b.bill_type !== "estimate" || b.deleted || b.status === "merged" || b.status === "converted") continue; // its goods live on in another invoice
-    await db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock, db.products], async () => {
-      if (returnStock && b.status === "final") {
-        await setTagsSold(b.rfid_tags, null);
-        const outs = await db.movements.where("ref_bill").equals(b.id).filter(m => m.kind === "sale" && !m.deleted).toArray();
-        for (const m of outs) {
-          await put("movements", { ...m, id: uid(), kind: "return", from_loc: null, to_loc: m.from_loc, note: "Estimate removed", at: now(), updated_at: now(), by_staff: by });
-          if (m.from_loc) { const k = m.product_id + "|" + m.from_loc; const c = await db.stock.get(k); await db.stock.put({ key: k, product_id: m.product_id, loc_id: m.from_loc, qty: (c?.qty || 0) + m.qty }); }
-        }
-      }
-      // keep only the id and number as a tombstone so other devices know to drop it
-      await put("bills", { ...b, deleted: 1, items: [], payments: [], rfid_tags: [], party_id: undefined, party_name: "", party_phone: "", party_gstin: "", party_state: "",
-        remarks: "", gross: 0, discount: 0, packing: 0, gst: 0, cgst: 0, sgst: 0, igst: 0, net: 0, advance: 0, paid: 0, total_qty: 0, void_reason: "Deleted by " + by });
-    });
-    n++;
-  }
-  return n;
+  return (await purgeEstimates(bills, { returnStock, by })).estimates;
 }

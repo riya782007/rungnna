@@ -15,6 +15,7 @@ import { rupees, toPaise, when } from "../lib/format";
 import { Head, Thumb } from "../components/common";
 import { VoiceNotes } from "../components/Voice";
 import { InvoiceSheet, PrintBill, type PrintFormat } from "../components/Invoice";
+import { DeleteEstimates } from "../components/DeleteEstimates";
 
 export default function Bills({ args }: { args: string[] }) {
   return args[0] ? <BillView id={args[0]} /> : <BillList />;
@@ -33,6 +34,7 @@ function BillList() {
   const [q, setQ] = useState("");
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [del, setDel] = useState<Bill[] | null>(null);
+  const [delAll, setDelAll] = useState(false);
   const [merge, setMerge] = useState<Bill[] | null>(null);
   const since = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - range); return d.toISOString(); }, [range]);
   const bills = useLiveQuery(() => db.bills.where("at").aboveOrEqual(since).reverse().sortBy("at"), [since], []);
@@ -55,6 +57,7 @@ function BillList() {
     <div>
       <Head title="Bills" sub={open ? "Estimates are showing. They hide again when you lock or leave the app." : "Every bill stays on record. Cancelled bills are kept and marked."}>
         {open && <button className="btn" onClick={() => lockNow()}><Icon n="lock" size={16} />Lock</button>}
+        {manage && <button className="btn bad" onClick={() => setDelAll(true)}>Delete all estimates</button>}
         <button className="btn p" onClick={() => go("bill")}><Icon n="plus" size={18} />New bill</button>
       </Head>
       <div className={"grid " + (open ? "g4" : "g3")} style={{ marginBottom: 12 }}>
@@ -96,6 +99,7 @@ function BillList() {
           {!list.length && <tr><td colSpan={8} className="empty">No bills in this range.</td></tr>}
         </tbody></table></div>
       {del && <DeleteEstimates bills={del} onClose={() => { setDel(null); setSel(new Set()); }} />}
+      {delAll && <DeleteEstimates all onClose={() => { setDelAll(false); setSel(new Set()); }} />}
       {merge && <MergeDialog sources={merge} onClose={() => setMerge(null)} onDone={b => { setMerge(null); setSel(new Set()); go("bills/" + b.id); }} />}
     </div>
   );
@@ -135,31 +139,6 @@ function MergeDialog({ sources, onClose, onDone }: { sources: Bill[]; onClose: (
         <div className="note sm">{already ? `${already} pieces already left the racks with the sources — they won't be taken off again. ` : ""}
           The sources stay on record, marked “{challans ? "invoiced" : "merged"} into” the new number. Cancelling the new invoice brings them back.</div>
         <button className="btn p big" disabled={busy} onClick={run}>{busy ? "Saving…" : `Make ${type === "gst" ? "GST invoice" : "estimate"}`}</button>
-      </div>
-    </Modal>
-  );
-}
-
-function DeleteEstimates({ bills, onClose }: { bills: Bill[]; onClose: () => void }) {
-  const { me } = useApp();
-  const [back, setBack] = useState(false);
-  const [typed, setTyped] = useState("");
-  const [busy, setBusy] = useState(false);
-  const total = bills.reduce((a, b) => a + b.net, 0);
-  const paid = bills.filter(b => b.paid || b.advance).length;
-  const word = bills.length > 1 ? "DELETE" : "YES";
-  return (
-    <Modal title={`Delete ${bills.length} estimate${bills.length > 1 ? "s" : ""}`} onClose={onClose}>
-      <div className="stack">
-        <div className="sm">{bills.length} estimate{bills.length > 1 ? "s" : ""} worth <b>{rupees(total)}</b> will be removed from every device and the cloud. This cannot be undone.</div>
-        {paid > 0 && <div className="note warn sm">{paid} of them have payments recorded. Those payments disappear with them, which changes the customer's balance.</div>}
-        <Switch on={back} onChange={setBack} label="Put the pieces back on the racks" hint="Turn on only if the goods never left the shop (a quotation). Leave off if they were delivered." />
-        <label className="f">Type {word} to confirm<input className="in mono" value={typed} onChange={e => setTyped(e.target.value.toUpperCase())} /></label>
-        <button className="btn bad big" disabled={typed !== word || busy} onClick={async () => {
-          setBusy(true);
-          const n = await deleteEstimates(bills, back, me?.name || "");
-          toast(`${n} estimate${n > 1 ? "s" : ""} deleted${back ? " · pieces back on racks" : ""}`); onClose();
-        }}>{busy ? "Deleting…" : "Delete permanently"}</button>
       </div>
     </Modal>
   );
