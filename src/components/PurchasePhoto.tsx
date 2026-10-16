@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+const BillCamera = lazy(() => import("./CustomerCamera"));
 import { useLiveQuery } from "dexie-react-hooks";
 import { Camera, Plus, Trash2 } from "lucide-react";
 import { db, put, getSetting, setSetting, type Product, type Purchase } from "../lib/db";
@@ -47,6 +48,7 @@ export default function PurchasePhoto({ by }: { by: string }) {
   const printer = useLabelPrint(cfg);
   const [saved, setSaved] = useState<Purchase | null>(null);
   const lock = useRef(false), file = useRef<HTMLInputElement>(null);
+  const [cam, setCam] = useState(false);
   const suppliers = useLiveQuery(() => db.parties.filter(p => p.kind === "supplier" && !p.deleted).toArray(), [], []);
 
   useEffect(() => { getSetting<Draft | null>("purchase_photo_draft", null).then(old => { if (old?.store === currentStore()) setD(old); setReady(true); }); }, []);
@@ -191,8 +193,9 @@ export default function PurchasePhoto({ by }: { by: string }) {
   const notReady = !!connection && !connection.startsWith("Ready");
   return <section className="purchase-photo stack">
     {!d.rows.length && <div className="bill-drop stack">
-      <button className="btn p bill-drop-btn" disabled={busy} onClick={() => file.current?.click()}>
-        <Camera size={22} />{busy ? "Reading the bill…" : "Photo of the bill"}</button>
+      <button className="btn p bill-drop-btn" disabled={busy} onClick={() => setCam(true)}>
+        <Camera size={22} />{busy ? "Reading the bill…" : "Take photo of the bill"}</button>
+      <button className="linkbtn" disabled={busy} onClick={() => file.current?.click()}>or upload a photo already taken</button>
       <div className="xs mut">Up to 3 pages of one bill. Then check what is highlighted, and approve: the products are drafted and the labels print.</div>
       <div className="row xs" style={{ justifyContent: "center", gap: 14 }}>
         <span className={notReady ? "bad-text" : "mut"}>{checking ? "Checking the AI…" : connection || ""}</span>
@@ -205,11 +208,15 @@ export default function PurchasePhoto({ by }: { by: string }) {
       </div>}
     </div>}
     {!!d.rows.length && <div className="row"><b className="grow">{d.supplierName || "Purchase bill"}{d.billNo ? <span className="xs mut"> · {d.billNo}</span> : null}</b>
-      <button className="btn sm" disabled={busy} onClick={() => file.current?.click()}><Camera size={15} />Another photo</button>
+      <button className="btn sm" disabled={busy} onClick={() => setCam(true)}><Camera size={15} />Photo of another page</button>
       <button className="btn sm" disabled={busy} onClick={() => set({ rows: [...d.rows, blank()] })}><Plus size={15} />Line</button>
       <button className="linkbtn" disabled={busy} onClick={() => { if (confirm("Clear this bill and start again? Nothing has been saved.")) set({ rows: [], billNo: "", total: "", warnings: "", check: undefined, supplierName: "", photoId: undefined }); }}>Start over</button></div>}
     <input ref={file} type="file" hidden accept="image/jpeg,image/png,image/webp" multiple onChange={e => { void read(Array.from(e.target.files || [])); e.target.value = ""; }} />
     {busy && !!d.rows.length && <div role="status">Working…</div>}
+    {cam && <Suspense fallback={<div role="status">Opening camera…</div>}>
+      <BillCamera title="Photo of the purchase bill" facing="environment" settingKey="bill_camera" onClose={() => setCam(false)}
+        onBlob={b => void read([new File([b], `bill-${Date.now()}.jpg`, { type: "image/jpeg" })])} />
+    </Suspense>}
 
     {saved && !d.rows.length && <div className="note" role="status">
       <b>Purchase {saved.no} saved.</b> {expandJobs(jobs).length} label{expandJobs(jobs).length === 1 ? "" : "s"} prepared.

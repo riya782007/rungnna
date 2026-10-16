@@ -243,9 +243,7 @@ export default function Labels({ args }: { args: string[] }) {
                 <label className="f">TK<input className="in mono" value={form.tk} onChange={e => set("tk", e.target.value.toUpperCase())} /></label>
                 <details className="label-advanced"><summary>More details</summary><div className="grid g2">
                 <label className="f">MODEL / ARTICLE No.<input className="in mono" value={form.model || ""} onChange={e => set("model", e.target.value.toUpperCase() || undefined)} placeholder="vendor's article no" /></label>
-                <label className="f">VENDOR
-                  <select className="in" value={form.vendor_id || ""} onChange={e => { const v = vendors.find(x => x.id === e.target.value); set("vendor_id", e.target.value || undefined); set("vendor_name", v?.name || undefined); }}>
-                    <option value="">—</option>{vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>
+                <VendorNo vendors={vendors} id={form.vendor_id} onPick={v => { set("vendor_id", v?.id); set("vendor_name", v?.name); }} />
                 <label className="f">ITEM CODE (old software)<input className="in mono" inputMode="numeric" value={form.item_code || ""} placeholder="auto" onChange={e => set("item_code", e.target.value.replace(/\D/g, "") || undefined)} /></label>
                 {can(me, "rates") && <label className="f">COST ₹
                   <input className="in mono" inputMode="decimal" value={cost} placeholder="enter cost" onChange={e => applyCost(e.target.value)} /></label>}
@@ -322,6 +320,27 @@ export function LabelView({ cfg, p, qtyOnLabel = 1 }: { cfg: LabelCfg; p: Produc
         {s.code && <div style={{ fontFamily: "monospace", fontSize: fs * 0.85 + "pt" }}>{p.code}</div>}
       </div>
     </div>
+  );
+}
+
+/* The vendor by its number ("51"), the way the old software takes it, not a long list of names.
+   The name shows underneath only to confirm the number was right. */
+function VendorNo({ vendors, id, onPick }: { vendors: { id: string; name: string; vendor_code?: string }[]; id?: string; onPick: (v?: { id: string; name: string }) => void }) {
+  const cur = vendors.find(v => v.id === id);
+  const [text, setText] = useState(cur ? cur.vendor_code || cur.name : "");
+  useEffect(() => { setText(cur ? cur.vendor_code || cur.name : ""); }, [id]);
+  const find = (t: string) => {
+    const k = t.trim().toUpperCase(); if (!k) return undefined;
+    return vendors.find(v => (v.vendor_code || "").toUpperCase() === k) || vendors.find(v => v.name.toUpperCase() === k);
+  };
+  const hit = find(text);
+  return (
+    <label className="f">VENDOR No.
+      <input className="in mono" value={text} list="vendor-nos" placeholder="e.g. 51" inputMode="text"
+        onChange={e => { const t = e.target.value.toUpperCase(); setText(t); const v = find(t); onPick(v ? { id: v.id, name: v.name } : undefined); }} />
+      <datalist id="vendor-nos">{vendors.filter(v => v.vendor_code).map(v => <option key={v.id} value={v.vendor_code} />)}</datalist>
+      {text.trim() && <span className={"xs " + (hit ? "mut" : "bad-text")}>{hit ? hit.name : `No vendor has number ${text.trim()}`}</span>}
+    </label>
   );
 }
 
@@ -426,6 +445,9 @@ export function useLabelPrint(cfg: LabelCfg) {
   const start = (list: Job[], direct = false, prompt = true) => {
     if (ref.current) return toast("Finish or stop the print already running first", true);
     const unit = cfg.mode === "roll" ? cfg.cols : cfg.cols * cfg.rows;
+    // a page is always fed out whole: say how many stickers will come out blank before any are used
+    const blank = cfg.mode === "sheet" && list.length % unit ? unit - (list.length % unit) : 0;
+    if (blank && !confirm(`The printer feeds a whole page of ${unit} stickers at a time.\n\n${list.length} label${list.length === 1 ? "" : "s"} leave${list.length === 1 ? "s" : ""} ${blank} sticker${blank === 1 ? "" : "s"} blank on the last page (they can't be printed later).\n\nPrint anyway? (Cancel to change the quantity: ${Math.ceil(list.length / unit) * unit} fills the page.)`)) return;
     const batches = labelBatches(list.length, unit, cfg.batch ?? DEFAULT_BATCH, cfg.testFirst ?? true);
     if (batches.length) void go({ list, batches, i: 0, phase: "print", direct, prompt, n: 0 });
   };
@@ -474,6 +496,7 @@ export function PrinterSetup({ cfg, onTest }: { cfg: LabelCfg; onTest?: () => vo
           ? <li>The TSC driver stays exactly as it is: <b>USER (101.6 mm × 152.4 mm)</b>, the page the shop already uses. Nothing to change in Windows.</li>
           : <li>Windows: <b>Settings › Printers &amp; scanners › TSC › Printing preferences</b> › Page Setup › Stock › <b>New</b>: name it “{paper}”, width <b>{pageW} mm</b>, height <b>{pageH} mm</b>, portrait. Stock tab: <b>Labels with gaps</b>. Apply.</li>}
         <li>Print once from here. In Chrome's print window open <b>More settings</b>: Paper size <b>{paper}</b>, Margins <b>None</b>, Scale <b>Default/100</b>, and <b>untick “Headers and footers”</b> (that is what prints the date and the link). Chrome remembers these.</li>
+        {asSet && <li><b>Plain white stickers, or tiny print?</b> Chrome's Paper size must be <b>USER (101.6 mm × 152.4 mm)</b> and Scale <b>Default</b>. If a “Rungnna 103×15” paper size was made earlier, don't pick it: the page gets shrunk onto one row.</li>}
         <li>Each printed page is {per} sticker{per === 1 ? "" : "s"}{cfg.mode === "sheet" ? ` (${cfg.cols} across × ${cfg.rows} down)` : ""}. If the print sits off the stickers, use <b>Nudge right / Nudge down</b>; if it drifts further down the page, change <b>Gap down</b>; across, <b>Gap across</b>. Not the printer's settings.</li>
         {onTest && <li><button className="btn" onClick={onTest}>Print alignment test (1 page)</button> Prints a box where the app puts each sticker, with a millimetre ruler. Send a photo of it: the ruler shows exactly which number to change.</li>}
         <li>Stuck or wrong print: switch the printer off, then <b>Printers &amp; scanners › TSC › Open print queue › Cancel all documents</b> before switching it on again. If a job will not go, restart the <b>Print Spooler</b> service.</li>
