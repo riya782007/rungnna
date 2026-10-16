@@ -135,6 +135,7 @@ export interface Bill extends Row {
   merged_from?: string[];  // the bills / challans this invoice was made from
   return_of?: string; return_of_no?: string;     // credit note: the bill the goods came back from
   src_type?: BillType;     // credit note: type of that bill (an estimate's return stays private)
+  prev_due?: number;       // the party's balance before this bill, frozen when it was first saved (printed as "Previous balance")
   device: string; by_staff: string; at: string;
 }
 

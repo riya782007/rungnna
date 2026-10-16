@@ -16,12 +16,15 @@ export interface Shop {
 }
 export const DEFAULT_SHOP: Shop = {
   name: "RUNGNNA JEWELLERY & CO", tagline: "Fashion & Imitation Jewellery", address: "", phone: "", whatsapp: "", gstin: "",
-  state: "", upi: "", bank: "", terms: "Goods once sold will not be taken back. Subject to local jurisdiction.",
+  state: "Delhi", upi: "", bank: "", terms: "Goods once sold will not be taken back. Subject to local jurisdiction.",
   hsn: "7117", gst_rate: 3, gst_mode: "exclusive", max_disc: 10,
 };
 export async function getShop(): Promise<Shop> {
   const c = await db.config.get("shop");
-  return { ...DEFAULT_SHOP, ...(c?.value || {}) };
+  /* The shop is in Sadar Bazar, Delhi. A blank state (as saved on 16 Oct) made every out-of-state tax invoice charge
+     CGST + SGST while printing "Place of supply: Rajasthan": the state decides IGST, so it is never left blank. */
+  const v = { ...DEFAULT_SHOP, ...(c?.value || {}) };
+  return { ...v, state: v.state || DEFAULT_SHOP.state };
 }
 export async function saveShop(v: Shop) {
   requirePerm("settings.manage", "changing shop settings");
@@ -224,11 +227,31 @@ export async function holdBill(b: Bill) {
   await put("bills", { ...b, status: "hold" });
 }
 
+/* What the party owed before this bill, the way their khata reads: opening balance + unpaid sales − credit notes
+   − receipts. A tax invoice never counts estimates (they are private and must not appear on a GST document); an
+   estimate counts them only while estimates are unlocked on this device. Printed on the bill as "Previous balance". */
+export async function balanceBefore(b: Bill): Promise<number> {
+  if (!b.party_id) return 0;
+  const withEst = b.bill_type === "estimate" && isOpen();
+  const party = await db.parties.get(b.party_id);
+  const fromReceipt = (p: { ref?: string }) => (p.ref || "").startsWith("RCPT");
+  const others = (await db.bills.where("party_id").equals(b.party_id).toArray())
+    .filter(x => x.id !== b.id && inStore(x) && x.status === "final" && !x.deleted && (withEst || !isEstimate(x)));
+  let bal = party?.opening_balance || 0;
+  for (const x of others) {
+    if (isSale(x)) bal += x.net - x.advance - x.payments.filter(p => p.mode !== "credit" && !fromReceipt(p)).reduce((a, p) => a + p.amount, 0);
+    else if (isReturn(x)) bal -= x.net - x.paid;
+  }
+  const rcpts = await db.receipts.where("party_id").equals(b.party_id).filter(r => inStore(r) && !r.deleted).toArray();
+  for (const r of rcpts) bal -= withEst ? r.amount : r.amount - r.allocations.filter(a => /^EST\//.test(a.bill_no)).reduce((x, a) => x + a.amount, 0);
+  return bal;
+}
+
 /* Final save: number it, take the pieces off the racks (fullest location first), keep a movement per rack.
    Lines marked stock_done already left on another document (merged sources, challans, a split) and are skipped.
    `after` runs inside the same transaction, so linked changes (e.g. marking merged sources) save all-or-nothing. */
 export async function finalize(b: Bill, shopState: string, customerName = "", after?: (saved: Bill) => Promise<void>): Promise<Bill> {
-  return db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock, db.products, db.stores, db.locations, db.settings, db.config], async () => {
+  return db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock, db.products, db.stores, db.locations, db.settings, db.config, db.parties, db.receipts], async () => {
   await assertStoreRow(b);
   b = await fillBillNames(b);
   if (b.items.some(l => !l.item?.trim() || /^ITEM\s+\d+$/i.test(l.item.trim()))) throw new Error("Every bill item needs a product name");
@@ -239,6 +262,9 @@ export async function finalize(b: Bill, shopState: string, customerName = "", af
   if (before0?.at) await assertUnlocked(before0.at);
   const num = t.no ? { no: t.no, series: t.series } : await nextNo(t.bill_type, t.src_type);
   const bill: Bill = { ...t, ...num, status: "final", oversold: undefined, at: t.status === "hold" ? now() : t.at };
+  // frozen the first time the bill is saved: a reprint next month still shows what was owed on the day
+  if (isSale(bill) && bill.party_id) bill.prev_due = before0?.status === "final" && before0.party_id === bill.party_id && before0.prev_due !== undefined ? before0.prev_due : await balanceBefore(bill);
+  else bill.prev_due = undefined;
   const oversold: { product_id: string; item: string; qty: number }[] = [];
   const bucket = new Set((await db.locations.filter(l => l.kind === "bucket").toArray()).map(l => l.id));
   const racks = new Set((await storeLocations()).map(l => l.id));

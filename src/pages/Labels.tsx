@@ -365,7 +365,9 @@ function LabelSettings({ cfg, upd, sample, qty, onTest }: { cfg: LabelCfg; upd: 
         {cfg.output === "tspl" && serialSupported() && <button className="btn" onClick={() => connectSerial().then(() => toast("Serial printer connected")).catch(e => toast(e.message, true))}>Connect serial printer</button>}
         {cfg.output === "tspl" && usbSupported() && <button className="btn" onClick={() => connectUSB().then(() => toast("USB printer connected")).catch(e => toast(e.message, true))}>Connect TSC USB printer</button>}
         <label className="f">Sticker
-          <select className="in" value={cfg.preset} onChange={e => { const p = PRESETS.find(x => x.key === e.target.value); upd({ preset: e.target.value, ...(p?.cfg || {}) }); }}>
+          <select className="in" value={cfg.preset} onChange={e => { const p = PRESETS.find(x => x.key === e.target.value);
+            // a preset is a whole sticker: settings only one preset uses (printer's own paper, right edge, rate size) go back to plain
+            upd({ preset: e.target.value, ...(p ? { driverPaper: undefined, edgeR: undefined, rateScale: undefined, offX: 0, offY: 0, left: 0, top: 0 } : {}), ...(p?.cfg || {}) }); }}>
             {PRESETS.map(p => <option key={p.key} value={p.key}>{p.name}</option>)}
             <option value="custom">Custom size</option>
           </select></label>
@@ -519,7 +521,7 @@ export function PrinterSetup({ cfg, onTest }: { cfg: LabelCfg; onTest?: () => vo
    exactly which number to change: the ruler reading at a sticker's left edge is its "Left margin", and so on. */
 export function AlignSheet({ cfg }: { cfg: LabelCfg }) {
   const W = cfg.mode === "sheet" ? cfg.sheetW : cfg.driverPaper && cfg.edgeR ? cfg.edgeR : cfg.cols * cfg.w + (cfg.cols - 1) * cfg.gapX;
-  const H = cfg.mode === "sheet" ? cfg.sheetH : cfg.h;
+  const H = cfg.mode === "sheet" ? cfg.sheetH : cfg.driverPaper ? cfg.h - 0.6 : cfg.h;   // same as a printed row
   const rows = cfg.mode === "sheet" ? cfg.rows : 1;
   const boxes = Array.from({ length: rows * cfg.cols }, (_, k) => {
     const c = k % cfg.cols, r = Math.floor(k / cfg.cols);
@@ -557,7 +559,9 @@ export function PrintSheet({ cfg, jobs }: { cfg: LabelCfg; jobs: Job[] }) {
           turns a wide, short page sideways (the rotated stickers of 15 Oct) or shrinks a bigger one onto it. */}
       <style>{cfg.driverPaper ? "@page{margin:0}" : `@page{size:${pageW}mm ${cfg.h + cfg.gapY}mm;margin:0}`}</style>
       {rows.map((r, i) => (
-        <div key={i} style={{ position: "relative", width: pageW + "mm", height: cfg.h + "mm", overflow: "hidden", pageBreakAfter: i === rows.length - 1 ? "auto" : "always", breakAfter: i === rows.length - 1 ? "auto" : "page" }}>
+        // on the printer's own paper a row is drawn a hair shorter than the sticker: if it were even 0.1 mm taller
+        // than what the driver can print, every row would spill onto a second, blank sticker row
+        <div key={i} style={{ position: "relative", width: pageW + "mm", height: (cfg.driverPaper ? cfg.h - 0.6 : cfg.h) + "mm", overflow: "hidden", pageBreakAfter: i === rows.length - 1 ? "auto" : "always", breakAfter: i === rows.length - 1 ? "auto" : "page" }}>
           {r.map((j, k) => {
             const x = cfg.offX + k * (cfg.w + cfg.gapX), w = Math.min(cfg.w, (cfg.edgeR ?? 1e9) - x);
             return <div key={k} style={{ position: "absolute", left: x + "mm", top: cfg.offY + "mm" }}>

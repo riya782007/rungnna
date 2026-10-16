@@ -110,7 +110,7 @@ export async function splitBill(b0: Bill, lineIds: string[], shop: Shop, by: str
   const movingProducts = new Set(moving.map(l => l.product_id).filter(Boolean) as string[]);
   const pieces = await db.products.bulkGet([...movingProducts]);
   const tagSet = new Set(pieces.flatMap(p => p?.barcodes || []));
-  const tagsMoving = (b.rfid_tags || []).filter(t => tagSet.has(t) && !staying.some(l => l.product_id && pieces.find(p => p?.id === l.product_id)?.barcodes.includes(t)));
+  const tagsMoving = (b.rfid_tags || []).filter(t => tagSet.has(t) && !staying.some(l => l.product_id && (pieces.find(p => p?.id === l.product_id)?.barcodes || []).includes(t)));
 
   if (b.status === "hold") {
     const split = totals({ ...base, items: moving.map(l => ({ ...l })), rfid_tags: tagsMoving }, shop.state, shop.gstin);
@@ -212,7 +212,7 @@ export async function saveReturn(cn0: Bill, bill: Bill, shop: Shop, refund?: { m
       const free: string[] = [];
       for (const l of saved.items) {
         const p = l.product_id ? await db.products.get(l.product_id) : undefined;
-        free.push(...tags.filter(t => p?.barcodes.includes(t) && p.sold_tags?.[t]).slice(0, l.qty));
+        free.push(...tags.filter(t => (p?.barcodes || []).includes(t) && p?.sold_tags?.[t]).slice(0, l.qty));
       }
       await setTagsSold(free, null);
     }

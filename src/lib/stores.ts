@@ -46,7 +46,7 @@ export async function dispatchTransfer(to_store: string, items: StoreTransfer["i
       const c = await db.stock.get(item.product_id + "|" + item.from_loc);
       if ((c?.qty || 0) < item.qty) throw new Error("Not enough stock in the source rack");
       for (const tag of item.tags || []) {
-        if (seenTags.has(tag) || !p.barcodes.includes(tag) || p.sold_tags?.[tag]) throw new Error("RFID tag is duplicated or unavailable");
+        if (seenTags.has(tag) || !(p.barcodes || []).includes(tag) || p.sold_tags?.[tag]) throw new Error("RFID tag is duplicated or unavailable");
         seenTags.add(tag);
       }
       if (item.tags?.length && item.tags.length !== item.qty) throw new Error("Tagged quantity must equal scanned tags");

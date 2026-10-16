@@ -268,7 +268,8 @@ export default function Billing({ args }: { args: string[] }) {
       const ok = pin && (await db.staff.filter(x => !!x.active && !x.deleted && x.login !== "role" && !!x.pin && x.pin === pin && can(x, "billing.discount_over")).count());
       if (!ok) return toast("Discount not approved", true);
     }
-    if (b.bill_type === "gst" && !shop.gstin) toast("Tip: add the shop GSTIN in Settings → Shop profile", true);
+    // a tax invoice without the seller's GSTIN is not a valid tax invoice: estimates and challans still work meanwhile
+    if (b.bill_type === "gst" && !shop.gstin?.trim()) return toast("A tax invoice needs the shop's GSTIN. Add it once in Settings → Shop profile (estimates and challans work without it).", true);
     const missing = t.items.find(l => !l.item?.trim() || /^ITEM\s+\d+$/i.test(l.item.trim()));
     if (missing) return toast("Add the product name before saving: " + (missing.style || missing.code), true);
     const done = await finalize(t, shop.state, b.party_name);

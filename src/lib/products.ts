@@ -32,7 +32,7 @@ export const hasProductName = (name?: string) => !!name?.trim() && !/^ITEM\s+\d+
 // An opaque barcode/RFID can still use the recognized label saved on its product.
 async function scannedDetails(p: Product, parsed: Parsed, rules: Pattern[]): Promise<Product> {
   let next = { ...p };
-  for (const raw of new Set([parsed.raw, p.raw_scan, ...p.barcodes])) {
+  for (const raw of new Set([parsed.raw, p.raw_scan, ...(p.barcodes || [])])) {
     if (!raw || isRfidTag(raw)) continue;
     const x = raw === parsed.raw ? parsed : parseLabel(raw, rules);
     if (["code", "unknown"].includes(x.how) || (next.item_code && x.icode && next.item_code !== x.icode)) continue;
@@ -61,7 +61,7 @@ export async function findByScan(raw: string, parsed?: Parsed): Promise<Product 
     const found = await findStoredScan(raw, x);
     if (!found) return undefined;
     const p = await scannedDetails(found, x, rules);
-    if (!["code", "unknown"].includes(x.how) && x.raw && !p.barcodes.includes(x.raw)) p.barcodes = [...p.barcodes, x.raw];
+    if (!["code", "unknown"].includes(x.how) && x.raw && !(p.barcodes || []).includes(x.raw)) p.barcodes = [...(p.barcodes || []), x.raw];
     const saved = JSON.stringify(p) !== JSON.stringify(found) ? await saveProduct(p) : p;
     return scannedPacket(saved, x);
   });
@@ -76,7 +76,7 @@ export async function resolveProductScan(raw: string, by: string): Promise<{ pro
     if (!found && (["code", "unknown"].includes(parsed.how) || !(parsed.style || parsed.item))) return {};
     const source = found || fromParsed(parsed, by);
     const p = await scannedDetails(source, parsed, rules);
-    if (parsed.raw && !p.barcodes.includes(parsed.raw)) p.barcodes = [...p.barcodes, parsed.raw];
+    if (parsed.raw && !(p.barcodes || []).includes(parsed.raw)) p.barcodes = [...(p.barcodes || []), parsed.raw];
     const saved = !found || JSON.stringify(p) !== JSON.stringify(found) ? await saveProduct(p) : p;
     return { product: scannedPacket(saved, parsed), created: !found };
   });
@@ -227,7 +227,7 @@ export async function saveProduct(p: Product) {
   p.item = p.item.trim().toUpperCase(); p.style = p.style.trim().toUpperCase(); p.color = p.color.trim().toUpperCase();
   p.type = (p.type || "PCS").trim().toUpperCase();
   if (p.size != null) p.size = p.size.trim().toUpperCase() || undefined;   // same key as lib/inventory normSize, incl. legacy rows
-  if (!p.barcodes.includes(p.code)) p.barcodes = [...p.barcodes, p.code];
+  if (!(p.barcodes || []).includes(p.code)) p.barcodes = [...(p.barcodes || []), p.code];
   const saved = await put("products", p);
   // the first time a number gets a real name (e.g. typed on Scan & record), every later label learns it
   if (p.item_code && !needsName(p)) await learnItems({ [p.item_code]: { name: p.item, unit: p.type !== "PCS" ? p.type : "" } }, true);

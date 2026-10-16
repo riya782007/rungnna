@@ -124,6 +124,8 @@ const ROLES: Staff["role"][] = ["owner", "manager", "cashier", "salesman", "help
 function PrintingSettings() {
   const [width, setWidth] = useState("80mm");
   const [cut, setCut] = useState<ReceiptCut>("partial");
+  const [copies, setCopies] = useState("1");
+  useEffect(() => { getSetting("invoice_copies", 1).then(n => setCopies(String(n || 1))); }, []);
   useEffect(() => {
     getSetting("thermal_width", "80mm").then(setWidth);
     getSetting("receipt_cut", "partial").then(value => setCut(receiptCut(value)));
@@ -136,6 +138,8 @@ function PrintingSettings() {
       catch { toast("Could not save cutter preference", true); }
     }}>{Object.entries(RECEIPT_CUTS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
     <span className="sm">{receiptCutSetup(cut)}</span>
+    <label className="f">Tax invoice copies (A4 / A5)<select className="in" value={copies} onChange={async e => { setCopies(e.target.value); await setSetting("invoice_copies", Number(e.target.value)); toast("Saved"); }}>
+      <option value="1">1 — Original only</option><option value="2">2 — Original + Duplicate (transporter)</option><option value="3">3 — Original, Duplicate, Triplicate (GST rule 48)</option></select></label>
     <span className="sm">Receipt size: fitted to each bill</span><a className="btn" href="#/labels">Label printer settings</a>
   </section>;
 }

@@ -34,7 +34,7 @@ function ProductList() {
   const list = useMemo(() => {
     const t = q.trim().toUpperCase().split(/\s+/).filter(Boolean);
     return all.filter(p => !p.deleted && (!item || p.item === item) && (!dead || !!p.tk?.trim()) &&
-      t.every(w => (p.code + " " + p.item + " " + p.style + " " + p.color + " " + p.tk + " " + p.barcodes.join(" ")).toUpperCase().includes(w)));
+      t.every(w => (p.code + " " + p.item + " " + p.style + " " + p.color + " " + p.tk + " " + (p.barcodes || []).join(" ")).toUpperCase().includes(w)));
   }, [all, q, item, dead]);
   return (
     <div>
@@ -133,7 +133,7 @@ function ProductDetail({ id }: { id: string }) {
             <label className="f">HSN<input className="in mono" value={p.hsn || ""} onChange={e => set("hsn", e.target.value.replace(/\D/g, "") || undefined)} /></label>
           </div>
           <label className="f">Notes<textarea className="in" rows={2} value={p.notes} onChange={e => set("notes", e.target.value)} /></label>
-          <div className="xs mut">Scans that open this product: <span className="mono">{p.barcodes.join(" · ")}</span></div>
+          <div className="xs mut">Scans that open this product: <span className="mono">{(p.barcodes || []).join(" · ")}</span></div>
           {tagsOf(p).length > 0 && <div className="xs mut">RFID tags: {tagsOf(p).length} linked{tagsOf(p).filter(t => soldBill(p, t)).length ? ` · ${tagsOf(p).filter(t => soldBill(p, t)).length} sold` : ""}</div>}
           <div className="row">
             <button className="btn p" onClick={async () => { await saveProduct({ ...p }); toast("Saved"); }}>Save changes</button>
