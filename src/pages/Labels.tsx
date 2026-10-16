@@ -32,6 +32,8 @@ export type LabelCfg = {
   testFirst?: boolean;   // a long run starts with one test row
   edgeR?: number;        // sheet: page x (mm) where the printer stops printing; a sticker past it is laid out narrower
   cur?: string;          // printed before the rate: "9" on the shop's old stickers, or ₹ / Rs. / nothing
+  driverPaper?: boolean; // roll: the page size comes from the printer's own stock (one row of stickers), not the page
+  rateScale?: number;    // rate line size, × text size
 };
 
 /** Where one sticker goes on a sheet page, and how wide it can be before the printer's right edge. */
@@ -42,6 +44,14 @@ export function cellBox(cfg: LabelCfg, c: number, r: number) {
 }
 
 export const PRESETS: { key: string; name: string; cfg: Partial<LabelCfg> }[] = [
+  /* What his old software does (and why its stickers always land right): every printed "page" is ONE ROW of three
+     stickers, and the printer's gap sensor lines up the top of every row by itself. A 4 × 6 in page of 9 rows can't:
+     its rows are drawn 16.93 mm apart but the stickers are ~17.6 mm apart (15 mm + gap), so content drifts a little
+     more each row, and a short print feeds out a whole page of blanks (both seen on 16 Oct).
+     Measured from his roll: liner ~105 mm, three 33 mm stickers ~1 mm apart, first one ~2.5 mm in from the edge the
+     print starts at. The page is the TSC driver's own stock "Rungnna row" (104 × 15 mm), so Chrome never rotates or
+     shrinks it. Text sizes copied from his old stickers: 6 pt lines, rate twice that. QR 8 mm: the smallest that still gives every QR square 2 whole printer dots at 203 dpi. */
+  { key: "rjrow", name: "Rungnna row: one row of 3 stickers per print (like the old software)", cfg: { mode: "roll", driverPaper: true, w: 33, h: 15, cols: 3, gapX: 1.3, gapY: 0, offX: 2.5, offY: 0, edgeR: 104, qr: 8, font: 6, rateScale: 1.8, pad: 1.4 } },
   /* Fitted to the shop's printer exactly as it is already set up (screenshot, 15 Oct 2026): the TSC driver's
      paper is USER 101.6 × 152.4 mm (4 × 6 in). Nothing on that computer changes; the app lays its 33 × 15 mm
      stickers onto that page instead: 3 across × 9 down = 27 a page. 9 rows × 16.93 mm = 152.4 mm, so every
@@ -67,8 +77,8 @@ export const PRESETS: { key: string; name: string; cfg: Partial<LabelCfg> }[] = 
 
 export const DEFAULT_CFG: LabelCfg = {
   output: "browser",
-  preset: "rjpage", mode: "sheet", w: 33, h: 15, cols: 3, gapX: 1.3, gapY: 1.93, sheetW: 101.6, sheetH: 152.4, top: 0, left: 3.5, edgeR: 100, rows: 9,
-  qr: 8, font: 5, pad: 0.8, offX: 0, offY: 0, shop: "RUNGNNA", format: "shop", layout: "shop",
+  preset: "rjrow", mode: "roll", driverPaper: true, w: 33, h: 15, cols: 3, gapX: 1.3, gapY: 0, sheetW: 101.6, sheetH: 152.4, top: 0, left: 0, edgeR: 104, rows: 9,
+  qr: 8, font: 6, rateScale: 1.8, pad: 1.4, offX: 2.5, offY: 0, shop: "RUNGNNA", format: "shop", layout: "shop",
   show: { shop: true, item: true, style: true, color: true, rate: true, tk: false, code: false, qty: true, cost_code: true },
   cur: "9",
 };
@@ -84,11 +94,9 @@ export function upgradeLabelCfg(saved: Partial<LabelCfg> | null | undefined): La
   const c = { ...DEFAULT_CFG, ...(saved || {}), show: { ...DEFAULT_CFG.show, ...(saved?.show || {}) } };
   const old50 = c.preset === "rj" && c.w === 50 && c.h === 20 && c.cols === 1;
   const oldRow = c.preset === "rj3" && c.mode === "roll" && c.w === 33 && c.h === 15 && c.cols === 3;
-  // the first version of the page layout (left 0, no right edge), untouched: take the measured one
-  const firstPage = c.preset === "rjpage" && c.left === 0 && c.edgeR === undefined && c.offX === 0;
-  if (old50 || oldRow || firstPage) return { ...c, ...PRESETS.find(x => x.key === "rjpage")!.cfg, preset: "rjpage", show: { ...c.show, cost_code: true } };
-  // the measured page before it matched his old stickers (QR 11): same look as his now
-  if (c.preset === "rjpage" && c.qr === 11 && c.left === 3.5) return { ...c, qr: 8, show: { ...c.show, cost_code: true } };
+  // the 4 × 6 in page layouts (any of its three versions) as set by the app, never nudged by hand
+  const page = c.preset === "rjpage" && c.offX === 0 && c.offY === 0 && c.sheetH === 152.4 && c.rows === 9;
+  if (old50 || oldRow || page) return { ...c, ...PRESETS.find(x => x.key === "rjrow")!.cfg, preset: "rjrow", show: { ...c.show, cost_code: true } };
   return c;
 }
 export const loadLabelCfg = () => getSetting<Partial<LabelCfg> | null>("label_cfg", null).then(upgradeLabelCfg);
@@ -301,7 +309,7 @@ export function LabelView({ cfg, p, qtyOnLabel = 1 }: { cfg: LabelCfg; p: Produc
         {s.code && <div style={{ fontSize: fs * 0.85 + "pt" }}>{p.code}</div>}
       </div>
       <div className="q" style={{ width: q + "mm", height: q + "mm" }} dangerouslySetInnerHTML={{ __html: svg }} />
-      {s.rate && p.rate > 0 && <div className="r" style={{ fontSize: fs * 1.75 + "pt" }}>{cur}{labelRate(p.rate)}{s.qty ? `X${pp.pack}${p.type || "PCS"}` : ""}</div>}
+      {s.rate && p.rate > 0 && <div className="r" style={{ fontSize: fs * (cfg.rateScale ?? 1.75) + "pt" }}>{cur}{labelRate(p.rate)}{s.qty ? `X${pp.pack}${p.type || "PCS"}` : ""}</div>}
       {s.shop && cfg.shop && <div className="n" style={{ fontSize: fs * 0.95 + "pt" }}>{cfg.shop}</div>}
     </div>
   );
@@ -486,13 +494,15 @@ export function PrinterSetup({ cfg, onTest }: { cfg: LabelCfg; onTest?: () => vo
   const pageH = cfg.mode === "roll" ? cfg.h : cfg.sheetH;
   // the page his TSC driver is already set to: nothing to change on that computer
   const asSet = cfg.mode === "sheet" && Math.abs(cfg.sheetW - 101.6) < 0.05 && Math.abs(cfg.sheetH - 152.4) < 0.05;
-  const paper = asSet ? "USER (101.6 mm × 152.4 mm)" : `Rungnna ${pageW}×${pageH}`;
+  const row = cfg.mode === "roll" && !!cfg.driverPaper;
+  const paper = asSet ? "USER (101.6 mm × 152.4 mm)" : row ? "Rungnna row" : `Rungnna ${pageW}×${pageH}`;
   const per = cfg.mode === "roll" ? cfg.cols : cfg.cols * cfg.rows;
   return (
     <details className="pad sm">
       <summary><b>Set up this computer once</b> (date, link or wrong size on stickers?)</summary>
       <ol className="stack" style={{ paddingLeft: 18, margin: "8px 0" }}>
-        {asSet
+        {row ? <li>Once, in Windows: <b>Settings › Printers &amp; scanners › TSC › Printing preferences</b> › Page Setup › Stock › <b>New…</b>: name <b>Rungnna row</b>, width <b>{cfg.edgeR ?? 104} mm</b>, height <b>{cfg.h} mm</b>. Stock tab: <b>Labels With Gaps</b>. OK. (Leave USER 4 × 6 as it is for anything else.) This is one row of {cfg.cols} stickers: the printer finds the gap before every row, exactly as with the old software.</li>
+        : asSet
           ? <li>The TSC driver stays exactly as it is: <b>USER (101.6 mm × 152.4 mm)</b>, the page the shop already uses. Nothing to change in Windows.</li>
           : <li>Windows: <b>Settings › Printers &amp; scanners › TSC › Printing preferences</b> › Page Setup › Stock › <b>New</b>: name it “{paper}”, width <b>{pageW} mm</b>, height <b>{pageH} mm</b>, portrait. Stock tab: <b>Labels with gaps</b>. Apply.</li>}
         <li>Print once from here. In Chrome's print window open <b>More settings</b>: Paper size <b>{paper}</b>, Margins <b>None</b>, Scale <b>Default/100</b>, and <b>untick “Headers and footers”</b> (that is what prints the date and the link). Chrome remembers these.</li>
@@ -508,12 +518,13 @@ export function PrinterSetup({ cfg, onTest }: { cfg: LabelCfg; onTest?: () => vo
 /* One page that shows where the app thinks every sticker is, against a millimetre ruler. A photo of it says
    exactly which number to change: the ruler reading at a sticker's left edge is its "Left margin", and so on. */
 export function AlignSheet({ cfg }: { cfg: LabelCfg }) {
-  const W = cfg.mode === "sheet" ? cfg.sheetW : cfg.cols * cfg.w + (cfg.cols - 1) * cfg.gapX;
+  const W = cfg.mode === "sheet" ? cfg.sheetW : cfg.driverPaper && cfg.edgeR ? cfg.edgeR : cfg.cols * cfg.w + (cfg.cols - 1) * cfg.gapX;
   const H = cfg.mode === "sheet" ? cfg.sheetH : cfg.h;
   const rows = cfg.mode === "sheet" ? cfg.rows : 1;
   const boxes = Array.from({ length: rows * cfg.cols }, (_, k) => {
     const c = k % cfg.cols, r = Math.floor(k / cfg.cols);
-    return cfg.mode === "sheet" ? { ...cellBox(cfg, c, r), c, r } : { x: cfg.offX + c * (cfg.w + cfg.gapX), y: cfg.offY, w: cfg.w, c, r };
+    const x = cfg.offX + c * (cfg.w + cfg.gapX);
+    return cfg.mode === "sheet" ? { ...cellBox(cfg, c, r), c, r } : { x, y: cfg.offY, w: Math.min(cfg.w, W - x), c, r };
   });
   const ticks = (n: number) => Array.from({ length: Math.floor(n) + 1 }, (_, i) => i);
   const across = (y: number) => <g key={"a" + y}>{ticks(W).map(i => <line key={i} x1={i} x2={i} y1={y} y2={y + (i % 10 ? i % 5 ? 0.8 : 1.4 : 2.2)} stroke="#000" strokeWidth={0.15} />)}
@@ -521,7 +532,7 @@ export function AlignSheet({ cfg }: { cfg: LabelCfg }) {
   // the up-and-down ruler runs in the gap after the first column, so it never covers a box's label
   const midX = cfg.mode === "sheet" && cfg.cols > 1 ? cellBox(cfg, 0, 0).x + cfg.w + cfg.gapX / 2 : W / 2;
   return (<>
-    <style>{`@page{size:${W}mm ${H}mm;margin:0}`}</style>
+    <style>{cfg.mode === "roll" && cfg.driverPaper ? "@page{margin:0}" : `@page{size:${W}mm ${H}mm;margin:0}`}</style>
     <svg width={W + "mm"} height={H + "mm"} viewBox={`0 0 ${W} ${H}`} style={{ display: "block" }} fontFamily="Arial, sans-serif">
       {boxes.map((b, i) => <g key={i}>
         <rect x={b.x} y={b.y} width={b.w} height={cfg.h} fill="none" stroke="#000" strokeWidth={0.25} />
@@ -539,13 +550,19 @@ export function AlignSheet({ cfg }: { cfg: LabelCfg }) {
    Two code paths for one sticker is how label geometry drifts. */
 export function PrintSheet({ cfg, jobs }: { cfg: LabelCfg; jobs: Job[] }) {
   if (cfg.mode === "roll") {
-    const pageW = cfg.cols * cfg.w + (cfg.cols - 1) * cfg.gapX;
+    const pageW = cfg.driverPaper && cfg.edgeR ? cfg.edgeR : cfg.cols * cfg.w + (cfg.cols - 1) * cfg.gapX;
     const rows: Job[][] = []; for (let i = 0; i < jobs.length; i += cfg.cols) rows.push(jobs.slice(i, i + cfg.cols));
     return (<>
-      <style>{`@page{size:${pageW}mm ${cfg.h + cfg.gapY}mm;margin:0}`}</style>
+      {/* driverPaper: no page size from here. Chrome then uses the printer's own one-row stock as it is, so it never
+          turns a wide, short page sideways (the rotated stickers of 15 Oct) or shrinks a bigger one onto it. */}
+      <style>{cfg.driverPaper ? "@page{margin:0}" : `@page{size:${pageW}mm ${cfg.h + cfg.gapY}mm;margin:0}`}</style>
       {rows.map((r, i) => (
-        <div key={i} style={{ display: "flex", gap: cfg.gapX + "mm", width: pageW + "mm", height: cfg.h + "mm", pageBreakAfter: i === rows.length - 1 ? "auto" : "always", breakAfter: i === rows.length - 1 ? "auto" : "page", transform: `translate(${cfg.offX}mm,${cfg.offY}mm)` }}>
-          {r.map((j, k) => <LabelView key={k} cfg={cfg} p={j.p} qtyOnLabel={j.qtyOnLabel} />)}
+        <div key={i} style={{ position: "relative", width: pageW + "mm", height: cfg.h + "mm", overflow: "hidden", pageBreakAfter: i === rows.length - 1 ? "auto" : "always", breakAfter: i === rows.length - 1 ? "auto" : "page" }}>
+          {r.map((j, k) => {
+            const x = cfg.offX + k * (cfg.w + cfg.gapX), w = Math.min(cfg.w, (cfg.edgeR ?? 1e9) - x);
+            return <div key={k} style={{ position: "absolute", left: x + "mm", top: cfg.offY + "mm" }}>
+              <LabelView cfg={w < cfg.w ? { ...cfg, w } : cfg} p={j.p} qtyOnLabel={j.qtyOnLabel} /></div>;
+          })}
         </div>))}
     </>);
   }

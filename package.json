@@ -12,6 +12,7 @@
   "dependencies": {
     "@fontsource/cormorant-garamond": "^5.3.0",
     "@fontsource/plus-jakarta-sans": "^5.3.0",
+    "@fontsource/roboto-condensed": "^5.3.0",
     "@supabase/supabase-js": "2.117.1",
     "barcode-detector": "3.2.2",
     "dexie": "4.4.6",

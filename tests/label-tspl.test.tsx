@@ -43,7 +43,7 @@ describe("TSPL for the TSC printer", () => {
     }
   });
   it("nudges move the whole label the same way", () => {
-    const a = job(DEFAULT_CFG), b = job({ ...DEFAULT_CFG, offX: 1, offY: 1 });
+    const a = job(DEFAULT_CFG), b = job({ ...DEFAULT_CFG, offX: DEFAULT_CFG.offX + 1, offY: DEFAULT_CFG.offY + 1 });
     const xy = (t: string) => [...t.matchAll(/(?:TEXT|QRCODE) (\d+),(\d+)/g)].map(m => [Number(m[1]), Number(m[2])]);
     xy(b).forEach(([x, y], i) => { expect(x - xy(a)[i][0]).toBe(8); expect(y - xy(a)[i][1]).toBe(8); });
   });
