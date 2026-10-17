@@ -26,12 +26,18 @@ function enhance(img: ImageData): ImageData {
   return out;
 }
 
-type Job = { id: number; img: ImageData; strong: boolean };
+type Job = { id: number; img: ImageData; strong: boolean; fast?: boolean };
 const BASE = { formats: ["QRCode", "DataMatrix", "Code128", "Code39", "EAN13", "EAN8", "UPCA", "ITF"] as any, tryRotate: true, tryInvert: true, maxNumberOfSymbols: 12 };
 
 self.onmessage = async (e: MessageEvent<Job>) => {
-  const { id, img, strong } = e.data;
+  const { id, img, strong, fast } = e.data;
   try {
+    // live frames: one quick pass (most stickers read here in a few ms); the next frame comes right after anyway
+    if (fast) {
+      const q = await readBarcodes(img, { ...BASE, tryHarder: false, tryDownscale: true, tryRotate: false, maxNumberOfSymbols: 4, binarizer: "LocalAverage" } as any);
+      const qs = q.filter(x => x.isValid && x.text).map(x => { const p = x.position; return { text: x.text, format: x.format, cx: (p.topLeft.x + p.bottomRight.x) / 2 / img.width, cy: (p.topLeft.y + p.bottomRight.y) / 2 / img.height }; });
+      (self as any).postMessage({ id, out: qs }); return;
+    }
     let r = await readBarcodes(img, { ...BASE, tryHarder: true, tryDownscale: true, binarizer: "LocalAverage" } as any);
     let src = img;
     if (!r.some(x => x.isValid)) { src = enhance(img); r = await readBarcodes(src, { ...BASE, tryHarder: true, tryDownscale: true, binarizer: "LocalAverage" } as any); }

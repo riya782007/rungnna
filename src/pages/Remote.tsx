@@ -24,7 +24,7 @@ export default function Remote({ id }: { id: string }) {
           <div className="xs mut"><i className={"dot " + (state === "connected" ? "" : state === "error" || state === "offline" ? "bad" : "warn")} /> {state === "connected" ? "Connected — scan stickers, they go straight onto the bill" : state === "offline" ? "Needs internet on this phone" : state === "error" ? "Can't reach the counter — check internet" : "Connecting…"}</div></div>
         <a className="btn sm" href="#/home"><Icon n="x" size={16} />Done</a>
       </div>
-      <CameraScanner tall gap={1500} onCode={t => { const k = ++n.current; link.current?.send(t, k); setLog(l => [{ n: k, text: t }, ...l].slice(0, 30)); }} />
+      <CameraScanner tall gap={800} onCode={t => { const k = ++n.current; link.current?.send(t, k); setLog(l => [{ n: k, text: t }, ...l].slice(0, 30)); }} />
       <div className="list" style={{ marginTop: 10 }}>
         {log.map(x => <div key={x.n} className="li"><span className="grow sm">{x.label || "Sending…"}</span><span className="xs mut mono" style={{ maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.text}</span></div>)}
         {!log.length && <div className="empty">Scanned items appear here and on the counter screen.</div>}

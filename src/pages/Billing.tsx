@@ -416,7 +416,7 @@ export default function Billing({ args }: { args: string[] }) {
               <span>{lastScan ? <><b>Added: {lastScan.item || lastScan.style || lastScan.code}</b><span className="xs">{[lastScan.style, lastScan.color, `Box ${lastScan.box_no}`, `${lastScan.qty} ${lastScan.type || "PCS"} × ${rupees(lastScan.rate)}`, rupees(lastScan.amount)].filter(Boolean).join(" · ")}</span></> : <span className="mut">{t.items.length} bill lines · {t.total_qty} units</span>}</span>
               {lastScan && <button className="btn sm" onClick={() => showLine(lastScan.id, true)}>Show line</button>}
             </div>
-            {cam && !small && <div style={{ maxWidth: 560 }}><CameraScanner onCode={c => onCode(c)} /></div>}
+            {cam && !small && <div style={{ maxWidth: 560 }}><CameraScanner gap={800} onCode={c => onCode(c)} /></div>}
             {itemEditor}
           </div>
 
@@ -601,10 +601,10 @@ function ScanSheet({ onCode, onClose, lines, pcs, net }: { onCode: (t: string) =
   return createPortal(
     <div className="scansheet">
       <div className="row between"><b style={{ fontSize: 17 }}>Scan to bill</b><button className="btn sm" onClick={onClose}>Done</button></div>
-      <CameraScanner tall gap={1500} onCode={async c => setMsg(await onCode(c))} />
+      <CameraScanner tall gap={800} onCode={async c => setMsg(await onCode(c))} />
       <div className="card pad stack" style={{ gap: 6 }}>
         {msg && <div className="sm b" style={{ color: bad ? "var(--bad)" : "var(--ok)" }}>{msg}</div>}
-        {!msg && <div className="xs mut">Point at one sticker at a time. The same sticker counts again after it leaves the picture.</div>}
+        {!msg && <div className="xs mut">One sticker at a time, about a hand’s width away. Each packet beeps once — move to the next one.</div>}
         <div className="row between"><span className="sm">{lines} lines · {pcs} pcs</span><b style={{ fontSize: 24 }}>{rupees(net)}</b></div>
         <button className="btn p big" onClick={onClose}>Done — go to bill</button>
       </div>
