@@ -162,7 +162,7 @@ export default function StockAI({ route = "" }: { route?: string }) {
         </details>}
       </div>}
 
-      {bill && <Modal title="Read a purchase bill" onClose={() => setBill(false)}>
+      {bill && <Modal title="Read a purchase bill" size="full" onClose={() => setBill(false)}>
         <Suspense fallback={<div role="status">Loading bill reader…</div>}>
           <PurchasePhoto by={me?.id || ""} camera={bill === "camera"} />
         </Suspense>

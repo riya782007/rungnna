@@ -258,7 +258,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
             <input className={"in" + ((k === "style" && r.autoStyle) || d.check?.fixes.some(f => f.line === i + 1 && f.field === k) ? " auto-filled" : "")} aria-label={`${k} line ${i + 1}`}
               title={k === "style" && r.autoStyle ? "The bill printed no article number — this was built from the item and its rate. Edit it if you have the supplier's own code." : undefined}
               value={r[k] ?? ""} onChange={e => row(i, k, e.target.value)}
-              style={{ minWidth: k === "item" ? 190 : k === "style" ? 140 : 65 }} /></td>)}
+              style={{ minWidth: k === "item" ? 170 : k === "style" ? 120 : 56 }} /></td>)}
           <td><button className="iconbtn" title="Remove line" aria-label="Remove line" onClick={() => set({ rows: d.rows.filter((_, k) => k !== i) })}><Trash2 size={16} /></button></td>
         </tr>)}</tbody></table></div>
 
@@ -281,6 +281,8 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       {validation && <div className="note warn" role="status">{validation}</div>}
       {d.warnings && <div className="note warn" style={{ whiteSpace: "pre-wrap" }}>{d.warnings}</div>}
 
+      {/* stays in view at the bottom of the full-window review, so approving needs no scrolling */}
+      <div className="approve-bar stack">
       <label className="row"><input type="checkbox" checked={reviewed} onChange={e => setReviewed(e.target.checked)} />
         {d.check?.ok ? "The lines add up to the bill. I checked the highlighted cells and the selling rates." : "I checked quantities, units, costs, selling rates and tax/freight differences."}</label>
       <button className="btn p" disabled={!ready4} onClick={approve}>
@@ -288,6 +290,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       </button>
       {!busy && !!missing.length && <div className="sm bad-text" role="status">To approve: {missing.join(" · ")}</div>}
       <div className="xs mut">One press records the purchase, drafts the products onto {d.rack ? "the chosen rack" : "the rack"} and sends the labels. Nothing is printed before you press it.</div>
+      </div>
     </>}
 
     {error && <div className="note warn" role="alert" style={{ whiteSpace: "pre-line" }}>{error}</div>}

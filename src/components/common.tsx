@@ -79,11 +79,12 @@ export function Head({ eyebrow, title, sub, children }: { eyebrow?: string; titl
   );
 }
 
-export function Modal({ onClose, children, title }: { onClose: () => void; children: ReactNode; title: string }) {
+/* size "full": a work screen (reviewing a 30-line bill) — nearly the whole window, so nothing needs side-scrolling */
+export function Modal({ onClose, children, title, size }: { onClose: () => void; children: ReactNode; title: string; size?: "full" }) {
   useEffect(() => { const f = (e: KeyboardEvent) => e.key === "Escape" && onClose(); addEventListener("keydown", f); return () => removeEventListener("keydown", f); }, [onClose]);
   return (
     <div className="modal" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="sheet card">
+      <div className={"sheet card" + (size === "full" ? " sheet-full" : "")}>
         <header><h3 className="grow">{title}</h3><button className="btn sm" onClick={onClose}>Close</button></header>
         <div className="pad">{children}</div>
       </div>

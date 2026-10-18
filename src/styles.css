@@ -775,3 +775,17 @@ html{scrollbar-gutter:stable}
 /* the bill line a sticker belongs to: a small boxed number before the item, so staff match stickers to goods */
 .lbl .lno-end{margin:0 0 0 1.2mm}
 .lbl .lno{display:inline-block;border:.15mm solid #000;border-radius:.4mm;padding:0 .35mm;margin-right:.6mm;font-weight:700;font-size:.9em;line-height:1.05}
+/* the purchase-bill review (owner, 18 Oct: "expand it so I don't have to scroll and swipe"):
+   the box takes the whole window, and the lines are compact so a 30-line bill shows at a glance */
+.sheet.sheet-full{max-width:none;width:calc(100vw - 24px);height:calc(100vh - 24px);max-height:none}
+@media(max-width:860px){.sheet.sheet-full{width:100vw;height:100vh;border-radius:0}}
+.sheet-full .purchase-photo .tw{overflow:visible}
+.purchase-photo .pos-t td{padding:2px 3px}
+.purchase-photo .pos-t th{padding:6px 4px}
+.sheet-full .purchase-photo .pos-t th{position:sticky;top:0;background:var(--surface);z-index:1}
+.purchase-photo .pos-t .in{height:32px;min-height:32px;padding:0 8px;font-size:13.5px;border-radius:6px}
+@media(min-width:861px){.purchase-photo .pos-t{width:100%}}
+.sheet-full .approve-bar{position:sticky;bottom:-16px;background:var(--surface);border-top:1px solid var(--line);padding:8px 0 12px;z-index:2;box-shadow:0 -6px 14px -10px rgba(0,0,0,.25);display:flex;flex-flow:row wrap;align-items:center;gap:6px 14px}
+.sheet-full .approve-bar>.btn{order:3;margin-left:auto}
+.sheet-full .approve-bar>.xs.mut{display:none}
+.sheet-full .approve-bar>.bad-text{order:2}
