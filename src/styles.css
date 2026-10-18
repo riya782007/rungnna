@@ -163,6 +163,11 @@ tr:last-child td{border-bottom:0}
 .toast{position:fixed;left:50%;transform:translateX(-50%);top:14px;z-index:90;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;width:max-content;max-width:calc(100vw - 32px)}
 .toast div{background:rgba(23,22,27,.92);color:#fff;border-radius:999px;padding:10px 18px;font-size:14px;box-shadow:0 10px 30px -10px rgba(0,0,0,.4);animation:tin .28s var(--ease);backdrop-filter:blur(8px)}
 .toast div.bad{background:rgba(180,68,62,.95)}
+.bill-scan-notice{position:fixed;right:24px;top:92px;z-index:96;display:flex;align-items:flex-start;gap:12px;width:380px;max-width:calc(100vw - 24px);padding:16px;background:#E6F4EA;color:#125B32;border:1px solid #81C995;border-radius:14px;box-shadow:0 12px 32px rgba(0,0,0,.16);pointer-events:none;animation:tin .18s var(--ease)}
+.bill-scan-notice .grow{min-width:0;display:flex;flex-direction:column;gap:3px;overflow-wrap:anywhere}
+.bill-scan-notice strong{font-size:19px;color:#153C25}.bill-scan-notice span{font-size:13px}.bill-scan-notice>svg{flex:none}.bill-scan-notice .x{pointer-events:auto;color:inherit}
+@media(max-width:860px){.bill-scan-notice{top:72px;left:12px;right:12px;width:auto}}
+@media print{.bill-scan-notice{display:none!important}}
 @keyframes tin{from{opacity:0;transform:translateY(-10px) scale(.96)}to{opacity:1;transform:none}}
 .modal{position:fixed;inset:0;background:rgba(23,22,27,.36);z-index:80;display:grid;place-items:center;padding:16px;animation:fade .18s}
 @keyframes fade{from{opacity:0}}

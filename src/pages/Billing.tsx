@@ -1,7 +1,7 @@
 import { placeCode } from "../lib/states";
 import { selectedBox, mergeBoxLine, type BillingDraft } from "../lib/billingBox";
 import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Calculator, Plus } from "lucide-react";
 import { repeatedPosLine, validatePosLines } from "../lib/pos";
 import type { CalcTarget } from "../components/PosTools";
@@ -25,6 +25,7 @@ import { MicButton } from "../components/Voice";
 import { Modal, PhotoButton, Thumb, MoneyInput } from "../components/common";
 import { PrintBill, type PrintFormat } from "../components/Invoice";
 import { resolveBillingScan, withBillNames } from "../lib/billing-products";
+import { BillScanNotice, type BillScanFeedback } from "../components/BillScanNotice";
 
 /* The counter screen. Built like the shop's current PACKING SLIP: scan → lines → totals → save/print,
    every action on a function key, works with no internet (numbers come from this counter's own series). */
@@ -46,7 +47,10 @@ export default function Billing({ args }: { args: string[] }) {
   useEffect(() => { boxCountRef.current = b?.box_count || 0; }, [b?.id]);
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
   const linesPane = useRef<HTMLDivElement>(null);
-  const pendingScan = useRef<string | null>(null);
+  const pendingScan = useRef<{ id: string; added: number; repeated: boolean } | null>(null);
+  const scanSequence = useRef(0);
+  const [scanFeedback, setScanFeedback] = useState<BillScanFeedback | null>(null);
+  const dismissScanFeedback = useCallback(() => setScanFeedback(null), []);
   const [lastScanId, setLastScanId] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
   function showLine(id: string, revealPage = false) {
@@ -65,15 +69,17 @@ export default function Billing({ args }: { args: string[] }) {
   }
   useEffect(() => {
     if (!pendingScan.current) return;
-    const id = pendingScan.current; pendingScan.current = null;
-    setLastScanId(id); showLine(id);
+    const added = pendingScan.current; pendingScan.current = null;
+    setLastScanId(added.id); showLine(added.id);
+    const line = b?.items.find(l => l.id === added.id);
+    if (line) setScanFeedback({ sequence: ++scanSequence.current, line: { ...line }, added: added.added, repeated: added.repeated });
   }, [b]);
   useEffect(() => {
     if (!flashId) return;
     const timer = setTimeout(() => { rowRefs.current.get(flashId)?.classList.remove("flash"); setFlashId(null); }, 1600);
     return () => clearTimeout(timer);
   }, [flashId, b]);
-  useEffect(() => { setLastScanId(null); setFlashId(null); pendingScan.current = null; }, [b?.id]);
+  useEffect(() => { setLastScanId(null); setFlashId(null); setScanFeedback(null); pendingScan.current = null; }, [b?.id]);
   const [q, setQ] = useState("");
   const [cam, setCam] = useState(false);
   const [held, setHeld] = useState(false);
@@ -147,19 +153,20 @@ export default function Billing({ args }: { args: string[] }) {
     if (savingRef.current) return;
     const repeated = b?.items.some(l => l.product_id === p.id && l.box_no === boxRef.current);
     beep(repeated ? "repeat" : true);
-    if (repeated) toast((!pieces && !rate ? "Repeated item: quantity increased · " : "Repeated item: added as a separate line · ") + label(p));
     setB(x => {
       if (!x) return x;
-      const same = x.items.find(l => l.product_id === p.id && l.box_no === boxRef.current);
-      if (same && !pieces && !rate) {
-        pendingScan.current = same.id;
-        const named = p.item ? { item: p.item, type: p.type } : {}; // a scan that just learned the name updates the line too
-        return { ...x, items: x.items.map(l => l.id === same.id ? fixLine(l.pack > 1 && l.pkts > 0 ? { ...l, ...named, pkts: l.pkts + pkts } : { ...l, ...named, qty: l.qty + pkts * Math.max(1, l.pack) }) : l) };
-      }
       let line = lineFrom(p, boxRef.current, pkts, x.price_level || "wholesale");
       if (pieces) line = fixLine({ ...line, pkts: 0, qty: pieces });
       if (rate) line = fixLine({ ...line, rate: toPaise(rate) });
-      pendingScan.current = line.id;
+      // Full packets and remainder stickers must keep their own quantities/rates.
+      const same = x.items.find(l => l.product_id === p.id && l.box_no === boxRef.current && l.pack === line.pack && l.rate === line.rate);
+      if (same && !pieces && !rate) {
+        const named = p.item ? { item: p.item, type: p.type } : {}; // a scan that just learned the name updates the line too
+        const changed = fixLine(same.pack > 1 && same.pkts > 0 ? { ...same, ...named, pkts: same.pkts + pkts } : { ...same, ...named, qty: same.qty + pkts * Math.max(1, same.pack) });
+        pendingScan.current = { id: same.id, added: changed.qty - same.qty, repeated: true };
+        return { ...x, items: x.items.map(l => l.id === same.id ? changed : l) };
+      }
+      pendingScan.current = { id: line.id, added: line.qty, repeated: x.items.some(l => l.product_id === p.id && l.box_no === boxRef.current) };
       return { ...x, items: [...x.items, line] };
     });
   }
@@ -185,6 +192,7 @@ export default function Billing({ args }: { args: string[] }) {
   async function onCode(raw: string): Promise<string> {
     const r = raw.trim(); if (!r) return "";
     if (savingRef.current) return "Saving bill";
+    setScanFeedback(null);
     if (r.toLowerCase() === "bb") {
       const next = ++boxCountRef.current; boxRef.current = next; setBox(next); set({ box_count: next }); setQ("");
       beep(); toast("Box " + next); return "Box " + next;
@@ -196,7 +204,7 @@ export default function Billing({ args }: { args: string[] }) {
     }
     if (isRfidTag(r)) {
       const tag = normTag(r); setQ("");
-      if (!tagsRef.current.add(tag)) return "Tag already on this bill";
+      if (!tagsRef.current.add(tag)) { beep("repeat"); toast("Tag already on this bill — no extra quantity added"); return "Tag already on this bill"; }
       const tp = await findByScan(tag);
       if (!tp) {
         tagsRef.current.delete(tag);
@@ -343,27 +351,24 @@ export default function Billing({ args }: { args: string[] }) {
       if (savingRef.current) throw new Error("Wait for the bill to finish saving");
       const repeated = repeatedPosLine(b.items, line);
       beep(repeated ? "repeat" : true);
-      if (repeated) {
-        const merged = !mergeBoxLine([...b.items, line], line.id).some(l => l.id === line.id);
-        toast((merged ? "Repeated item: quantity increased · " : "Repeated item: added as a separate line · ") + line.item);
-      }
       setB(x => {
         if (!x) return x;
         const items = mergeBoxLine([...x.items, line], line.id);
-        pendingScan.current = items.some(l => l.id === line.id) ? line.id
+        const id = items.some(l => l.id === line.id) ? line.id
           : items.find(l => l.qty !== x.items.find(old => old.id === l.id)?.qty)?.id || line.id;
+        pendingScan.current = { id, added: line.qty, repeated: repeatedPosLine(x.items, line) };
         return { ...x, items };
       });
     }} onCustom={line => {
       if (savingRef.current) throw new Error("Wait for the bill to finish saving");
       const repeated = repeatedPosLine(b.items, line);
       beep(repeated ? "repeat" : true);
-      if (repeated) toast("Repeated custom item: added as a separate line · " + line.item);
-      pendingScan.current = line.id; setB(x => x && { ...x, items: [...x.items, line] });
+      pendingScan.current = { id: line.id, added: line.qty, repeated }; setB(x => x && { ...x, items: [...x.items, line] });
     }} /></Suspense>;
 
   return (
     <div className="pos">
+      {scanFeedback && createPortal(<BillScanNotice key={scanFeedback.sequence} feedback={scanFeedback} onClose={dismissScanFeedback} />, document.body)}
       <div className="pos-top card">
         {priv ? <div className="seg" role="group" aria-label="Bill type">
           <button aria-pressed={b.bill_type === "estimate"} onClick={() => set({ bill_type: "estimate" })}>Estimate</button>
