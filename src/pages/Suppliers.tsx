@@ -1,3 +1,4 @@
+import { byRollNo } from "../components/SupplierNo";
 import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -28,7 +29,7 @@ function SupplierList() {
   const [age, setAge] = useState(new Map<string, { d0_30: number; d31_60: number; d60: number; total: number }>());
   useEffect(() => { supplierBalances().then(setBal); supplierAging().then(setAge); }, [stamp, suppliers.length]);
   const list = useMemo(() => suppliers.filter(p => !q || ((p.vendor_code || "") + " " + p.name + " " + p.phone + " " + p.city).toLowerCase().includes(q.toLowerCase()))
-    .sort((a, z) => (bal.get(z.id) || 0) - (bal.get(a.id) || 0) || (a.vendor_code || "").localeCompare(z.vendor_code || "", "en", { numeric: true })), [suppliers, q, bal]);
+    .sort(byRollNo), [suppliers, q, bal]);   // roll numbers ascending, as on the shop's vendor list
   const total = [...bal.values()].reduce((a, v) => a + Math.max(0, v), 0);
   return <div>
     <Head title="Suppliers" sub={`${suppliers.length} suppliers · ${rupees(total)} payable`}>

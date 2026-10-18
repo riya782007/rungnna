@@ -16,6 +16,7 @@ import { directPrintSupported } from "../lib/tsc";
 import { currentStore } from "../lib/scope";
 import { toast } from "../lib/app";
 import { RackPicker } from "./RackPicker";
+import { SupplierNo } from "./SupplierNo";
 import { checkBill, checkSummary, matchSupplier, fallbackBillNo, type LineFix } from "../lib/billCheck";
 import { newParty } from "../lib/billing";
 
@@ -194,7 +195,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
   const ready4 = !busy && reviewed && !validation && !!d.supplier && !!d.rack && !!d.billNo.trim();
   /* a grey button with no reason sends the owner hunting: say exactly what is still missing */
   const missing = [
-    !d.supplier && (d.supplierName ? `add or choose the supplier (tap “+ Add ${d.supplierName.trim().toUpperCase()}”)` : "choose the supplier"),
+    !d.supplier && (d.supplierName ? `type the supplier's roll number, or tap “+ Add ${d.supplierName.trim().toUpperCase()}”` : "type the supplier's roll number"),
     !d.rack && "choose the location",
     !d.billNo.trim() && "enter the supplier bill no.",
     validation && validation.replace(/\.$/, "").replace(/^./, c => c.toLowerCase()),
@@ -241,12 +242,12 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         {d.check.doubts.map(x => <div key={"d" + x.line} className="sm">Line {x.line}: {x.why}. Check it against the bill.</div>)}
       </div>}
       <div className="grid g3">
-        <label className="f">Supplier<select className="in" value={d.supplier} onChange={e => set({ supplier: e.target.value })}><option value="">Select supplier</option>{suppliers.map(s => <option key={s.id} value={s.id}>{s.vendor_code ? s.vendor_code + " · " : ""}{s.name}</option>)}</select>
+        <div className="f"><SupplierNo suppliers={suppliers} id={d.supplier} onPick={s => set({ supplier: s?.id || "" })} />
           {!d.supplier && !!d.supplierName && <button type="button" className="linkbtn xs" style={{ textAlign: "left" }} onClick={async () => {
             const name = d.supplierName!.trim().toUpperCase();
             const sup = { ...newParty(name), kind: "supplier" as const };
             await put("parties", sup); set({ supplier: sup.id }); toast(`${name} added as a supplier`);
-          }}>+ Add “{d.supplierName.trim().toUpperCase()}” as a new supplier</button>}</label>
+          }}>+ Add “{d.supplierName.trim().toUpperCase()}” as a new supplier</button>}</div>
         <label className="f">Supplier bill no.<input className={"in" + (d.autoBillNo ? " auto-filled" : "")} value={d.billNo}
           title={d.autoBillNo ? "The bill printed no number, so its date and total stand in for one. That still stops the same bill being saved twice." : undefined}
           onChange={e => set({ billNo: e.target.value, autoBillNo: false })} /></label>

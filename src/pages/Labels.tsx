@@ -10,6 +10,7 @@ import { ownPayload } from "../lib/parse";
 import { blankProduct, saveProduct, findByScan, distinct, DEFAULT_ITEMS, DEFAULT_TYPES, label, itemCodeFor } from "../lib/products";
 import { Head, DeadToggle , MoneyInput } from "../components/common";
 import { RackPicker } from "../components/RackPicker";
+import { SupplierNo } from "../components/SupplierNo";
 import { WedgeInput } from "../components/Scanner";
 import { useApp, toast } from "../lib/app";
 import { can, roleName } from "../lib/roles";
@@ -252,7 +253,7 @@ export default function Labels({ args }: { args: string[] }) {
                 <label className="f">TK<input className="in mono" value={form.tk} onChange={e => set("tk", e.target.value.toUpperCase())} /></label>
                 <details className="label-advanced"><summary>More details</summary><div className="grid g2">
                 <label className="f">MODEL / ARTICLE No.<input className="in mono" value={form.model || ""} onChange={e => set("model", e.target.value.toUpperCase() || undefined)} placeholder="vendor's article no" /></label>
-                <VendorNo vendors={vendors} id={form.vendor_id} onPick={v => { set("vendor_id", v?.id); set("vendor_name", v?.name); }} />
+                <SupplierNo suppliers={vendors} id={form.vendor_id} label="VENDOR roll no." onPick={v => { set("vendor_id", v?.id); set("vendor_name", v?.name); }} />
                 <label className="f">ITEM CODE (old software)<input className="in mono" inputMode="numeric" value={form.item_code || ""} placeholder="auto" onChange={e => set("item_code", e.target.value.replace(/\D/g, "") || undefined)} /></label>
                 {can(me, "rates") && <label className="f">COST ₹
                   <input className="in mono" inputMode="decimal" value={cost} placeholder="enter cost" onChange={e => applyCost(e.target.value)} /></label>}
@@ -330,27 +331,6 @@ export function LabelView({ cfg, p, qtyOnLabel = 1, line }: { cfg: LabelCfg; p: 
         {s.code && <div style={{ fontFamily: "monospace", fontSize: fs * 0.85 + "pt" }}>{p.code}</div>}
       </div>
     </div>
-  );
-}
-
-/* The vendor by its number ("51"), the way the old software takes it, not a long list of names.
-   The name shows underneath only to confirm the number was right. */
-function VendorNo({ vendors, id, onPick }: { vendors: { id: string; name: string; vendor_code?: string }[]; id?: string; onPick: (v?: { id: string; name: string }) => void }) {
-  const cur = vendors.find(v => v.id === id);
-  const [text, setText] = useState(cur ? cur.vendor_code || cur.name : "");
-  useEffect(() => { setText(cur ? cur.vendor_code || cur.name : ""); }, [id]);
-  const find = (t: string) => {
-    const k = t.trim().toUpperCase(); if (!k) return undefined;
-    return vendors.find(v => (v.vendor_code || "").toUpperCase() === k) || vendors.find(v => v.name.toUpperCase() === k);
-  };
-  const hit = find(text);
-  return (
-    <label className="f">VENDOR No.
-      <input className="in mono" value={text} list="vendor-nos" placeholder="e.g. 51" inputMode="text"
-        onChange={e => { const t = e.target.value.toUpperCase(); setText(t); const v = find(t); onPick(v ? { id: v.id, name: v.name } : undefined); }} />
-      <datalist id="vendor-nos">{vendors.filter(v => v.vendor_code).map(v => <option key={v.id} value={v.vendor_code} />)}</datalist>
-      {text.trim() && <span className={"xs " + (hit ? "mut" : "bad-text")}>{hit ? hit.name : `No vendor has number ${text.trim()}`}</span>}
-    </label>
   );
 }
 
