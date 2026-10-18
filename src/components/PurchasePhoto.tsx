@@ -30,7 +30,12 @@ type Draft = { store: string; rows: PhotoRow[]; supplier: string; billNo: string
   supplierName?: string;   // as read from the bill, for one-tap "add this supplier"
   autoBillNo?: boolean };  // the bill printed no number; one was made from its date and total
 
-export default function PurchasePhoto({ by }: { by: string }) {
+/* "Take photo" from anywhere (the AI strip on every Stock tab) opens this reader's camera: directly when the reader
+   is in a box of its own (`camera`), or by event when it is already on the page (Labels, Stock in). */
+export const BILL_CAMERA = "rj-bill-camera";
+export function askBillCamera() { (window as any).__rjBillCamera = true; window.dispatchEvent(new Event(BILL_CAMERA)); }
+
+export default function PurchasePhoto({ by, camera = false }: { by: string; camera?: boolean }) {
   const [d, setD] = useState<Draft>({ store: currentStore(), rows: [], supplier: "", billNo: "", rack: "", warnings: "", total: "" });
   const [ready, setReady] = useState(false), [busy, setBusy] = useState(false), [reviewed, setReviewed] = useState(false), [error, setError] = useState("");
   const [connection, setConnection] = useState(""), [checking, setChecking] = useState(false);
@@ -48,7 +53,13 @@ export default function PurchasePhoto({ by }: { by: string }) {
   const printer = useLabelPrint(cfg);
   const [saved, setSaved] = useState<Purchase | null>(null);
   const lock = useRef(false), file = useRef<HTMLInputElement>(null);
-  const [cam, setCam] = useState(false);
+  const [cam, setCam] = useState(camera);
+  useEffect(() => {
+    const open = () => { (window as any).__rjBillCamera = false; setCam(true); };
+    if ((window as any).__rjBillCamera) open();          // asked for before this reader had loaded
+    window.addEventListener(BILL_CAMERA, open);
+    return () => window.removeEventListener(BILL_CAMERA, open);
+  }, []);
   const suppliers = useLiveQuery(() => db.parties.filter(p => p.kind === "supplier" && !p.deleted).toArray(), [], []);
 
   useEffect(() => { getSetting<Draft | null>("purchase_photo_draft", null).then(old => { if (old?.store === currentStore()) setD(old); setReady(true); }); }, []);

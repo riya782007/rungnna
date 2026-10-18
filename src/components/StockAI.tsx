@@ -32,7 +32,13 @@ const HAS_READER = ["labels", "stockin"];
 
 export default function StockAI({ route = "" }: { route?: string }) {
   const { me, setMe } = useApp();
-  const [bill, setBill] = useState(false);
+  const [bill, setBill] = useState<false | "upload" | "camera">(false);
+  /* the reader already on this page (Labels, Stock in): open its box and its camera there, not a second copy */
+  const cameraHere = () => {
+    const box = document.querySelector<HTMLDetailsElement>("details.purchase-import");
+    if (box) { box.open = true; box.scrollIntoView({ behavior: "smooth", block: "start" }); }
+    void import("./PurchasePhoto").then(m => m.askBillCamera());
+  };
   const [open, setOpen] = useState(false);
   const [target, setTarget] = useState<BulkTarget>("missing");
   const [busy, setBusy] = useState(false);
@@ -116,11 +122,12 @@ export default function StockAI({ route = "" }: { route?: string }) {
 
         {!busy && <>
           <div className="row">
-            <span className="sm grow">Read a purchase bill from its photo</span>
+            <span className="sm grow">Read a purchase bill from its photo: labels print and product pages are drafted</span>
             {!mayBill ? <Locked />
               : HAS_READER.includes(route)
-                ? <span className="xs mut">Open “From a purchase bill” below ↓</span>
-                : <button className="btn p" onClick={() => setBill(true)}><Camera size={15} />Upload bill</button>}
+                ? <button className="btn p" onClick={cameraHere}><Camera size={15} />Take photo of bill</button>
+                : <><button className="btn p" onClick={() => setBill("camera")}><Camera size={15} />Take photo of bill</button>
+                  <button className="btn" onClick={() => setBill("upload")}>Upload photo</button></>}
           </div>
 
           {!mayWrite && <div className="row"><span className="sm grow">Write product pages with AI</span><Locked /></div>}
@@ -157,7 +164,7 @@ export default function StockAI({ route = "" }: { route?: string }) {
 
       {bill && <Modal title="Read a purchase bill" onClose={() => setBill(false)}>
         <Suspense fallback={<div role="status">Loading bill reader…</div>}>
-          <PurchasePhoto by={me?.id || ""} />
+          <PurchasePhoto by={me?.id || ""} camera={bill === "camera"} />
         </Suspense>
       </Modal>}
     </div>
