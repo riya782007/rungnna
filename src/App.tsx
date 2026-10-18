@@ -238,9 +238,9 @@ class Guard extends Component<{ children: ReactNode }, { err: Error | null }> {
 
 function UpdateBar() {
   const [ready, setReady] = useState(false);
-  useEffect(() => onUpdate(() => setReady(true)), []);
+  useEffect(() => onUpdate(setReady), []);
   if (!ready) return null;
-  return <div className="updatebar">New version ready<button className="btn sm" onClick={() => applyUpdate()}>Update</button></div>;
+  return <div className="updatebar">New version ready<button className="btn sm" onClick={() => { setReady(false); void applyUpdate(); }}>Update</button></div>;
 }
 
 function NoAccess() {
