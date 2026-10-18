@@ -1,5 +1,6 @@
 import { db, getSetting, setSetting, type Config } from "./db";
 import { now } from "./db";
+import { requirePerm } from "./scope";
 
 /* ===========================================================================
    Consistent cost-code + price engine.
@@ -77,6 +78,7 @@ export async function getRule(): Promise<PricingRule> {
 }
 
 export async function saveRule(rule: PricingRule) {
+  requirePerm("settings.manage", "changing the pricing rule");
   const r = normalizeRule(rule);
   r.updated_at = now();
   // config table syncs to all devices via put(); also keep a device-local copy for instant offline reads.
@@ -130,6 +132,14 @@ function roundRupees(rupees: number, to: RoundTo, dir: "nearest" | "up"): number
 }
 
 /* Sell price (paise) computed from cost (paise) by the rule. Deterministic. */
+/* Shop rule (owner, 18 Oct): the rate on a label is always an EVEN number of whole rupees. Half of it is the
+   wholesale rate, and "975" would make that ₹37.50: so 75 → 76, 24.50 → 26 (up to the next even rupee). */
+export function evenRate(paise: number): number {
+  if (!(paise > 0)) return 0;
+  const r = Math.ceil(Math.round(paise) / 100);
+  return (r % 2 ? r + 1 : r) * 100;
+}
+
 export function sellFromCost(costPaise: number, rule: PricingRule): number {
   const cost = costPaise / 100;
   const m = rule.margin;
@@ -137,7 +147,7 @@ export function sellFromCost(costPaise: number, rule: PricingRule): number {
   if (m.mode === "multiply") sell = cost * (m.factor || 1);
   else if (m.mode === "divide") sell = m.factor ? cost / m.factor : cost;
   else sell = cost * (1 + (m.percent || 0) / 100);
-  return Math.round(roundRupees(sell, m.round_to, m.round_dir) * 100);
+  return evenRate(Math.round(roundRupees(sell, m.round_to, m.round_dir) * 100));
 }
 
 /* The encrypted cost code — the same cost ALWAYS gives the same code. */

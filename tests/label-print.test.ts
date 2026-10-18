@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { DEFAULT_CFG, validateLabelPrint, afterCheckRow, labelSetupKey, PrintSheet } from "../src/pages/Labels";
+import { DEFAULT_CFG, validateLabelPrint, runBatches, printerSig, PrintSheet } from "../src/pages/Labels";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { blankProduct } from "../src/lib/products";
@@ -8,20 +8,19 @@ it("accepts the shop's default label format", () => { expect(() => validateLabel
 it("rejects broken roll dimensions rather than looping or spooling blank paper", () => {
   for (const change of [{ cols: 0 }, { cols: 1.5 }, { w: NaN }, { h: 0 }, { gapY: -1 }]) expect(() => validateLabelPrint({ ...DEFAULT_CFG, ...change }, jobs)).toThrow();
 });
-it("counts an accepted check row once even when it spans different products", () => {
-  const second = { ...jobs[0], p: { ...jobs[0].p, item: "F-RING" }, copies: 4 };
-  expect(afterCheckRow([{ ...jobs[0], copies: 2 }, second], 3)).toEqual([{ ...second, copies: 3 }]);
-  expect(afterCheckRow(jobs, 4)).toEqual([]);
+it("counts a checked row once, then prints the remaining labels", () => {
+  expect(runBatches(4, 3, 60, true, false)).toEqual([{ from: 0, to: 3 }, { from: 3, to: 4 }]);
+  expect(runBatches(2, 3, 60, true, false)).toEqual([{ from: 0, to: 2 }]);
 });
 it("requires another check after changing printer or alignment", () => {
-  const key = labelSetupKey(DEFAULT_CFG);
-  expect(labelSetupKey({ ...DEFAULT_CFG, checked: key })).toBe(key);
-  expect(labelSetupKey({ ...DEFAULT_CFG, offX: 0.5 })).not.toBe(key);
-  expect(labelSetupKey({ ...DEFAULT_CFG, output: "qz", qzPrinter: "TSC" })).not.toBe(key);
+  const key = printerSig(DEFAULT_CFG);
+  expect(printerSig({ ...DEFAULT_CFG, offX: DEFAULT_CFG.offX + 0.5 })).not.toBe(key);
+  expect(printerSig({ ...DEFAULT_CFG, output: "qz", qzPrinter: "TSC" })).not.toBe(key);
+  expect(printerSig({ ...DEFAULT_CFG, output: "qz", qzPrinter: "TSC2" })).not.toBe(printerSig({ ...DEFAULT_CFG, output: "qz", qzPrinter: "TSC" }));
 });
-it("prints 3-across browser pages with the gap managed by the driver", () => {
+it("prints 3-across browser pages with stock dimensions managed by the driver", () => {
   const html = renderToStaticMarkup(createElement(PrintSheet, { cfg: DEFAULT_CFG, jobs: Array.from({ length: 4 }, () => jobs[0]) }));
-  expect(html).toContain("@page{size:104mm 15mm;margin:0}");
+  expect(html).toContain("@page{margin:0}");
   expect(html.match(/class="lbl"/g)).toHaveLength(4);
   expect(html.match(/page-break-after:always/g)).toHaveLength(1);
 });

@@ -5,12 +5,13 @@ import { startSync, onSync, type SyncState } from "./lib/sync";
 import { warmScanner } from "./components/Scanner";
 import { SearchPalette } from "./components/Search";
 import { Icon } from "./components/Icon";
-import { can } from "./lib/roles";
+import { can, roleName } from "./lib/roles";
 import { t, initLang, onLang } from "./lib/i18n";
 import Home from "./pages/Home";
 import { WhoAreYou } from "./pages/Settings";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "./lib/db";
+const StockAI = lazy(() => import("./components/StockAI"));
 import { OwnerGate } from "./components/OwnerSecurity";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { getSetting, setSetting } from "./lib/db";
@@ -38,19 +39,30 @@ const Stores = lazy(() => import("./pages/Stores"));
 const Import = lazy(() => import("./pages/Import"));
 const Remote = lazy(() => import("./pages/Remote"));
 const Settings = lazy(() => import("./pages/Settings"));
+const Roles = lazy(() => import("./pages/Roles"));
+const AddInventory = lazy(() => import("./pages/AddInventory"));
+const Dealers = lazy(() => import("./pages/Dealers"));
 
 /* Five places. Everything else is a tab inside one of them. */
 type Sec = { key: string; label: string; icon: string; tabs?: [string, string][] };
 const SECTIONS: Sec[] = [
   { key: "home", label: "Home", icon: "home" },
-  { key: "sell", label: "Sell", icon: "sell", tabs: [["bill", "New bill"], ["bills", "Bills"], ["customers", "Customers"], ["suppliers", "Suppliers"], ["vouchers", "Vouchers"]] },
-  { key: "stock", label: "Stock", icon: "stock", tabs: [["products", "Products"], ["stockin", "Stock in"], ["scan", "Scan & record"], ["recheck", "Recheck"], ["rfid", "RFID count"], ["labels", "Labels"], ["catalogue", "Catalogue"], ["racks", "Racks"], ["move", "Move"], ["activity", "Activity"], ["import", "Import"]] },
+  { key: "sell", label: "Sell", icon: "sell", tabs: [["bill", "New bill"], ["bills", "Bills"], ["customers", "Customers"], ["suppliers", "Suppliers"], ["dealers", "Trade orders"], ["vouchers", "Vouchers"]] },
+  { key: "stock", label: "Stock", icon: "stock", tabs: [["products", "Products"], ["add", "Add inventory"], ["stockin", "Stock in"], ["scan", "Scan & record"], ["recheck", "Recheck"], ["rfid", "RFID count"], ["labels", "Labels"], ["catalogue", "Catalogue"], ["racks", "Racks"], ["move", "Move"], ["activity", "Activity"], ["import", "Import"]] },
   { key: "reports", label: "Reports", icon: "sales" },
   { key: "ask", label: "Ask", icon: "ask" },
   { key: "settings", label: "Settings", icon: "settings" },
 ];
-const sectionOf = (r: string) => (["bill", "bills", "customers", "suppliers", "vouchers"].includes(r) ? "sell" : ["products", "product", "stockin", "scan", "recheck", "rfid", "labels", "catalogue", "racks", "move", "activity", "import"].includes(r) ? "stock" : r === "ask" || r === "settings" || r === "reports" ? r : "home");
+const sectionOf = (r: string) => (["bill", "bills", "customers", "suppliers", "dealers", "vouchers"].includes(r) ? "sell" : ["products", "product", "add", "stockin", "scan", "recheck", "rfid", "labels", "catalogue", "racks", "move", "activity", "import"].includes(r) ? "stock" : r === "ask" || r === "settings" || r === "reports" ? r : r === "roles" ? "settings" : "home");
 const lastTab: Record<string, string> = { sell: "bill", stock: "products" };
+/* What each screen needs (lib/roles). A tab you can't use is not shown. */
+const ROUTE_PERM: Record<string, string> = {
+  bill: "billing.sell", bills: "billing.sell", customers: "customers.manage", suppliers: "suppliers.manage", vouchers: "money.vouchers",
+  reports: "reports.view", ask: "ai.use", scan: "stock.in", stockin: "stock.in", recheck: "stock.count", rfid: "stock.count",
+  labels: "labels.print", catalogue: "catalogue.share", racks: "racks.manage", move: "stock.move", products: "stock.view", product: "stock.view",
+  activity: "stock.view", add: "products.edit", dealers: "dealers.manage", import: "import.data", bank: "bank.reconcile", stores: "stores.transfer", roles: "staff.manage",
+  settings: "settings.manage",
+};
 
 function useSync() {
   const [s, setS] = useState<SyncState>();
@@ -93,24 +105,40 @@ function Shell() {
     };
     addEventListener("keydown", f); return () => removeEventListener("keydown", f);
   }, [route]);
+  /* A dealer's order used to wait until somebody happened to open Sell › Trade orders.
+     Count the orders and sign-ups that need a person, and badge the section.
+     Must stay ABOVE the early returns below — every hook runs on every render. */
+  const waiting = useLiveQuery(async () => {
+    if (!me || !can(me, "dealers.manage")) return 0;
+    const [orders, signups] = await Promise.all([
+      db.trade_orders.filter(o => !o.deleted && o.status === "new").count(),
+      db.dealers.filter(d => !d.deleted && d.status === "pending").count(),
+    ]);
+    return orders + signups;
+  }, [me?.id, me?.role, me?.role_id], 0);
+
   if (!ready) return null;
   if (!me) return <WhoAreYou />;
 
-  const visible = SECTIONS.filter(s => (s.key !== "sell" || can(me, "bill")) && (s.key !== "ask" || can(me, "ai")) && (s.key !== "reports" || can(me, "reports")));
+  const ok = (r: string) => !ROUTE_PERM[r] || can(me, ROUTE_PERM[r]);
+  const visible = SECTIONS.filter(s => s.tabs ? s.tabs.some(([k]) => ok(k)) : ok(s.key));
   const cur = SECTIONS.find(s => s.key === sec)!;
-  const hrefOf = (s: Sec) => "#/" + (s.tabs ? lastTab[s.key] || s.tabs[0][0] : s.key);
-  const tabs = cur.tabs?.filter(([k]) => (k !== "bill" || can(me, "bill")) && (k !== "import" || can(me, "settings")) && (k !== "suppliers" || can(me, "rates")));
+  const hrefOf = (s: Sec) => "#/" + (s.tabs ? (ok(lastTab[s.key]) && lastTab[s.key]) || s.tabs.find(([k]) => ok(k))?.[0] || s.tabs[0][0] : s.key);
+  const tabs = cur.tabs?.filter(([k]) => ok(k));
+  // what this person's role is hiding in this section, so a missing screen reads as
+  // "ask for the permission" instead of "the feature is gone"
+  const hidden = (cur.tabs || []).filter(([k]) => !ok(k)).map(([, label]) => label);
   const tabOn = (k: string) => route === k || (k === "products" && route === "product");
 
   let page: ReactNode;
   switch (route) {
-    case "bill": page = can(me, "bill") ? <Billing args={args} /> : <NoAccess />; break;
-    case "bills": page = can(me, "bill") ? <Bills args={args} /> : <NoAccess />; break;
-    case "customers": page = can(me, "bill") ? <Customers args={args} /> : <NoAccess />; break;
-    case "suppliers": page = can(me, "rates") ? <Suppliers args={args} /> : <NoAccess />; break;
-    case "vouchers": page = can(me, "bill") ? <Vouchers /> : <NoAccess />; break;
-    case "reports": page = can(me, "reports") ? <Reports /> : <NoAccess />; break;
-    case "ask": page = can(me, "ai") ? <Ask /> : <NoAccess />; break;
+    case "bill": page = <Billing args={args} />; break;
+    case "bills": page = <Bills args={args} />; break;
+    case "customers": page = <Customers args={args} />; break;
+    case "suppliers": page = <Suppliers args={args} />; break;
+    case "vouchers": page = <Vouchers />; break;
+    case "reports": page = <Reports />; break;
+    case "ask": page = <Ask />; break;
     case "scan": page = <Scan />; break;
     case "recheck": page = <Recheck args={args} />; break;
     case "rfid": page = <RfidCount />; break;
@@ -123,28 +151,35 @@ function Shell() {
     case "activity": page = <Activity />; break;
     case "stockin": page = <StockIn args={args} />; break;
     case "remote": page = <Remote id={args[0] || ""} />; break;
-    case "import": page = me.role === "owner" ? <Import /> : <NoAccess />; break;
-    case "bank": page = me.role === "owner" ? <Bank /> : <NoAccess />; break;
+    case "import": page = <Import />; break;
+    case "bank": page = <Bank />; break;
     case "stores": page = <Stores />; break;
     case "settings": page = <Settings />; break;
+    case "roles": page = <Roles />; break;
+    case "add": page = <AddInventory />; break;
+    case "dealers": page = <Dealers />; break;
     default: page = <Home />;
   }
+  if (!ok(route)) page = <NoAccess />;
 
   return (
     <div className={"shell" + (compact ? " compact-menu" : "") + (route === "bill" ? " billing-shell" : "")}>
       <aside className="rail">
-        <div className="brand"><span className="mark">R</span><div><b>Rungnna</b><span>Jewellery &amp; Co</span></div></div>
+        {/* the R mark is what people tap first, so it opens and closes the menu: on a desktop the
+            collapsed rail had no other way back, the toggle lives in the phone-only top bar */}
+        <div className="brand"><button type="button" className="mark markbtn" onClick={() => { setCompact(!compact); setSetting("compact_menu", !compact); }}
+          title={compact ? "Show menu" : "Hide menu"} aria-label={compact ? "Show menu" : "Hide menu"} aria-expanded={!compact}>R</button><div><b>Rungnna</b><span>Jewellery &amp; Co</span></div></div>
         {can(me, "bill") && <a href="#/bill" className="newbill"><Icon n="plus" size={18} /><span className="t">{t("New bill")}</span><kbd style={{ background: "rgba(255,255,255,.15)", color: "#fff" }}>F2</kbd></a>}
         <button className="railsearch" onClick={() => setPal(true)}><Icon n="search" size={17} /><span className="grow">Search</span><kbd>Ctrl K</kbd></button>
-        {visible.map(s => <a key={s.key} href={hrefOf(s)} title={t(s.label)} aria-label={t(s.label)} className={"nav" + (sec === s.key ? " on" : "")}><Icon n={s.icon} /><span className="grow">{t(s.label)}</span></a>)}
+        {visible.map(s => <a key={s.key} href={hrefOf(s)} title={t(s.label)} aria-label={t(s.label) + (s.key === "sell" && waiting ? ` · ${waiting} waiting` : "")} className={"nav" + (sec === s.key ? " on" : "")}><Icon n={s.icon} /><span className="grow">{t(s.label)}</span>{s.key === "sell" && waiting > 0 && <span className="navbadge" title={`${waiting} trade order${waiting > 1 ? "s" : ""} / dealer sign-up${waiting > 1 ? "s" : ""} waiting`}>{waiting > 9 ? "9+" : waiting}</span>}</a>)}
         {me.role === "owner" && <label className="f store-switch">Store<select className="in" value={store} onChange={e => switchStore(e.target.value)}>{stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>}
-        <a className="nav" href="#/stores" title="Transfers and stores" aria-label="Transfers and stores"><Icon n="stock" /><span>Transfers{me.role === "owner" ? " & stores" : ""}</span></a>
-        {me.role === "owner" && <a className="nav" href="#/bank" title="Bank reconciliation" aria-label="Bank reconciliation"><Icon n="sales" /><span>Bank reconciliation</span></a>}
+        {can(me, "stores.transfer") && <a className="nav" href="#/stores" title="Transfers and stores" aria-label="Transfers and stores"><Icon n="stock" /><span>Transfers{me.role === "owner" ? " & stores" : ""}</span></a>}
+        {can(me, "bank.reconcile") && <a className="nav" href="#/bank" title="Bank reconciliation" aria-label="Bank reconciliation"><Icon n="sales" /><span>Bank reconciliation</span></a>}
         <div className="railfoot">
           <Status />
           <button className="me" onClick={() => setMe(null)} title="Switch person">
             <span className="av">{me.name.slice(0, 1).toUpperCase()}</span>
-            <span className="grow"><b className="sm">{me.name}</b><small>{me.role} · tap to switch</small></span><Icon n="lock" size={16} />
+            <span className="grow"><b className="sm">{me.name}</b><small>{roleName(me)} · tap to switch</small></span><Icon n="lock" size={16} />
           </button>
         </div>
       </aside>
@@ -160,15 +195,21 @@ function Shell() {
         {tabs && tabs.length > 1 && (
           <div className={"subnav" + (scrolled ? " scrolled" : "")}>
             <nav className="tabs">{tabs.map(([k, label]) => <a key={k} href={"#/" + k} className={tabOn(k) ? "on" : ""} ref={el => { if (el && tabOn(k)) el.scrollIntoView({ block: "nearest", inline: "center" }); }}>{t(label)}</a>)}</nav>
+            {!!hidden.length && <span className="xs mut tabs-hidden" title={hidden.join(", ")}>
+              {hidden.length} more {hidden.length === 1 ? "screen needs" : "screens need"} another role — <button type="button" className="linkbtn" onClick={() => setMe(null)}>switch person</button>
+            </span>}
             <span className="grow" /><Status />
           </div>)}
         <main className={"page" + (route === "bill" ? " wide" : "")}>
-          <Guard key={store + route + (args[0] || "")}><Suspense fallback={<Loading />}><div className="pagein">{page}</div></Suspense></Guard>
+          <Guard key={store + route + (args[0] || "")}>
+            {sec === "stock" && <Suspense fallback={null}><StockAI route={route} /></Suspense>}
+            <Suspense fallback={<Loading />}><div className="pagein">{page}</div></Suspense>
+          </Guard>
         </main>
       </div>
       <nav className="tabbar">
         {[visible.find(s => s.key === "home"), visible.find(s => s.key === "sell")].filter(Boolean).map(s => <a key={s!.key} href={hrefOf(s!)} className={sec === s!.key ? "on" : ""}><Icon n={s!.icon} size={22} />{t(s!.label)}</a>)}
-        <a href="#/stockin" className="fab"><span className="c"><Icon n="scan" size={24} sw={2} /></span></a>
+        <a href={ok("stockin") ? "#/stockin" : "#/"} className="fab"><span className="c"><Icon n="scan" size={24} sw={2} /></span></a>
         {[visible.find(s => s.key === "stock"), visible.find(s => s.key === "reports") || visible.find(s => s.key === "ask") || visible.find(s => s.key === "settings")].filter(Boolean).map(s => <a key={s!.key} href={hrefOf(s!)} className={sec === s!.key ? "on" : ""}><Icon n={s!.icon} size={22} />{t(s!.label)}</a>)}
       </nav>
       {pal && <SearchPalette onClose={() => setPal(false)} />}
@@ -197,9 +238,9 @@ class Guard extends Component<{ children: ReactNode }, { err: Error | null }> {
 
 function UpdateBar() {
   const [ready, setReady] = useState(false);
-  useEffect(() => onUpdate(() => setReady(true)), []);
+  useEffect(() => onUpdate(setReady), []);
   if (!ready) return null;
-  return <div className="updatebar">New version ready<button className="btn sm" onClick={() => applyUpdate()}>Update</button></div>;
+  return <div className="updatebar">New version ready<button className="btn sm" onClick={() => { setReady(false); void applyUpdate(); }}>Update</button></div>;
 }
 
 function NoAccess() {

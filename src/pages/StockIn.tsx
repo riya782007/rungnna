@@ -11,7 +11,7 @@ import { rupees, toPaise, when } from "../lib/format";
 import { CameraScanner, useScannerGun } from "../components/Scanner";
 import { LinkRfid } from "../components/LinkRfid";
 import { isRfidTag, normTag, TagSet, Recent } from "../lib/rfid";
-import { Head, LocationSelect, PhotoButton, Modal, LOC_PREFIX, useLocations } from "../components/common";
+import { Head, LocationSelect, PhotoButton, Modal, LOC_PREFIX, useLocations , MoneyInput } from "../components/common";
 import { parseRackScan } from "../lib/rackLabel";
 import { Icon } from "../components/Icon";
 import { NameItemCodes, unnamedCodes } from "../components/NameItemCodes";
@@ -112,7 +112,7 @@ function StockInSession() {
   return (
     <div style={{ paddingBottom: 80 }}>
       <Head title="Stock in" sub="Stand at the rack, scan every packet, save once. New labels become products by themselves." />
-      {me?.role === "owner" && <details className="purchase-import"><summary>Purchase bill photos / manual purchase entry</summary><Suspense fallback={<div role="status">Loading purchase entry…</div>}><PurchasePhoto by={me.id} /></Suspense></details>}
+      {can(me, "purchases.photo") && <details className="purchase-import"><summary>Purchase bill photos / manual purchase entry</summary><Suspense fallback={<div role="status">Loading purchase entry…</div>}><PurchasePhoto by={me?.id || ""} /></Suspense></details>}
       <div className="split">
         <div className="stack">
           <div className="card pad stack">
@@ -147,7 +147,7 @@ function StockInSession() {
                       <span className="xs mut">pkt</span></span>
                   : <input className="cell r" style={{ width: 60 }} inputMode="numeric" value={l.qty} onChange={e => setLine(l.id, { qty: parseInt(e.target.value) || 0 })} />}
                 <b className="mono" style={{ width: 56, textAlign: "right" }}>{lineQty(l)}</b>
-                {seeCost && <input className="cell r" style={{ width: 70 }} inputMode="decimal" placeholder="cost" value={l.cost ? l.cost / 100 : ""} onChange={e => setLine(l.id, { cost: toPaise(e.target.value) })} />}
+                {seeCost && <MoneyInput className="cell r" style={{ width: 70 }} placeholder="cost" paise={l.cost} onPaise={v => setLine(l.id, { cost: v })} />}
                 <button className="x" aria-label="Remove" onClick={() => {
                   const codes = new Set(products.find(x => x.id === l.product_id)?.barcodes || []);
                   (p.rfid_tags || []).forEach(tg => codes.has(tg) && tagsRef.current.delete(tg));

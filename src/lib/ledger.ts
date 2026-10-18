@@ -5,6 +5,7 @@ import { rupees } from "./format";
 import { isOpen, isEstimate } from "./privacy";
 import { Pdf, fit } from "./pdf";
 import { assertUnlocked } from "./finance";
+import { requirePerm } from "./scope";
 
 /* A customer's account, the way a khata reads: what they bought (debit), what they paid (credit), balance. */
 export type Entry = { at: string; kind: "opening" | "bill" | "paid" | "receipt" | "return" | "refund"; ref: string; id?: string; debit: number; credit: number; balance: number; note?: string };
@@ -44,6 +45,7 @@ export async function ledger(party: Party): Promise<{ entries: Entry[]; balance:
 
 /* Receive money: clears the opening balance first, then the oldest unpaid bills. Anything extra stays as advance. */
 export async function receive(party: Party, amount: number, mode: Payment["mode"], note: string, by: string, at = now()): Promise<Receipt> {
+  requirePerm("receipts.take", "taking a payment");
   return db.transaction("rw", [db.bills, db.receipts, db.settings, db.stores, db.config, db.outbox], async () => {
   await assertUnlocked(at);
   if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error("Enter a positive amount");

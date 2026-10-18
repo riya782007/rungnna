@@ -1,13 +1,21 @@
-/* Rungnna Shop OS — one typeface, one accent, lots of air. */
+/* Rungnna Shop OS — emerald & gold on ivory (the house look shared with the storefront).
+   Screens only: bills and labels print in plain black on white (see .inv / .lbl), exactly as before. */
 :root{
-  --bg:#F8F9FA; --surface:#FFFFFF; --ink:#202124; --ink-2:#3C4043; --muted:#62676D; --line:#DADCE0; --line-2:#EEF0F2; --fill:#F1F3F4;
-  --gold:#B8903F; --gold-l:#F5EEDF; --gold-d:#8C6A26; --ok:#1F7A5C; --ok-l:#E6F3ED; --bad:#B4443E; --bad-l:#FBECEA; --warn:#9A6A00; --warn-l:#FFF3DA;
+  --bg:#FAF6EF; --surface:#FFFFFF; --ink:#241B2E; --ink-2:#3D3346; --muted:#6B6175; --line:#E7DBC6; --line-2:#F1E9DA; --fill:#F2EADA;
+  --gold:#C8A24C; --gold-l:#F7EED8; --gold-d:#A07E2E;
+  /* readable-on-tint variants: --gold at 2.4:1 failed the 3:1 non-text floor for a focus ring,
+     and --gold-d on --gold-l was 3.3:1 for 11px pill text. Measured, not guessed. */
+  --gold-ink:#7A5E1E;        /* 5.3:1 on --gold-l */
+  --focus:var(--gold-d);     /* 3.8:1 on white */
+  --emerald:#0F5C4D; --emerald-dk:#0A4034; --emerald-lt:#2E8573; --emerald-mist:#E6F0ED;
+  --ok:#0F5C4D; --ok-l:#E6F0ED; --bad:#9C3F57; --bad-l:#F8E8ED; --warn:#7D5708; --warn-l:#FBF1D9;
   /* legacy names used inline by pages */
-  --ivory:var(--bg); --cream:var(--fill); --sand:var(--line); --white:#fff; --em:var(--ink); --em-d:var(--ok); --em-m:var(--ok-l);
-  --rose:var(--bad); --wine:var(--bad);
-  --r:16px; --sh:0 1px 2px rgba(23,22,27,.04),0 8px 24px -16px rgba(23,22,27,.18);
+  --ivory:var(--bg); --cream:var(--fill); --sand:var(--line); --white:#fff; --em:var(--emerald); --em-d:var(--emerald-dk); --em-m:var(--emerald-mist);
+  --rose:var(--bad); --wine:#6E2238;
+  --r:16px; --sh:0 1px 2px rgba(36,27,46,.04),0 10px 30px -16px rgba(36,27,46,.20); --sh-gold:0 8px 30px -8px rgba(200,162,76,.35);
   --ease:cubic-bezier(.2,.8,.2,1);
-  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Inter","Segoe UI",Roboto,"Noto Sans",system-ui,sans-serif;
+  --font:"Plus Jakarta Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans",system-ui,sans-serif;
+  --display:"Cormorant Garamond",Georgia,"Times New Roman",serif;
   color-scheme:light;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -15,7 +23,8 @@ html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--fon
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
 a{color:inherit}
-:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.sec-title{font-family:var(--display);font-size:19px;font-weight:700;letter-spacing:0}
 ::selection{background:var(--gold-l)}
 .mono{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
 .disp{font-weight:700;letter-spacing:-.02em}
@@ -27,15 +36,16 @@ h1,h2,h3{margin:0;letter-spacing:-.01em}
 .rail{background:var(--surface);border-right:1px solid var(--line);position:sticky;top:0;height:100vh;display:flex;flex-direction:column;padding:18px 12px;gap:2px;overflow:auto}
 .brand{display:flex;gap:10px;align-items:center;padding:2px 8px 16px}
 .mark{width:34px;height:34px;flex:none;border-radius:10px;display:grid;place-items:center;background:linear-gradient(145deg,#D9B869,#9C7630);color:#2A1E05;font:800 17px/1 var(--font);box-shadow:inset 0 1px 0 rgba(255,255,255,.35)}
-.brand b{display:block;font-weight:700;font-size:16px;letter-spacing:-.01em}
+.brand b{display:block;font:700 21px/1 var(--display);letter-spacing:.01em;color:var(--emerald-dk)}
 .brand span{font-size:11px;color:var(--muted)}
-.newbill{display:flex;align-items:center;justify-content:center;gap:8px;height:44px;border-radius:12px;background:var(--ink);color:#fff;text-decoration:none;font-weight:600;margin:0 4px 12px;transition:transform .12s var(--ease),background .2s}
-.newbill:hover{background:#000}.newbill:active{transform:scale(.98)}
+.newbill{display:flex;align-items:center;justify-content:center;gap:8px;height:44px;border-radius:12px;background:linear-gradient(135deg,var(--emerald),var(--emerald-dk));color:#fff;box-shadow:0 8px 20px -12px rgba(15,92,77,.9);text-decoration:none;font-weight:600;margin:0 4px 12px;transition:transform .12s var(--ease),background .2s}
+.newbill:hover{background:var(--emerald-dk)}.newbill:active{transform:scale(.98)}
 .nav{display:flex;align-items:center;gap:12px;height:40px;padding:0 12px;border-radius:10px;color:var(--ink-2);text-decoration:none;font-weight:500;transition:background .15s,color .15s}
 .nav:hover{background:var(--line-2);color:var(--ink)}
-.nav.on{background:var(--fill);color:var(--ink);font-weight:600}
-.nav svg{color:var(--muted)}.nav.on svg{color:var(--ink)}
+.nav.on{background:var(--emerald-mist);color:var(--emerald-dk);font-weight:600;box-shadow:inset 3px 0 0 var(--gold)}
+.nav svg{color:var(--muted)}.nav.on svg{color:var(--emerald)}
 .nav .grow{flex:1}
+.navbadge{flex:none;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--bad);color:#fff;font:700 11px/18px var(--font);text-align:center;font-variant-numeric:tabular-nums}
 .railsearch{display:flex;align-items:center;gap:10px;height:40px;padding:0 12px;margin:0 0 6px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--muted);text-align:left}
 .railfoot{margin-top:auto;display:flex;flex-direction:column;gap:6px;padding-top:12px;border-top:1px solid var(--line-2)}
 .me{display:flex;align-items:center;gap:10px;padding:8px;border-radius:12px;border:0;background:none;text-align:left;width:100%}
@@ -81,7 +91,7 @@ h1,h2,h3{margin:0;letter-spacing:-.01em}
 /* ---------- primitives ---------- */
 .card{background:var(--surface);border-radius:var(--r);border:1px solid var(--line);box-shadow:var(--sh)}
 .card>header{padding:14px 16px;border-bottom:1px solid var(--line-2);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.card>header h3{font-size:15px;font-weight:600}
+.card>header h3{font:700 19px/1.2 var(--display);letter-spacing:.005em;color:var(--ink)}
 .pad{padding:16px}
 .stack{display:flex;flex-direction:column;gap:12px}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -96,8 +106,8 @@ h1,h2,h3{margin:0;letter-spacing:-.01em}
 .split{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:16px;align-items:start}
 @media(max-width:960px){.split{grid-template-columns:minmax(0,1fr)}}
 .mut{color:var(--muted)} .sm{font-size:13.5px} .xs{font-size:12px} .b{font-weight:600}
-.h1{font-size:28px;line-height:1.15;font-weight:700;letter-spacing:-.025em}
-.eyebrow{font-size:12px;color:var(--muted);font-weight:500;margin-bottom:2px}
+.h1{font:700 34px/1.08 var(--display);letter-spacing:-.01em;color:var(--ink)}
+.eyebrow{font-size:11px;color:var(--gold-d);font-weight:700;margin-bottom:2px;text-transform:uppercase;letter-spacing:.12em}
 .head{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;margin:6px 0 18px}
 .head .acts{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
 @media(max-width:860px){.h1{font-size:24px}.head{margin:4px 0 14px}}
@@ -107,8 +117,9 @@ h1,h2,h3{margin:0;letter-spacing:-.01em}
   transition:transform .12s var(--ease),background .15s,border-color .15s,box-shadow .15s}
 .btn:hover{border-color:#CFC9BF}
 .btn:active{transform:scale(.97)}
-.btn.p,.btn.dk{background:var(--ink);border-color:var(--ink);color:#fff}
-.btn.p:hover,.btn.dk:hover{background:#000}
+.btn.p{background:var(--emerald);border-color:var(--emerald);color:#fff;box-shadow:0 6px 18px -10px rgba(15,92,77,.7)}
+.btn.p:hover{background:var(--emerald-dk)}
+.btn.dk{background:var(--ink);border-color:var(--ink);color:#fff}.btn.dk:hover{background:#000}
 .btn.g{background:var(--gold);border-color:var(--gold);color:#fff}
 .btn.g:hover{background:var(--gold-d)}
 .btn.bad{color:var(--bad);border-color:#EACFCC;background:var(--surface)}
@@ -121,11 +132,11 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--
 textarea.in{height:auto;padding:10px 14px;line-height:1.45}
 .in:focus{border-color:var(--ink);box-shadow:0 0 0 4px rgba(23,22,27,.06)}
 .in.hi{background:var(--gold-l);border-color:#E3CF9E}
-.in.bad{border-color:var(--bad)}
+.in.bad,.cell.bad{border-color:var(--bad);background:var(--bad-l)}
 select.in{padding-right:8px}
 .in::placeholder,.wedge input::placeholder,.cell::placeholder{color:#B7B1BA}
 .pill{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:999px;background:var(--fill);color:var(--ink-2);white-space:nowrap}
-.pill.ok{background:var(--ok-l);color:var(--ok)} .pill.warn{background:var(--warn-l);color:var(--warn)} .pill.bad{background:var(--bad-l);color:var(--bad)} .pill.gold{background:var(--gold-l);color:var(--gold-d)}
+.pill.ok{background:var(--ok-l);color:var(--ok)} .pill.warn{background:var(--warn-l);color:var(--warn)} .pill.bad{background:var(--bad-l);color:var(--bad)} .pill.gold{background:var(--gold-l);color:var(--gold-ink)}
 .note{border-radius:12px;padding:12px 14px;font-size:13.5px;background:var(--ok-l);color:#155C45}
 .note.warn{background:var(--warn-l);color:#6B4A00}
 .note.bad{background:var(--bad-l);color:#8A2F2A}
@@ -207,10 +218,10 @@ tr.click{cursor:pointer}tr.click:hover td{background:var(--bg)}
 .hero>div{background:var(--surface);padding:18px 20px;display:flex;flex-direction:column;gap:2px}
 .hero .k{font-size:12.5px;color:var(--muted);font-weight:500}
 .hero b{font-size:26px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
-.hero>div:first-child{background:var(--ink);color:#fff}
-.hero>div:first-child .k{color:#C9C3CE}
-.hero>div:first-child b{font-size:38px;color:#fff}
-.hero .xs{color:var(--muted)}.hero>div:first-child .xs{color:#A9A3AE}
+.hero>div:first-child{background:linear-gradient(140deg,var(--emerald-dk),var(--emerald));color:#fff}
+.hero>div:first-child .k{color:#CFE3DD}
+.hero>div:first-child b{font-size:38px;color:var(--gold-l)}
+.hero .xs{color:var(--muted)}.hero>div:first-child .xs{color:#B9D3CC}
 @media(max-width:860px){.hero,.hero.three{grid-template-columns:repeat(3,minmax(0,1fr))}.hero.three{grid-template-columns:repeat(2,minmax(0,1fr))}.hero>div:first-child{grid-column:1/-1}.hero>div{padding:14px}.hero b{font-size:18px}.hero>div:first-child b{font-size:34px}}
 .hero.three{grid-template-columns:1.3fr 1fr 1fr}
 .quick{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px}
@@ -291,11 +302,14 @@ tr.click{cursor:pointer}tr.click:hover td{background:var(--bg)}
 .inv-shop{font:700 18px Georgia,serif;letter-spacing:.02em}
 .inv-sub{font-size:10.5px;color:#333}
 .inv-title{font-weight:700;font-size:14px;text-align:right;white-space:nowrap}
+.inv-copy{font-size:9px;font-weight:700;letter-spacing:.06em;border:1px solid #000;padding:1px 5px;margin:3px 0 0 auto;display:block;width:fit-content}
 .inv-void{color:#b00;border:2px solid #b00;padding:1px 6px;margin-top:4px;display:inline-block;transform:rotate(-4deg)}
 .inv-meta{display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-size:11px}
 .inv-t{width:100%;border-collapse:collapse;font-size:11px}
 .inv-t th{background:#eee;color:#000;letter-spacing:0;text-transform:none;font-size:10.5px;padding:4px;border:1px solid #999}
 .inv-t td{border:1px solid #bbb;padding:3px 4px}
+/* the app-wide `tr:last-child td{border-bottom:0}` left every printed bill's item table open at the bottom */
+.inv-t tr:last-child td{border-bottom:1px solid #bbb}
 .inv-c{color:#444}
 .inv-foot{display:flex;justify-content:space-between;gap:12px;margin-top:6px}
 .inv-left{display:flex;flex-direction:column;gap:3px;font-size:11px;flex:1}
@@ -363,7 +377,9 @@ tr.click{cursor:pointer}tr.click:hover td{background:var(--bg)}
 @media(min-width:861px){
   .compact-menu.shell{grid-template-columns:64px minmax(0,1fr)}
   .compact-menu .rail{padding:10px 6px}
-  .compact-menu .rail :is(.grow,.t,kbd,.brand>div,.store-switch,.railfoot,.nav>span){display:none}
+  /* collapsed: hide the words, never the switch-person button (it was the only way out) */
+  .compact-menu .rail :is(.grow,.t,kbd,.brand>div,.store-switch,.railfoot>:not(.me),.me>svg,.nav>span){display:none}
+  .compact-menu .me{justify-content:center;padding:8px 0}
   .compact-menu :is(.nav,.newbill,.railsearch){justify-content:center;padding:12px 6px}
   .pos .card{border-radius:3px;box-shadow:none}
   .pos-main{gap:8px}
@@ -591,15 +607,21 @@ html{scrollbar-gutter:stable}
 .grid>*,.split>*,.dash-grid>*,.row>.grow,.f{min-width:0}
 .subnav .tabs{min-width:0;flex-shrink:1}
 .page :is(.head,.f,.sumrow,.list b){overflow-wrap:anywhere}
-.billing-shell{--gold:#1A73E8;--gold-d:#1557B0;--gold-l:#E8F0FE}
+/* The POS keeps its deliberate Google-like blue. It used to get there by redefining --gold,
+   which also drove :focus-visible, ::selection, .tabs a.on and .pill.gold — so those flipped
+   blue on the one screen that is open all day. The accent now has its own name, and only the
+   things that should be blue are. */
+.billing-shell{--pos-accent:#1A73E8;--pos-accent-d:#1557B0;--pos-accent-l:#E8F0FE;--focus:#1A73E8}
+.billing-shell ::selection{background:var(--pos-accent-l)}
+.billing-shell .tabs a.on{box-shadow:inset 0 -2px 0 var(--pos-accent)}
 .billing-shell :is(.top,.subnav){background:#F8F9FA;backdrop-filter:none;-webkit-backdrop-filter:none}
 .billing-shell .pagein{animation:none}
 .billing-shell :is(.btn,.chip,.seg button,.pos-cust){transform:none;transition:background-color .12s,border-color .12s}
 .billing-shell :is(.btn,.in,.pos-cust,.seg,.seg button,.wedge,.card){border-radius:6px;box-shadow:none}
 .billing-shell :is(b,h1,h2,h3,.net b,.pos-title b){letter-spacing:0}
-.billing-shell .btn.p,.billing-shell .btn.g,.billing-shell .btn.dk{background:#1A73E8;border-color:#1A73E8;color:#fff}
-.billing-shell .btn:is(.p,.g,.dk):hover{background:#1557B0;border-color:#1557B0}
-.billing-shell .btn[aria-pressed="true"]{background:#E8F0FE;border-color:#A8C7FA;color:#174EA6}
+.billing-shell .btn.p,.billing-shell .btn.g,.billing-shell .btn.dk{background:var(--pos-accent);border-color:var(--pos-accent);color:#fff}
+.billing-shell .btn:is(.p,.g,.dk):hover{background:var(--pos-accent-d);border-color:var(--pos-accent-d)}
+.billing-shell .btn[aria-pressed="true"]{background:var(--pos-accent-l);border-color:#A8C7FA;color:#174EA6}
 .billing-shell .pos-top{border-radius:0;background:#fff;gap:10px;padding:10px 12px}
 .pos-workspace{min-height:0}
 .pos-entry,.pos-notes{background:#fff;border:1px solid var(--line);padding:12px}
@@ -674,3 +696,104 @@ html{scrollbar-gutter:stable}
   .purchase-photo .pos-t td::before{content:attr(data-l);display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
   .purchase-photo .pos-t td:last-child{grid-column:1/-1;text-align:right}
 }
+
+/* Owner rule (R-204): "sale not executed" on an estimate / unnumbered draft.
+   The band prints on every format including the thermal roll; the diagonal watermark is
+   position:fixed so it repeats on EVERY sheet of a multi-page quotation, not just the first. */
+.inv-notexec{margin-top:4px;color:#b0506a;border:1.5px solid #b0506a;border-radius:3px;padding:1px 6px;
+  display:inline-block;font-size:9.5px;font-weight:700;letter-spacing:.04em;white-space:nowrap}
+.inv-wm{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:50}
+.inv-wm span{transform:rotate(-24deg);text-align:center;font-weight:800;line-height:1.1;letter-spacing:.04em;
+  font-size:44px;color:rgba(176,80,106,.13)}
+@media screen{.inv-wm{position:absolute}}
+
+/* ---------- roles & permissions ---------- */
+.sec-title{margin:22px 0 10px;font-size:15px}
+.perm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.perm-group{border:1px solid var(--line);border-radius:14px;padding:12px;background:var(--surface)}
+.perm-group-title{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-2)}
+.perm{display:flex;gap:8px;align-items:flex-start;font-size:14px;padding:4px 0;cursor:pointer}
+.perm input{margin-top:3px;accent-color:var(--em-d)}
+.perm-flag{margin-left:6px;vertical-align:1px;padding:0 6px;font-size:10px;letter-spacing:.02em;text-transform:uppercase}
+
+/* Stock in › bill reader: the sticker preview, and the articles the app had to invent */
+.label-preview{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:12px;background:var(--fill);border:1px solid var(--line);border-radius:var(--r)}
+.label-preview .lbl{background:#fff;box-shadow:var(--sh)}
+.in.auto-filled{background:var(--gold-l);border-color:var(--gold)}
+.perm-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.role-card summary{list-style:none;cursor:pointer}.role-card summary::-webkit-details-marker{display:none}
+.role-editor{box-shadow:none}
+
+/* ---------- emerald & gold touches ---------- */
+.subnav{background:rgba(250,246,239,.86)}
+@media(max-width:860px){.top{background:rgba(250,246,239,.9)}.subnav{background:var(--bg)}.tabbar a.on{color:var(--emerald)}}
+.tabs a.on{color:var(--emerald-dk);box-shadow:0 1px 3px rgba(36,27,46,.10),inset 0 -2px 0 var(--gold)}
+.chip[aria-pressed=true]{background:var(--emerald);border-color:var(--emerald);color:#fff}
+.in:focus{border-color:var(--emerald-lt);box-shadow:0 0 0 3px var(--emerald-mist)}
+.note{border-left:3px solid var(--gold)}
+.card{border-color:var(--line)}
+.add-inv .split{grid-template-columns:minmax(0,1fr) 340px}
+.add-inv aside .card{position:sticky;top:70px}
+.add-sum{margin:0}.add-sum b{font-size:22px!important}
+@media(max-width:860px){.add-inv .split{grid-template-columns:1fr}.add-inv aside .card{position:static}}
+.tabs-hidden{padding:0 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46ch}
+@media(max-width:900px){.tabs-hidden{display:none}}
+
+/* Stock › the AI strip that rides above every tab */
+.stock-ai{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh);margin-bottom:14px;overflow:hidden}
+.stock-ai-head{display:flex;align-items:center;gap:10px;width:100%;padding:10px 14px;background:none;border:0;text-align:left;color:inherit}
+.stock-ai-head:hover{background:var(--line-2)}
+.stock-ai-head svg{color:var(--gold-d)}
+.stock-ai .bar-track{display:block;height:8px;border-radius:99px;background:var(--line-2);overflow:hidden}
+.stock-ai .bar-fill{display:block;height:100%;background:linear-gradient(90deg,var(--gold),var(--emerald));transition:width .2s var(--ease)}
+
+/* the brand mark doubles as the desktop menu toggle */
+.markbtn{border:0;cursor:pointer;padding:0;font:inherit}
+.markbtn:focus-visible{outline:2px solid var(--gold-d);outline-offset:2px}
+/* Roles & Permissions: the passcode chip and banner, as on the reference console */
+.roles-banner{margin:0 0 16px}
+.passcode-label{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.passcode-chip{display:inline-flex;align-items:center;gap:4px;border-radius:8px;background:var(--line-2);padding:2px 4px 2px 10px;font-size:14px;letter-spacing:.18em;color:var(--ink)}
+.passcode-chip .iconbtn.xs{min-width:26px;width:auto;padding:0 5px;height:26px;letter-spacing:0;color:var(--muted);white-space:nowrap}
+.passcode-chip .iconbtn.xs:hover{color:var(--ink)}
+.bad-text{color:var(--bad)}
+/* bill reader: one obvious action before a bill is read */
+.bill-drop{align-items:center;text-align:center;padding:22px 12px;border:1.5px dashed var(--line);border-radius:16px;background:var(--bg)}
+.bill-drop-btn{min-height:56px;padding:0 28px;font-size:17px;gap:10px}
+.ok-text{color:var(--ok, #1f7a4d)}
+.batch-panel{flex-direction:column;align-items:stretch;gap:8px;max-width:min(560px,calc(100vw - 24px));box-shadow:0 6px 24px rgba(0,0,0,.18);border-radius:10px;padding:12px}
+.batch-panel .row{flex-wrap:wrap;gap:8px}
+/* the shop's own sticker: condensed type, rate big along the bottom, name standing up at the right.
+   Every line stays one line and is clipped, never wrapped: a long name can't push into the rate (16 Oct). */
+.lbl.lbl-shop{display:grid!important;grid-template-columns:minmax(0,1fr) auto auto;grid-template-rows:minmax(0,1fr) auto;align-items:start;
+  font-family:"Roboto Condensed","Arial Narrow",Arial,sans-serif;line-height:1.1;overflow:hidden}
+.lbl-shop .t{grid-column:1;grid-row:1;min-width:0;min-height:0;overflow:hidden;justify-content:flex-start;font-weight:500;letter-spacing:.02em}
+.lbl-shop .t>div{white-space:nowrap;overflow:hidden;max-height:none;flex:none}
+/* the text column ends where the rate begins: anything that doesn't fit is cut off, it never runs into the rate */
+.lbl-shop .t{align-self:stretch;height:100%}
+.lbl-shop .q{grid-column:2;grid-row:1;align-self:start}
+.lbl-shop .r{grid-column:1 / 3;grid-row:2;justify-self:start;text-align:left;white-space:nowrap;font-weight:500;line-height:1;letter-spacing:.01em;max-width:100%;overflow:hidden}
+.lbl-shop .n{grid-column:3;grid-row:1 / 3;writing-mode:vertical-rl;font-weight:700;letter-spacing:.12em;align-self:center}
+/* the bill line a sticker belongs to: a small boxed number before the item, so staff match stickers to goods */
+.lbl .lno-end{margin:0 0 0 1.2mm}
+.lbl .lno{display:inline-block;border:.15mm solid #000;border-radius:.4mm;padding:0 .35mm;margin-right:.6mm;font-weight:700;font-size:.9em;line-height:1.05}
+/* the purchase-bill review (owner, 18 Oct: "expand it so I don't have to scroll and swipe"):
+   the box takes the whole window, and the lines are compact so a 30-line bill shows at a glance */
+.sheet.sheet-full{max-width:none;width:calc(100vw - 24px);height:calc(100vh - 24px);max-height:none}
+@media(max-width:860px){.sheet.sheet-full{width:100vw;height:100vh;border-radius:0}}
+.sheet-full .purchase-photo .tw{overflow:visible}
+.purchase-photo .pos-t td{padding:2px 3px}
+.purchase-photo .pos-t th{padding:6px 4px}
+.sheet-full .purchase-photo .pos-t th{position:sticky;top:0;background:var(--surface);z-index:1}
+.purchase-photo .pos-t .in{height:32px;min-height:32px;padding:0 8px;font-size:13.5px;border-radius:6px}
+@media(min-width:861px){.purchase-photo .pos-t{width:100%}}
+.sheet-full .approve-bar{position:sticky;bottom:-16px;background:var(--surface);border-top:1px solid var(--line);padding:8px 0 12px;z-index:2;box-shadow:0 -6px 14px -10px rgba(0,0,0,.25);display:flex;flex-flow:row wrap;align-items:center;gap:6px 14px}
+.sheet-full .approve-bar>.btn{order:3;margin-left:auto}
+.sheet-full .approve-bar>.xs.mut{display:none}
+.sheet-full .approve-bar>.bad-text{order:2}
+
+/* bill reader: the apply buttons say, in green, that they worked */
+.pill.applied{font-size:12.5px;padding:6px 12px;border:1px solid rgba(18,196,106,.35)}
+.note.applied-note{padding:8px 12px;margin:6px 0;font-weight:600}
+.purchase-photo .pos-t td.line-no{font-weight:700;text-align:center;color:var(--muted);min-width:26px}
+.in.cost-low{border-color:var(--bad)!important;background:var(--bad-l)}

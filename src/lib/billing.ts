@@ -6,6 +6,9 @@ import { assertUnlocked } from "./finance";
 import { currentStore, inStore, assertStoreRow, storeLocations } from "./stores";
 import { fillBillNames } from "./billing-products";
 import { validatePosLines } from "./pos";
+import { isInterState } from "./states";
+import { requirePerm } from "./scope";
+import { purgeEstimates } from "./estimatePurge";
 
 /* ---------------- shop profile (synced to every device) ---------------- */
 export interface Shop {
@@ -14,14 +17,20 @@ export interface Shop {
 }
 export const DEFAULT_SHOP: Shop = {
   name: "RUNGNNA JEWELLERY & CO", tagline: "Fashion & Imitation Jewellery", address: "", phone: "", whatsapp: "", gstin: "",
-  state: "", upi: "", bank: "", terms: "Goods once sold will not be taken back. Subject to local jurisdiction.",
+  state: "Delhi", upi: "", bank: "", terms: "Goods once sold will not be taken back. Subject to local jurisdiction.",
   hsn: "7117", gst_rate: 3, gst_mode: "exclusive", max_disc: 10,
 };
 export async function getShop(): Promise<Shop> {
   const c = await db.config.get("shop");
-  return { ...DEFAULT_SHOP, ...(c?.value || {}) };
+  /* The shop is in Sadar Bazar, Delhi. A blank state (as saved on 16 Oct) made every out-of-state tax invoice charge
+     CGST + SGST while printing "Place of supply: Rajasthan": the state decides IGST, so it is never left blank. */
+  const v = { ...DEFAULT_SHOP, ...(c?.value || {}) };
+  return { ...v, state: v.state || DEFAULT_SHOP.state };
 }
-export async function saveShop(v: Shop) { await put("config", { id: "shop", value: v, updated_at: now() } as Config); }
+export async function saveShop(v: Shop) {
+  requirePerm("settings.manage", "changing shop settings");
+  await put("config", { id: "shop", value: v, updated_at: now() } as Config);
+}
 
 /* ---------------- numbering: each counter owns its own series, so offline numbers never clash ---------------- */
 export function fy(d = new Date()) {
@@ -30,7 +39,8 @@ export function fy(d = new Date()) {
 }
 export async function counterCode(): Promise<string> {
   let c = await getSetting<string>("counter_code", "");
-  if (!c) { c = "C" + deviceId().slice(-2); await setSetting("counter_code", c); }
+  // 3 random chars: ~47k codes, so two counters rarely get the same one
+  if (!c) { c = "C" + deviceId().slice(-3); await setSetting("counter_code", c); }
   const store = await db.stores.get(currentStore());
   return store && store.code !== "MAIN" ? store.code + c : c;
 }
@@ -49,46 +59,141 @@ export const docShort = (b: Pick<Bill, "bill_type">) =>
 async function nextNo(t: BillType, src?: BillType) {
   const series = seriesOf(t, src), f = fy(), cc = await counterCode();
   const key = `seq_${series}_${f}_${cc}`;
-  const n = (await getSetting<number>(key, 0)) + 1;
+  let n = (await getSetting<number>(key, 0)) + 1, no = "";
+  // never hand out a number that already exists on this device (lost counter after clearing browser data, a copied counter code…)
+  for (;; n++) {
+    no = `${series}/${f.slice(0, 2)}${cc}${String(n).padStart(4, "0")}`;
+    if (!(await db.bills.where("no").equals(no).count())) break;
+  }
   await setSetting(key, n);
-  const no = `${series}/${f.slice(0, 2)}${cc}${String(n).padStart(4, "0")}`;
   if (["gst", "challan"].includes(t) && no.length > 16) throw new Error("Shorten the counter code in Settings (government limit: 16 characters)");
   return { no, series: `${series}/${f}/${cc}` };
 }
 
+/** Document numbers used by more than one saved document (e.g. two counters with the same code before they synced). */
+export async function duplicateNumbers(): Promise<{ no: string; ids: string[] }[]> {
+  const seen = new Map<string, string[]>();
+  for (const b of await db.bills.toArray()) if (b.no && !b.deleted) seen.set(b.no, [...(seen.get(b.no) || []), b.id]);
+  return [...seen].filter(([, ids]) => ids.length > 1).map(([no, ids]) => ({ no, ids }));
+}
+
 /* ---------------- maths (all paise) ---------------- */
+/** A line discount is blank, "10%" (0–100) or a rupee amount "25" / "25.50". Anything else is a typing mistake. */
+export const DISC_RE = /^(\d+(\.\d{1,2})?)\s*%?$/;
+export function discError(disc: string): string {
+  const d = (disc || "").trim();
+  if (!d) return "";
+  const m = d.match(DISC_RE);
+  if (!m) return "Discount must be a number like 10% or 25";
+  if (d.endsWith("%") && Number(m[1]) > 100) return "Discount cannot be more than 100%";
+  return "";
+}
 export function lineAmount(l: Pick<BillLine, "qty" | "rate" | "disc">) {
   const g = l.qty * l.rate;
   const d = (l.disc || "").trim();
-  if (!d) return g;
-  if (d.endsWith("%")) return Math.round(g - g * (parseFloat(d) || 0) / 100);
-  return Math.max(0, g - Math.round((parseFloat(d) || 0) * 100));
+  if (!d || discError(d)) return g;        // an invalid discount is never applied (save is blocked until it is fixed)
+  const n = parseFloat(d);
+  if (d.endsWith("%")) return Math.round(g - g * Math.min(100, n) / 100);
+  return Math.max(0, g - Math.round(n * 100));
 }
 export function fixLine(l: BillLine): BillLine {
   const qty = l.pack > 1 && l.pkts > 0 ? l.pkts * l.pack : l.qty;
   const x = { ...l, qty };
   return { ...x, amount: lineAmount(x) };
 }
-export function totals(b: Bill, shopState = ""): Bill {
+/** Split integer paise by weights so the parts always add back to the total. */
+export function allocate(total: number, weights: number[]) {
+  if (!weights.length) return [];
+  const w = weights.some(n => n > 0) ? weights.map(n => Math.max(0, n)) : weights.map(() => 1);   // all free lines: share equally
+  const sum = w.reduce((a, n) => a + n, 0);
+  const out = w.map(n => Math.floor(total * n / sum));
+  let left = total - out.reduce((a, n) => a + n, 0);
+  for (let i = 0; left > 0; i = (i + 1) % out.length, left--) out[i]++;
+  return out;
+}
+/** " 3%" for a single-rate bill; "" (just "GST") when lines carry different rates. */
+export const gstLabel = (b: Bill) => (b.items.some(l => l.tax != null) ? "" : ` ${b.gst_rate}%`);
+export function totals(b: Bill, shopState = "", shopGstin = ""): Bill {
   const items = b.items.map(fixLine);
   const gross = items.reduce((a, l) => a + l.amount, 0);
   const total_qty = items.reduce((a, l) => a + l.qty, 0);
   const box_count = Math.max(b.box_count || 0, new Set(items.map(l => l.box_no)).size);
   // a discount can never exceed the goods on the bill, so NET can't go negative
-  const discount = Math.min(gross, Math.max(0, b.discount_pct ? Math.round(gross * b.discount_pct / 100) : b.discount));
+  const pct = Number.isFinite(b.discount_pct) ? Math.min(100, Math.max(0, b.discount_pct)) : 0;
+  const discount = Math.min(gross, Math.max(0, pct ? Math.round(gross * pct / 100) : (Number.isFinite(b.discount) ? b.discount : 0)));
+  const packing = Number.isFinite(b.packing) ? Math.max(0, b.packing) : 0;
   // a credit note against a tax invoice reverses its GST; estimates, challans and their returns carry none
   const rate = b.bill_type === "gst" || (b.bill_type === "return" && b.src_type === "gst") ? b.gst_rate : 0;
-  let base = gross - discount + b.packing, gst = 0;
-  if (rate) {
-    if (b.gst_mode === "inclusive") { const ex = Math.round(base * 100 / (100 + rate)); gst = base - ex; base = ex; }
-    else gst = Math.round(base * rate / 100);
+  let base = gross - discount + packing, gst = 0, lines = items;
+  // lines taxed at a different rate than the bill (e.g. a 12% item on a 3% bill) are taxed line by line
+  const mixed = !!rate && items.some(l => l.gst_rate != null && l.gst_rate !== rate);
+  if (mixed) {
+    const shares = allocate(base, items.map(l => l.amount));
+    base = 0;
+    lines = items.map((l, i) => {
+      const r = l.gst_rate ?? rate, s = shares[i];
+      let ex = s, tax: number;
+      if (b.gst_mode === "inclusive") { ex = Math.round(s * 100 / (100 + r)); tax = s - ex; } else tax = Math.round(s * r / 100);
+      base += ex; gst += tax;
+      return { ...l, taxable: ex, tax };
+    });
+  } else {
+    lines = items.map(l => { const { taxable, tax, ...rest } = l; return rest; });
+    if (rate) {
+      if (b.gst_mode === "inclusive") { const ex = Math.round(base * 100 / (100 + rate)); gst = base - ex; base = ex; }
+      else gst = Math.round(base * rate / 100);
+    }
   }
-  const inter = !!(shopState && b.party_state && shopState.trim().toLowerCase() !== b.party_state.trim().toLowerCase());
-  const igst = inter ? gst : 0, cgst = inter ? 0 : Math.floor(gst / 2), sgst = inter ? 0 : gst - Math.floor(gst / 2);
+  const inter = isInterState({ state: shopState, gstin: shopGstin }, b.party_state, b.party_gstin);
+  // CGST/SGST are split rate by rate, so every "CGST x%" row printed on the invoice adds up to the bill's total exactly
+  const groups = rateGroups(lines, mixed ? null : { rate, taxable: base, tax: gst }, rate);
+  const cgst = inter ? 0 : groups.reduce((a, g) => a + Math.floor(g.tax / 2), 0);
+  const sgst = inter ? 0 : gst - cgst, igst = inter ? gst : 0;
   const raw = base + gst;
   const net = Math.round(raw / 100) * 100;
-  const paid = b.bill_type === "challan" ? 0 : b.payments.filter(p => p.mode !== "credit").reduce((a, p) => a + p.amount, 0);
-  return { ...b, items, gross, total_qty, box_count, discount, gst, cgst, sgst, igst, adjust: net - raw, net, paid };
+  const paid = b.bill_type === "challan" ? 0 : b.payments.filter(p => p.mode !== "credit").reduce((a, p) => a + (Number.isFinite(p.amount) ? p.amount : 0), 0);
+  return { ...b, items: lines, gross, total_qty, box_count, discount, discount_pct: pct, packing, gst, cgst, sgst, igst, adjust: net - raw, net, paid };
+}
+
+type RateGroup = { rate: number; taxable: number; tax: number };
+function rateGroups(lines: BillLine[], single: RateGroup | null, def: number): RateGroup[] {
+  if (single) return single.tax || single.rate ? [single] : [];
+  const m = new Map<number, RateGroup>();
+  for (const l of lines) {
+    const r = l.gst_rate ?? def, g = m.get(r) || { rate: r, taxable: 0, tax: 0 };
+    g.taxable += l.taxable || 0; g.tax += l.tax || 0; m.set(r, g);
+  }
+  return [...m.values()].sort((a, z) => a.rate - z.rate);
+}
+
+export type TaxRow = { rate: number; hsn: string; taxable: number; cgst: number; sgst: number; igst: number };
+/** The tax on a saved/computed bill, line by line, so it can be summarised by rate (invoice) or by HSN (GSTR-1).
+    Line values always add back to the bill's own taxable value and CGST/SGST/IGST. */
+export function taxLines(b: Bill, shopHsn = "7117"): TaxRow[] {
+  if (!b.gst || !b.items.length) return [];
+  const mixed = b.items.every(l => l.tax != null && l.taxable != null);
+  const amounts = b.items.map(l => l.amount);
+  const taxable = mixed ? b.items.map(l => l.taxable!) : allocate(b.net - b.adjust - b.gst, amounts);
+  const tax = mixed ? b.items.map(l => l.tax!) : allocate(b.gst, amounts);
+  const rows = b.items.map((l, i) => ({ rate: mixed ? l.gst_rate ?? b.gst_rate : b.gst_rate, hsn: (l.hsn || shopHsn || "").trim(), taxable: taxable[i], cgst: 0, sgst: 0, igst: 0 }));
+  // split each rate's tax the same way totals() did, then spread it over that rate's lines
+  for (const r of [...new Set(rows.map(x => x.rate))]) {
+    const idx = rows.map((x, i) => (x.rate === r ? i : -1)).filter(i => i >= 0);
+    const t = idx.reduce((a, i) => a + tax[i], 0), w = idx.map(i => tax[i] || 1);
+    const parts = b.igst ? { igst: t, cgst: 0, sgst: 0 } : { igst: 0, cgst: Math.floor(t / 2), sgst: t - Math.floor(t / 2) };
+    (["cgst", "sgst", "igst"] as const).forEach(k => allocate(parts[k], w).forEach((v, j) => { rows[idx[j]][k] = v; }));
+  }
+  return rows;
+}
+/** Rows summed by a key: rate ("3") for the invoice, or HSN+rate for the HSN summary. */
+export function taxSummary(b: Bill, by: "rate" | "hsn", shopHsn = "7117"): TaxRow[] {
+  const m = new Map<string, TaxRow>();
+  for (const r of taxLines(b, shopHsn)) {
+    const k = by === "rate" ? String(r.rate) : r.hsn + "|" + r.rate;
+    const g = m.get(k) || { ...r, taxable: 0, cgst: 0, sgst: 0, igst: 0 };
+    g.taxable += r.taxable; g.cgst += r.cgst; g.sgst += r.sgst; g.igst += r.igst; m.set(k, g);
+  }
+  return [...m.values()].sort((a, z) => a.rate - z.rate || a.hsn.localeCompare(z.hsn));
 }
 export const due = (b: Pick<Bill, "net" | "advance" | "paid"> & { bill_type?: BillType }) =>
   b.bill_type === "challan" ? 0 : b.net - b.advance - b.paid;   // a challan asks for no money
@@ -110,7 +215,7 @@ export function priceFor(p: Product, level: Party["tier"] | Bill["price_level"] 
 }
 export function lineFrom(p: Product, box = 1, pkts = 1, level: Party["tier"] | Bill["price_level"] = "wholesale"): BillLine {
   const pack = p.pack && p.pack > 1 ? p.pack : 1;
-  return fixLine({ id: uid(), hsn: p.hsn, product_id: p.id, code: p.code, item: p.item || (p.item_code ? "ITEM " + p.item_code : ""), type: p.type, style: p.style, color: p.color,
+  return fixLine({ id: uid(), hsn: p.hsn, ...(p.gst_rate != null ? { gst_rate: p.gst_rate } : {}), product_id: p.id, code: p.code, item: p.item || (p.item_code ? "ITEM " + p.item_code : ""), type: p.type, style: p.style, color: p.color,
     box_no: box, pack, pkts: pack > 1 ? pkts : 0, qty: pack > 1 ? pkts * pack : pkts, rate: priceFor(p, level), disc: "", amount: 0 });
 }
 
@@ -123,21 +228,45 @@ export async function holdBill(b: Bill) {
   await put("bills", { ...b, status: "hold" });
 }
 
+/* What the party owed before this bill, the way their khata reads: opening balance + unpaid sales − credit notes
+   − receipts. A tax invoice never counts estimates (they are private and must not appear on a GST document); an
+   estimate counts them only while estimates are unlocked on this device. Printed on the bill as "Previous balance". */
+export async function balanceBefore(b: Bill): Promise<number> {
+  if (!b.party_id) return 0;
+  const withEst = b.bill_type === "estimate" && isOpen();
+  const party = await db.parties.get(b.party_id);
+  const fromReceipt = (p: { ref?: string }) => (p.ref || "").startsWith("RCPT");
+  const others = (await db.bills.where("party_id").equals(b.party_id).toArray())
+    .filter(x => x.id !== b.id && inStore(x) && x.status === "final" && !x.deleted && (withEst || !isEstimate(x)));
+  let bal = party?.opening_balance || 0;
+  for (const x of others) {
+    if (isSale(x)) bal += x.net - x.advance - x.payments.filter(p => p.mode !== "credit" && !fromReceipt(p)).reduce((a, p) => a + p.amount, 0);
+    else if (isReturn(x)) bal -= x.net - x.paid;
+  }
+  const rcpts = await db.receipts.where("party_id").equals(b.party_id).filter(r => inStore(r) && !r.deleted).toArray();
+  for (const r of rcpts) bal -= withEst ? r.amount : r.amount - r.allocations.filter(a => /^EST\//.test(a.bill_no)).reduce((x, a) => x + a.amount, 0);
+  return bal;
+}
+
 /* Final save: number it, take the pieces off the racks (fullest location first), keep a movement per rack.
    Lines marked stock_done already left on another document (merged sources, challans, a split) and are skipped.
    `after` runs inside the same transaction, so linked changes (e.g. marking merged sources) save all-or-nothing. */
 export async function finalize(b: Bill, shopState: string, customerName = "", after?: (saved: Bill) => Promise<void>): Promise<Bill> {
-  return db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock, db.products, db.stores, db.locations, db.settings, db.config], async () => {
+  return db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock, db.products, db.stores, db.locations, db.settings, db.config, db.parties, db.receipts], async () => {
   await assertStoreRow(b);
   b = await fillBillNames(b);
   if (b.items.some(l => !l.item?.trim() || /^ITEM\s+\d+$/i.test(l.item.trim()))) throw new Error("Every bill item needs a product name");
   if (b.compliance?.irn || b.compliance?.ewb) throw new Error("Registered documents cannot be edited; use a credit note");
-  const t = totals(b, shopState);
+  const t = totals(b, shopState, (await getShop()).gstin);
   validatePosLines(t.items);
   const before0 = await db.bills.get(b.id);
   if (before0?.at) await assertUnlocked(before0.at);
   const num = t.no ? { no: t.no, series: t.series } : await nextNo(t.bill_type, t.src_type);
-  const bill: Bill = { ...t, ...num, status: "final", at: t.status === "hold" ? now() : t.at };
+  const bill: Bill = { ...t, ...num, status: "final", oversold: undefined, at: t.status === "hold" ? now() : t.at };
+  // frozen the first time the bill is saved: a reprint next month still shows what was owed on the day
+  if (isSale(bill) && bill.party_id) bill.prev_due = before0?.status === "final" && before0.party_id === bill.party_id && before0.prev_due !== undefined ? before0.prev_due : await balanceBefore(bill);
+  else bill.prev_due = undefined;
+  const oversold: { product_id: string; item: string; qty: number }[] = [];
   const bucket = new Set((await db.locations.filter(l => l.kind === "bucket").toArray()).map(l => l.id));
   const racks = new Set((await storeLocations()).map(l => l.id));
   await db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock, db.products], async () => {
@@ -156,7 +285,7 @@ export async function finalize(b: Bill, shopState: string, customerName = "", af
         .filter(c => c.qty > 0 && racks.has(c.loc_id) && !bucket.has(c.loc_id)).sort((a, z) => z.qty - a.qty);
       const parts: { loc: string | null; q: number }[] = [];
       for (const c of cells) { if (!left) break; const q = Math.min(left, c.qty); parts.push({ loc: c.loc_id, q }); left -= q; }
-      if (left) parts.push({ loc: null, q: left });          // sold more than was recorded: still logged
+      if (left) { parts.push({ loc: null, q: left }); oversold.push({ product_id: l.product_id, item: [l.item, l.style, l.color].filter(Boolean).join(" "), qty: left }); }   // sold more than was recorded: still logged, and flagged on the bill
       for (const x of parts) {
         const m: Movement = { id: uid(), product_id: l.product_id, kind: "sale", qty: x.q, from_loc: x.loc, to_loc: null,
           person_type: "customer", person_name: customerName || bill.party_name, by_staff: bill.by_staff, note: bill.no,
@@ -165,6 +294,7 @@ export async function finalize(b: Bill, shopState: string, customerName = "", af
         if (x.loc) await bumpStock(l.product_id, x.loc, -x.q);
       }
     }
+    if (oversold.length) { bill.oversold = oversold; await put("bills", bill); }
   });
   return bill;
   });
@@ -178,6 +308,7 @@ export async function bumpStock(product_id: string, loc: string, delta: number) 
    A credit note being cancelled takes its returned pieces off the racks again.
    A merged invoice being cancelled gives its source bills / challans back (they hold their own stock). */
 export async function voidBill(b: Bill, reason: string, by: string) {
+  requirePerm("billing.void", "cancelling a bill");
   await assertStoreRow(b);
   if ([b.compliance?.irn, b.compliance?.ewb].some(r => r && !r.cancelled_at)) throw new Error("Cancel government registration before voiding this bill");
   await assertUnlocked(b.at);
@@ -217,11 +348,13 @@ export async function voidBill(b: Bill, reason: string, by: string) {
 
 /* Estimate → GST invoice: new GST number, same goods, estimate marked "converted" (never deleted). */
 export async function convertToGst(est: Bill, shop: Shop, by: string): Promise<Bill> {
+  requirePerm("billing.sell", "making a tax invoice");
   const g: Bill = { ...est, id: uid(), no: "", series: "", bill_type: "gst", status: "hold", gst_rate: shop.gst_rate, gst_mode: shop.gst_mode,
     converted_from: est.id, by_staff: by, at: now(), payments: est.payments };
-  const done = await finalize(g, shop.state);
-  await put("bills", { ...est, status: "converted", converted_to: done.id });
-  return done;
+  const fresh = await db.bills.get(est.id);
+  if (!fresh || fresh.status !== "final" || fresh.converted_to) throw new Error("This estimate was already converted or changed — reopen it");
+  // the estimate is marked converted inside the same save, so a crash can never leave both live
+  return finalize(g, shop.state, est.party_name, async done => { await put("bills", { ...fresh, status: "converted", converted_to: done.id }); });
 }
 
 /* ---------------- customers ---------------- */
@@ -243,7 +376,7 @@ export function billText(b: Bill, shop: Shop) {
   L.push("", `Pieces: ${b.total_qty} · Boxes: ${b.box_count}`);
   if (b.discount) L.push(`Discount: -${rupees(b.discount)}`);
   if (b.packing) L.push(`Packing: ${rupees(b.packing)}`);
-  if (b.gst) L.push(`GST ${b.gst_rate}%: ${rupees(b.gst)}`);
+  if (b.gst) L.push(`GST${gstLabel(b)}: ${rupees(b.gst)}`);
   L.push(b.bill_type === "return" ? `*Credit: ${rupees(b.net)}*` : b.bill_type === "challan" ? `*Value: ${rupees(b.net)}* (no payment due on a challan)` : `*Total: ${rupees(b.net)}*`);
   const d = isSale(b) ? due(b) : 0; if (d > 0) L.push(`Balance due: ${rupees(d)}`);
   if (shop.upi && d > 0) L.push(`Pay by UPI: upi://pay?pa=${encodeURIComponent(shop.upi)}&pn=${encodeURIComponent(shop.name)}&am=${(d / 100).toFixed(2)}&cu=INR`);
@@ -290,7 +423,7 @@ export async function billImage(b: Bill, shop: Shop): Promise<Blob> {
   row(`Pieces ${b.total_qty} · Boxes ${b.box_count}`, rupees(b.gross));
   if (b.discount) row("Discount", "-" + rupees(b.discount));
   if (b.packing) row("Packing", rupees(b.packing));
-  if (b.gst) row(`GST ${b.gst_rate}%`, rupees(b.gst));
+  if (b.gst) row(`GST${gstLabel(b)}`, rupees(b.gst));
   row(b.bill_type === "return" ? "CREDIT" : b.bill_type === "challan" ? "VALUE" : "TOTAL", rupees(b.net), true);
   const d = isSale(b) ? due(b) : 0; if (d > 0) row("Balance due", rupees(d), true);
   g.fillStyle = "#A07E2E"; g.font = "italic 16px Georgia"; g.fillText("Thank you for shopping with us", pad, y += 44);
@@ -313,26 +446,8 @@ export async function shareBill(b: Bill, shop: Shop) {
 
 export async function lastBills(n = 50) { return db.bills.orderBy("at").reverse().filter(b => !b.deleted).limit(n).toArray(); }
 
-/* Owner-only: remove estimates for good. The rows are emptied and marked deleted on every device and in the cloud.
+/* Owner-only: remove estimates for good, from everywhere (see lib/estimatePurge.ts).
    returnStock = the goods never left (a quotation) → pieces go back to the racks they came from. */
 export async function deleteEstimates(bills: Bill[], returnStock: boolean, by: string) {
-  let n = 0;
-  for (const b of bills) {
-    if (b.bill_type !== "estimate" || b.deleted || b.status === "merged" || b.status === "converted") continue; // its goods live on in another invoice
-    await db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock, db.products], async () => {
-      if (returnStock && b.status === "final") {
-        await setTagsSold(b.rfid_tags, null);
-        const outs = await db.movements.where("ref_bill").equals(b.id).filter(m => m.kind === "sale" && !m.deleted).toArray();
-        for (const m of outs) {
-          await put("movements", { ...m, id: uid(), kind: "return", from_loc: null, to_loc: m.from_loc, note: "Estimate removed", at: now(), updated_at: now(), by_staff: by });
-          if (m.from_loc) { const k = m.product_id + "|" + m.from_loc; const c = await db.stock.get(k); await db.stock.put({ key: k, product_id: m.product_id, loc_id: m.from_loc, qty: (c?.qty || 0) + m.qty }); }
-        }
-      }
-      // keep only the id and number as a tombstone so other devices know to drop it
-      await put("bills", { ...b, deleted: 1, items: [], payments: [], rfid_tags: [], party_id: undefined, party_name: "", party_phone: "", party_gstin: "", party_state: "",
-        remarks: "", gross: 0, discount: 0, packing: 0, gst: 0, cgst: 0, sgst: 0, igst: 0, net: 0, advance: 0, paid: 0, total_qty: 0, void_reason: "Deleted by " + by });
-    });
-    n++;
-  }
-  return n;
+  return (await purgeEstimates(bills, { returnStock, by })).estimates;
 }

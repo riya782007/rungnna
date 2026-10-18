@@ -56,17 +56,17 @@ export async function linkTag(product: Product, raw: string): Promise<{ product:
   const others = await db.products.where("barcodes").equals(tag).filter(p => p.id !== product.id).toArray();
   for (const o of others) {
     const { [tag]: _, ...sold } = o.sold_tags || {};
-    await put("products", { ...o, barcodes: o.barcodes.filter(b => b !== tag), sold_tags: sold });
+    await put("products", { ...o, barcodes: (o.barcodes || []).filter(b => b !== tag), sold_tags: sold });
     if (!o.deleted) movedFrom = o;
   }
   const cur = (await db.products.get(product.id)) || product;
   const { [tag]: _, ...sold } = cur.sold_tags || {};
-  const next = await put("products", { ...cur, barcodes: cur.barcodes.includes(tag) ? cur.barcodes : [...cur.barcodes, tag], sold_tags: sold });
+  const next = await put("products", { ...cur, barcodes: (cur.barcodes || []).includes(tag) ? (cur.barcodes || []) : [...(cur.barcodes || []), tag], sold_tags: sold });
   return { product: next, movedFrom };
 }
 
 /* Tags a product carries, and the ones of those that already left on a bill */
-export const tagsOf = (p: Pick<Product, "barcodes">) => p.barcodes.filter(isRfidTag);
+export const tagsOf = (p: Pick<Product, "barcodes">) => (p.barcodes || []).filter(isRfidTag);
 export const soldBill = (p: Pick<Product, "sold_tags">, tag: string) => p.sold_tags?.[normTag(tag)];
 
 /* Final bill: its tags are sold. Void / returned stock: they're back. Call inside a transaction that includes db.products. */
@@ -92,13 +92,13 @@ export interface CountReport { rows: CountRow[]; unknown: string[]; missing: num
 export function countReport(expected: Map<string, number>, reads: string[], products: Pick<Product, "id" | "barcodes" | "sold_tags" | "deleted">[]): CountReport {
   const byId = new Map(products.map(p => [p.id, p]));
   const byTag = new Map<string, Pick<Product, "id" | "barcodes" | "sold_tags" | "deleted">>();
-  for (const p of products) if (!p.deleted) for (const b of p.barcodes) if (isRfidTag(b)) byTag.set(normTag(b), p);
+  for (const p of products) if (!p.deleted) for (const b of p.barcodes || []) if (isRfidTag(b)) byTag.set(normTag(b), p);
   const rows = new Map<string, CountRow>();
   const row = (id: string) => {
     let r = rows.get(id);
     if (!r) {
       const p = byId.get(id);
-      const tagged = p ? p.barcodes.filter(b => isRfidTag(b) && !p.sold_tags?.[normTag(b)]).length : 0;
+      const tagged = p ? (p.barcodes || []).filter(b => isRfidTag(b) && !p.sold_tags?.[normTag(b)]).length : 0;
       r = { product_id: id, expected: expected.get(id) || 0, found: 0, tagged, sold: [] };
       rows.set(id, r);
     }

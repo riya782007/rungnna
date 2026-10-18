@@ -7,6 +7,7 @@ import { localDay } from "../src/lib/ledger";
 import { supplierAging, supplierLedger } from "../src/lib/suppliers";
 import { saveVoucher } from "../src/lib/vouchers";
 import { reportData } from "../src/lib/reports";
+import { MAIN_STORE, setScope } from "../src/lib/scope";
 
 const product: Product = { id: "p1", code: "P1", barcodes: ["P1"], item: "CHAIN", type: "PCS", style: "K1", color: "G", tk: "", rate: 10000,
   wholesale_rate: 10000, retail_rate: 18000, mrp: 20000, category: "", notes: "", cost: 4000, hsn: "7117", created_by: "t", created_at: "", updated_at: "" };
@@ -14,6 +15,7 @@ const supplier: Party = { id: "s1", kind: "supplier", name: "SUP", alt_name: "",
   tier: "wholesale", credit_limit: 0, notes: "", opening_balance: 10000, updated_at: "" };
 
 beforeEach(async () => {
+  setScope(MAIN_STORE, "owner");   // these flows are the owner working the counter
   await Promise.all(db.tables.map(t => t.clear()));
   await db.products.put(product);
   await db.parties.put(supplier);

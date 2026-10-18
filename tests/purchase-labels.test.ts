@@ -8,7 +8,7 @@ import type { Purchase } from "../src/lib/db";
 const p = { ...blankProduct("owner"), id: "p", item: "BALI", type: "PAIR", rate: 10000 };
 const purchase = (): Purchase => ({ ...newPurchase("owner", "rack"), status: "final", items: [{ ...lineOf(p), qty: 6, pack: 2 }] });
 it("prepares all named purchase products with packet-aware copy counts", () => {
-  expect(purchaseLabelJobs(purchase(), [p])).toEqual([{ p, qtyOnLabel: 2, copies: 3 }]);
+  expect(purchaseLabelJobs(purchase(), [p])).toEqual([{ p, qtyOnLabel: 2, copies: 3, line: 1 }]);   // line: the bill line, printed on the sticker
 });
 it("does not silently print an incomplete purchase", () => {
   expect(() => purchaseLabelJobs(purchase(), [])).toThrow("missing");
@@ -22,7 +22,7 @@ it("rejects unsaved purchases and unsafe quantities", () => {
 });
 it("prints the actual quantity on a partly filled final packet", () => {
   const x = purchase(); x.items[0].qty = 5;
-  expect(purchaseLabelJobs(x, [p])).toEqual([{ p, qtyOnLabel: 2, copies: 2 }, { p, qtyOnLabel: 1, copies: 1 }]);
+  expect(purchaseLabelJobs(x, [p])).toEqual([{ p, qtyOnLabel: 2, copies: 2, line: 1 }, { p, qtyOnLabel: 1, copies: 1, line: 1 }]);
 });
 it("encodes exactly the printed quantity, even when the saved product has a different pack", () => {
   const original = { ...p, pack: 12, cost_code: "OAX12PAIR" };
@@ -33,12 +33,12 @@ it("encodes exactly the printed quantity, even when the saved product has a diff
 });
 it("uses the reviewed photo packet size while retaining a partial last packet", () => {
   const x = purchase(); x.items[0] = { ...x.items[0], qty: 13, pack: 1, label_pack: 6 };
-  expect(purchaseLabelJobs(x, [p])).toEqual([{ p, qtyOnLabel: 6, copies: 2 }, { p, qtyOnLabel: 1, copies: 1 }]);
+  expect(purchaseLabelJobs(x, [p])).toEqual([{ p, qtyOnLabel: 6, copies: 2, line: 1 }, { p, qtyOnLabel: 1, copies: 1, line: 1 }]);
 });
 it("prints an exact sticker override independently of inventory quantity", () => {
   const x = purchase(); x.items[0] = { ...x.items[0], qty: 60, pack: 1, label_pack: 6, print_qty: 4 };
   const jobs = purchaseLabelJobs(x, [p]);
-  expect(jobs).toEqual([{ p, qtyOnLabel: 6, copies: 4 }]);
+  expect(jobs).toEqual([{ p, qtyOnLabel: 6, copies: 4, line: 1 }]);
   expect(parseLabel(ownPayload(productForLabel(jobs[0].p, jobs[0].qtyOnLabel))).qty).toBe("6");
   expect(x.items[0].qty).toBe(60);
 });
@@ -46,7 +46,7 @@ it("skips explicitly zero stickers and allows the entire purchase to skip printi
   const x = purchase(); x.items[0].print_qty = 0;
   expect(purchaseLabelJobs(x, [p])).toEqual([]);
   x.items.push({ ...x.items[0], id: "second", print_qty: 4 });
-  expect(purchaseLabelJobs(x, [p])).toEqual([{ p, qtyOnLabel: 2, copies: 4 }]);
+  expect(purchaseLabelJobs(x, [p])).toEqual([{ p, qtyOnLabel: 2, copies: 4, line: 2 }]);
 });
 it("rejects unsafe saved sticker overrides and invalid reviewed packet sizes", () => {
   for (const print_qty of [-1, 0.5, NaN, 5001]) {

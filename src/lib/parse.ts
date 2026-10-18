@@ -147,9 +147,17 @@ export function ownPayload(p: { code: string; item: string; type: string; style:
   return [OWN_PREFIX, s(p.code), s(p.item), s(p.type), s(p.style), s(p.color), s(p.tk), p.rate ? String(Math.round(p.rate) / 100) : "", String(p.pack || 1)].join("|");
 }
 
-/* A short, unique, human-typeable code. Device letter + time base36 keeps it collision-free offline. */
+/* A short, unique, human-typeable code. Device letters + time base36 keep it collision-free offline.
+
+   The tail is a COUNTER, not a dice roll. A design with 6 colours × 3 sizes mints 18 codes inside one
+   millisecond, so a single random base36 character collided with near-certainty (p ≈ 0.99) — and because
+   `code` is a non-unique index, nothing complained: two colours simply shared a code and scanning that
+   sticker at the counter could pull up the wrong one. Two counter chars (36² = 1296) advance on every
+   call, so the same run never repeats a code, and the seed is random so two devices don't march in step. */
+let codeSeq = Math.floor(Math.random() * 1296);
 export function newCode(device: string) {
   const t = Date.now().toString(36).toUpperCase().slice(-6);
-  const r = Math.floor(Math.random() * 36).toString(36).toUpperCase();
+  codeSeq = (codeSeq + 1) % 1296;
+  const r = codeSeq.toString(36).toUpperCase().padStart(2, "0");
   return "R" + device.slice(1, 3) + t + r;
 }

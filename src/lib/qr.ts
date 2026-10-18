@@ -1,7 +1,16 @@
 import qrcode from "qrcode-generator";
 
-/* QR as crisp SVG path, generated fully offline. */
+/* QR as crisp SVG path, generated fully offline. A batch of 500 identical stickers is drawn once, not 500 times. */
+const cache = new Map<string, { svg: string; modules: number }>();
 export function qrSvg(text: string, ecc: "L" | "M" | "Q" | "H" = "M"): { svg: string; modules: number } {
+  const key = ecc + "\u0000" + text, hit = cache.get(key);
+  if (hit) return hit;
+  const made = makeQr(text, ecc);
+  if (cache.size > 3000) cache.delete(cache.keys().next().value!);
+  cache.set(key, made);
+  return made;
+}
+function makeQr(text: string, ecc: "L" | "M" | "Q" | "H"): { svg: string; modules: number } {
   const q = qrcode(0, ecc);
   q.addData(text, "Byte");
   q.make();

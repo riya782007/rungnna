@@ -1,4 +1,4 @@
-import { sb } from "./sync";
+import { sb, signOut } from "./sync";
 import { db } from "./db";
 
 /* Calls the shop's own server functions (/api/…). They hold the Gemini / WhatsApp keys; the phone never sees them. */
@@ -13,7 +13,13 @@ export async function api<T = any>(path: string, body?: unknown): Promise<T> {
     headers: { "content-type": "application/json", authorization: "Bearer " + (await token()) },
     body: body ? JSON.stringify(body) : undefined,
   });
-  const j = await r.json().catch(() => ({ error: "Server error " + r.status }));
+  // a page that is not JSON (an HTML fallback, a proxy error) is never an answer, even with a 200:
+  // treating it as one turned "the server is unreachable" into "no AI key yet"
+  const j = await r.json().catch(() => null);
+  if (!j || typeof j !== "object") throw new Error(`The AI service did not answer (server ${r.status}). Check the internet, or that the latest version is deployed.`);
+  /* A login the server rejects (an old token, or one from before this Supabase project) would
+     otherwise keep Settings saying "Connected", which hides the very form that fixes it. */
+  if (r.status === 401 && /no longer valid/i.test(String(j.error || ""))) await signOut().catch(() => {});
   if (!r.ok) throw new Error(j.error || "Failed");
   return j as T;
 }

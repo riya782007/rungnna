@@ -6,7 +6,15 @@ const dots = (mm: number) => Math.round(mm * LABEL_DOTS_PER_MM);
 const encoder = new TextEncoder();
 const number = (n: number) => String(+n.toFixed(3));
 
-export function labelRowWidth(cfg: LabelCfg) { return cfg.cols * cfg.w + (cfg.cols - 1) * cfg.gapX; }
+export function labelRowWidth(cfg: LabelCfg) {
+  return cfg.driverPaper && cfg.edgeR !== undefined ? cfg.edgeR : cfg.cols * cfg.w + (cfg.cols - 1) * cfg.gapX;
+}
+
+/** Match PrintSheet: position the whole sticker, then relayout its right edge. */
+export function labelBitmapCell(cfg: LabelCfg, col: number) {
+  const x = cfg.offX + col * (cfg.w + cfg.gapX);
+  return { x, y: cfg.offY, w: Math.min(cfg.w, Math.round(((cfg.edgeR ?? 1e9) - x) * 100) / 100) };
+}
 
 /** Flatten only copies, preserving purchase line and partial-packet order across rows. */
 export function labelBitmapRows(cfg: LabelCfg, jobs: PurchaseLabelJob[]): PurchaseLabelJob[][] {
@@ -23,10 +31,15 @@ export function labelBitmapRows(cfg: LabelCfg, jobs: PurchaseLabelJob[]): Purcha
 export function validateLabelBitmapJob(cfg: LabelCfg, jobs: PurchaseLabelJob[]) {
   if (cfg.mode !== "roll") throw new Error("Direct TSC printing needs roll labels. Use browser printing for sheets.");
   if (![cfg.w, cfg.h, cfg.qr, cfg.font].every(n => Number.isFinite(n) && n > 0) || ![cfg.gapX, cfg.gapY, cfg.pad].every(n => Number.isFinite(n) && n >= 0) || ![cfg.offX, cfg.offY].every(Number.isFinite) || cfg.h > 300 || cfg.pad * 2 >= Math.min(cfg.w, cfg.h)) throw new Error("Check the sticker size, gaps and margins");
-  labelBitmapRows(cfg, jobs);
+  const rows = labelBitmapRows(cfg, jobs);
   if (labelRowWidth(cfg) > 104 || labelRowWidth(cfg) <= 0) throw new Error("The full row must fit the TSC printer's 104 mm print width");
+  if ((cfg.edgeR !== undefined && (!Number.isFinite(cfg.edgeR) || cfg.edgeR <= 0 || cfg.edgeR > 104)) || (cfg.rateScale !== undefined && (!Number.isFinite(cfg.rateScale) || cfg.rateScale <= 0))) throw new Error("Check the printer's right edge and rate text size");
   if (Math.abs(cfg.offX) >= cfg.w || Math.abs(cfg.offY) >= cfg.h) throw new Error("The print nudge is outside the sticker. Reset the nudge in printer settings.");
-  for (const j of jobs) labelArtworkGeometry(cfg, j.p, j.qtyOnLabel);
+  for (const row of rows) row.forEach((j, col) => {
+    const cell = labelBitmapCell(cfg, col);
+    if (cell.w <= cfg.pad * 2) throw new Error("A sticker falls past the printer's right edge. Check columns, gaps and nudge.");
+    labelArtworkGeometry({ ...cfg, w: cell.w }, j.p, j.qtyOnLabel);
+  });
 }
 
 /** TSPL BITMAP mode 0: 0 prints black, 1 leaves white; rows are MSB first.
@@ -76,16 +89,27 @@ export async function buildLabelBitmapJob(cfg: LabelCfg, jobs: PurchaseLabelJob[
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) throw new Error("This browser cannot prepare label images. Use browser printing.");
   if (document.fonts?.ready) await document.fonts.ready;
-  const pictures = new Map<PurchaseLabelJob, HTMLImageElement>();
+  const pictures = new Map<PurchaseLabelJob, Map<number, HTMLImageElement>>();
+  const sameArtwork = new Map<string, HTMLImageElement>();
   // Validate and decode everything before producing a printable byte stream.
-  for (const job of jobs) pictures.set(job, await imageFromSvg(renderLabelSvg(cfg, job.p, job.qtyOnLabel)));
+  for (const row of rows) for (let col = 0; col < row.length; col++) {
+    const job = row[col], w = labelBitmapCell(cfg, col).w;
+    let sizes = pictures.get(job);
+    if (!sizes) { sizes = new Map(); pictures.set(job, sizes); }
+    if (!sizes.has(w)) {
+      const svg = renderLabelSvg({ ...cfg, w }, job.p, job.qtyOnLabel, job.line);
+      let picture = sameArtwork.get(svg);
+      if (!picture) { picture = await imageFromSvg(svg); sameArtwork.set(svg, picture); }
+      sizes.set(w, picture);
+    }
+  }
   const chunks: Uint8Array[] = [];
   for (const row of rows) {
     ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, width, height); ctx.imageSmoothingEnabled = false;
     row.forEach((job, col) => {
-      const cellX = dots(col * (cfg.w + cfg.gapX));
-      ctx.save(); ctx.beginPath(); ctx.rect(cellX, 0, dots(cfg.w), height); ctx.clip();
-      ctx.drawImage(pictures.get(job)!, cellX + dots(cfg.offX), dots(cfg.offY), dots(cfg.w), height); ctx.restore();
+      const cell = labelBitmapCell(cfg, col), cellX = dots(cell.x), cellWidth = dots(cell.w);
+      ctx.save(); ctx.beginPath(); ctx.rect(cellX, 0, cellWidth, height); ctx.clip();
+      ctx.drawImage(pictures.get(job)!.get(cell.w)!, cellX, dots(cell.y), cellWidth, height); ctx.restore();
     });
     chunks.push(encodeLabelBitmapRow(cfg, rgbaToTsplBitmap(ctx.getImageData(0, 0, width, height).data, width, height)));
   }

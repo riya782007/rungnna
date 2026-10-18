@@ -1,12 +1,27 @@
-import { expect, it } from "vitest";
-import { buildTSPL, type TscLabel } from "../src/lib/tsc";
-const label: TscLabel = { wmm: 50, hmm: 20, gapmm: 2, qr: "RG|BALI|1", lines: ["BALI", "100X1PAIR"], copies: 4 };
-it("prints the exact reviewed number of stickers and declares paper / gap dimensions", () => {
-  const command = buildTSPL(label); expect(command).toContain("SIZE 50 mm, 20 mm"); expect(command).toContain("GAP 2 mm"); expect(command).toContain("PRINT 1,4\r\n");
-});
-it("does not accept invalid dimensions, counts or unsupported Unicode fonts", () => {
-  for (const change of [{ copies: 0 }, { copies: 1.5 }, { wmm: NaN }, { hmm: 0 }, { gapmm: -1 }, { lines: ["\u0939\u093f\u0928\u094d\u0926\u0940"] }]) expect(() => buildTSPL({ ...label, ...change })).toThrow();
-});
-it("does not let text read from an invoice become extra printer commands", () => {
-  expect(buildTSPL({ ...label, lines: ["BALI\r\nPRINT 1,5000"] }).match(/\r\nPRINT /g)).toHaveLength(1);
+import { expect, it, describe } from "vitest";
+import { printTSPL, directPrintSupported, serialSupported, usbSupported } from "../src/lib/tsc";
+
+/* lib/tsc is the TRANSPORT only. The TSPL itself has exactly one builder — labelTSPL in
+   lib/label-tspl, covered by label-tspl.test.tsx. The second builder this file used to test
+   (buildTSPL) was dead code whose geometry had drifted from the real sticker, so it is gone;
+   these tests pin the contract that replaced it. */
+
+describe("direct printing transport", () => {
+  it("reports no direct printing when the browser has neither Web Serial nor WebUSB", () => {
+    // jsdom has neither, which is the iOS Safari case the UI must fall back from
+    expect(serialSupported()).toBe(false);
+    expect(usbSupported()).toBe(false);
+    expect(directPrintSupported()).toBe(false);
+  });
+
+  it("asks the caller to fall back to browser printing instead of failing silently", async () => {
+    await expect(printTSPL("SIZE 50 mm, 20 mm\r\nPRINT 1,1\r\n")).rejects.toThrow(/TSC printer|Browser/i);
+  });
+
+  it("exports no label builder — label geometry lives in one place only", async () => {
+    const mod: Record<string, unknown> = await import("../src/lib/tsc");
+    expect(Object.keys(mod).sort()).toEqual(
+      ["connectSerial", "connectUSB", "directPrintSupported", "printTSPL", "serialSupported", "usbSupported"],
+    );
+  });
 });

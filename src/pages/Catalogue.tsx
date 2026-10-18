@@ -4,8 +4,11 @@ import { db, type Product } from "../lib/db";
 import { Head, Thumb, Modal, Switch } from "../components/common";
 import { useApp, toast, go } from "../lib/app";
 import { can } from "../lib/roles";
+import { dealerUrl } from "../lib/trade";
 import { rupees } from "../lib/format";
 import { label } from "../lib/products";
+import { QuickPhoto, PutLive } from "../components/QuickPhoto";
+import { publishAll } from "../lib/bulkListing";
 import { slugify } from "../../api/_listing";
 import {
   publishBlockers, shopUrl, tradeUrl, catalogueUrl, productUrl, waShare, copy, randomKey,
@@ -17,7 +20,8 @@ import {
    private trade portal link, and collections to send to any buyer. */
 export default function Catalogue() {
   const { me } = useApp();
-  const admin = can(me, "settings");
+  // this page publishes and rotates the trade link, so it is catalogue.share — not shop settings
+  const admin = can(me, "catalogue.share");
   const products = useLiveQuery(() => db.products.filter(p => !p.deleted).toArray(), [], [] as Product[]);
   const cfgStamp = useLiveQuery(() => db.config.filter(c => c.id === "trade_portal" || c.id.startsWith("catalogue:")).toArray().then(r => r.map(x => x.updated_at + (x.deleted || "")).join()), [], "");
   const [portal, setPortal] = useState<TradePortal | null>(null);
@@ -57,7 +61,9 @@ export default function Catalogue() {
                     <div className="xs mut">{p.code}{p.mrp ? " · MRP " + rupees(p.mrp) : ""}{p.rate ? " · trade " + rupees(p.rate) : ""}{filter !== "live" && publishBlockers(p).length ? " · " + publishBlockers(p)[0] : ""}</div>
                   </button>
                   {filter === "live" && <button className="btn sm" onClick={() => share(productUrl(p.slug!), p.content?.title || "")}>Copy link</button>}
-                  {filter !== "live" && <button className="btn sm" onClick={() => go("product/" + p.id)}>{filter === "draft" ? "Write page" : "Publish"}</button>}
+                  {filter !== "live" && admin && <QuickPhoto p={p} compact />}
+                  {filter === "draft" && <button className="btn sm" onClick={() => go("product/" + p.id)}>Write page</button>}
+                  {filter === "ready" && admin && <PutLive p={p} />}
                 </div>))}
               {!shown.length && <div className="mut sm">{filter === "live" ? "Nothing live yet. Open a product → Online page → Write page with AI → Published." : "Nothing here."}</div>}
             </div>
@@ -77,8 +83,21 @@ export default function Catalogue() {
             </div>
           </div>
 
+          <div className="card dealer-card">
+            <header><h3>Dealer portal</h3><span className="pill ok" style={{ marginLeft: "auto" }}>accounts · trade rates</span></header>
+            <div className="pad stack">
+              <div className="xs mut">Retailers register with their mobile and a PIN; you approve them; they order published designs at your trade rates and the order lands in Sell › Trade orders, priced by the server.</div>
+              <code className="mono xs" style={{ wordBreak: "break-all" }}>{dealerUrl()}</code>
+              <div className="row">
+                <button className="btn sm" onClick={() => share(dealerUrl(), "")}>Copy link</button>
+                <a className="btn sm g" href={waShare(`Order from our wholesale catalogue — register once with your mobile: ${dealerUrl()}`)} target="_blank" rel="noopener">Invite on WhatsApp</a>
+                {can(me, "dealers.manage") && <a className="btn sm p" href="#/dealers">Trade orders</a>}
+              </div>
+            </div>
+          </div>
+
           <div className="card">
-            <header><h3>Trade portal</h3><span className={"pill " + (portal?.enabled ? "ok" : "")} style={{ marginLeft: "auto" }}>{portal?.enabled ? "on · private link" : "off"}</span></header>
+            <header><h3>Secret-link line sheet</h3><span className={"pill " + (portal?.enabled ? "ok" : "")} style={{ marginLeft: "auto" }}>{portal?.enabled ? "on · private link" : "off"}</span></header>
             <div className="pad stack">
               <div className="xs mut">Wholesale rates, packing and an order builder that sends the order to your WhatsApp. Only people with the link see trade rates; it is hidden from Google.</div>
               {portal?.enabled ? <>
@@ -97,10 +116,10 @@ export default function Catalogue() {
           </div>
 
           <div className="card">
-            <header><h3>Catalogues to share</h3><button className="btn sm p" style={{ marginLeft: "auto" }} disabled={!live.length}
+            <header><h3>Catalogues to share</h3><button className="btn sm p" style={{ marginLeft: "auto" }} disabled={!live.length && !withPage.length}
               onClick={() => setEdit({ slug: "", title: "", note: "", audience: "retail", product_ids: [], active: true, created_at: new Date().toISOString() })}>+ New</button></header>
             <div className="pad stack" style={{ gap: 8 }}>
-              {!live.length && <div className="xs mut">Publish a few designs first, then pick them into a catalogue.</div>}
+              {!live.length && !withPage.length && <div className="xs mut">Write a page and add a photo for a few designs first, then pick them into a catalogue.</div>}
               {cats.map(c => (
                 <div key={c.slug} className="item" style={{ flexWrap: "wrap" }}>
                   <span className="grow"><b className="sm">{c.title}</b>
@@ -114,25 +133,32 @@ export default function Catalogue() {
         </div>
       </div>
 
-      {edit && <CatalogueEditor value={edit} live={live} taken={cats.map(c => c.slug)} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); listCatalogues().then(setCats); }} />}
+      {edit && <CatalogueEditor value={edit} live={live} ready={withPage.filter(p => !publishBlockers(p).length)} taken={cats.map(c => c.slug)} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); listCatalogues().then(setCats); }} />}
     </div>
   );
 }
 
-function CatalogueEditor({ value, live, taken, onClose, onSaved }: { value: CatalogueRow; live: Product[]; taken: string[]; onClose: () => void; onSaved: () => void }) {
+function CatalogueEditor({ value, live, ready, taken, onClose, onSaved }: { value: CatalogueRow; live: Product[]; ready: Product[]; taken: string[]; onClose: () => void; onSaved: () => void }) {
   const isNew = !value.slug;
   const [c, setC] = useState<CatalogueRow>(value);
   const [q, setQ] = useState("");
   const picked = new Set(c.product_ids);
-  const list = useMemo(() => { const t = q.trim().toLowerCase(); return live.filter(p => !t || `${p.content?.title} ${p.code} ${p.item} ${p.category}`.toLowerCase().includes(t)); }, [q, live]);
+  /* Ready-but-not-live designs are offered too, and publishing them is part of saving.
+     A catalogue can only show designs that are live, so letting one be picked without
+     putting it live would quietly send the buyer a shorter catalogue than was chosen. */
+  const pool = useMemo(() => [...live, ...ready], [live, ready]);
+  const notLive = useMemo(() => ready.filter(p => picked.has(p.id)), [ready, c.product_ids]);
+  const list = useMemo(() => { const t = q.trim().toLowerCase(); return pool.filter(p => !t || `${p.content?.title} ${p.code} ${p.item} ${p.category}`.toLowerCase().includes(t)); }, [q, pool]);
   const toggle = (id: string) => setC(x => ({ ...x, product_ids: picked.has(id) ? x.product_ids.filter(i => i !== id) : [...x.product_ids, id] }));
   const save = async () => {
     if (!c.title.trim()) return toast("Give the catalogue a name", true);
     if (!c.product_ids.length) return toast("Pick at least one design", true);
+    if (notLive.length && !confirm(`${notLive.length} of the designs you picked are not on the site yet.\n\nSaving puts them live, so the buyer can see them in this catalogue.`)) return;
     let slug = c.slug;
     if (isNew) { const base = slugify(c.title) || "catalogue"; slug = base; let n = 2; while (taken.includes(slug)) slug = `${base}-${n++}`; }
+    if (notLive.length) await publishAll(notLive);
     await saveCatalogue({ ...c, slug, title: c.title.trim() });
-    toast(isNew ? "Catalogue created — copy the link to share" : "Saved"); onSaved();
+    toast(isNew ? `Catalogue created${notLive.length ? ` · ${notLive.length} put live` : ""} — copy the link to share` : "Saved"); onSaved();
   };
   return (
     <Modal title={isNew ? "New catalogue" : "Edit catalogue"} onClose={onClose}>
@@ -146,8 +172,8 @@ function CatalogueEditor({ value, live, taken, onClose, onSaved }: { value: Cata
         </div>
         {c.audience === "trade" && <div className="xs mut">Trade catalogues get their own private key in the link. Delete the catalogue to stop that link working.</div>}
         {!isNew && <Switch on={c.active} onChange={v => setC({ ...c, active: v })} label="Link active" hint="Pause to stop the link working without deleting" />}
-        <input className="in" placeholder={`Search ${live.length} live designs`} value={q} onChange={e => setQ(e.target.value)} />
-        <div className="row xs"><span className="grow mut">{c.product_ids.length} picked</span>
+        <input className="in" placeholder={`Search ${pool.length} design${pool.length === 1 ? "" : "s"}`} value={q} onChange={e => setQ(e.target.value)} />
+        <div className="row xs"><span className="grow mut">{c.product_ids.length} picked{notLive.length ? ` · ${notLive.length} will be put live` : ""}</span>
           <button className="linkbtn" onClick={() => setC({ ...c, product_ids: [...new Set([...c.product_ids, ...list.map(p => p.id)])] })}>Pick all shown</button>
           <button className="linkbtn" onClick={() => setC({ ...c, product_ids: [] })}>Clear</button></div>
         <div className="stack" style={{ gap: 4, maxHeight: 320, overflow: "auto" }}>
@@ -155,7 +181,8 @@ function CatalogueEditor({ value, live, taken, onClose, onSaved }: { value: Cata
             <label key={p.id} className="item" style={{ cursor: "pointer" }}>
               <input type="checkbox" checked={picked.has(p.id)} onChange={() => toggle(p.id)} />
               <Thumb photo_id={p.pro_photo_id || p.photo_id} url={p.pro_photo_url || p.photo_url} text={p.item} size={36} />
-              <span className="grow sm">{p.content?.title || label(p)} <span className="xs mut mono">{p.code}</span></span>
+              <span className="grow sm">{p.content?.title || label(p)} <span className="xs mut mono">{p.code}</span>
+                {!p.catalogue && <span className="xs mut"> · not live yet</span>}</span>
               <span className="xs mono">{c.audience === "trade" ? (p.rate ? rupees(p.rate) : "") : (p.mrp ? rupees(p.mrp) : "")}</span>
             </label>))}
         </div>

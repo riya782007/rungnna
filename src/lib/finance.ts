@@ -2,6 +2,7 @@ import { db, put, uid, now, deviceId, type FiscalYearClose, type Party } from ".
 import { fy } from "./billing";
 import { balances } from "./ledger";
 import { supplierBalances } from "./suppliers";
+import { ownerOnly, requirePerm } from "./scope";
 
 export const dayOf = (iso: string) => iso.slice(0, 10);
 
@@ -15,10 +16,12 @@ export async function assertUnlocked(at?: string) {
 }
 
 export async function setVoucherLock(date: string) {
+  requirePerm("settings.manage", "locking past entries");
   await put("config", { id: "voucher_lock", value: { date }, updated_at: now() } as any);
 }
 
 export async function closeFinancialYear(by: string, date: string): Promise<FiscalYearClose> {
+  ownerOnly();   // closing a year freezes the books: the owner alone
   await assertUnlocked(new Date(date + "T23:59").toISOString());
   const [customers, suppliers, cb, sb] = await Promise.all([
     db.parties.filter(p => !p.deleted && p.kind !== "supplier").toArray(),

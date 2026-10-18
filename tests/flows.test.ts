@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { db, type Bill, type BillLine, type Product } from "../src/lib/db";
 import { finalize, holdBill, newBill, lineFrom, voidBill, partyDue, DEFAULT_SHOP, type Shop } from "../src/lib/billing";
 import { mergeBills, splitBill, buildReturn, saveReturn, returnable } from "../src/lib/docs";
+import { MAIN_STORE, setScope } from "../src/lib/scope";
 
 /* End-to-end on a real (in-memory) IndexedDB: the stock book must stay right through every document flow. */
 const shop: Shop = { ...DEFAULT_SHOP, state: "Delhi" };
@@ -17,6 +18,7 @@ const doc = (type: Bill["bill_type"], lines: BillLine[]): Bill =>
 const pcs = (p: Product, q: number) => ({ ...lineFrom(p, 1, 1), qty: q, pkts: 0, amount: q * p.rate });
 
 beforeEach(async () => {
+  setScope(MAIN_STORE, "owner");   // these flows are the owner working the counter
   await Promise.all(db.tables.map(t => t.clear()));
   await db.locations.put({ id: RACK, code: "G-R01-B1", floor: "G", rack: "R01", box: "B1", name: "", kind: "rack", updated_at: "" });
   await db.products.bulkPut([ring, chain]);

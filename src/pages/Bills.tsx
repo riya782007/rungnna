@@ -4,7 +4,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, type Bill, type BillType, type Payment } from "../lib/db";
 import { GstBill } from "../components/GstBill";
 import { inStore } from "../lib/scope";
-import { due, getShop, voidBill, convertToGst, shareBill, billText, waLink, deleteEstimates, totals, isSale, docName, docShort, DEFAULT_SHOP, type Shop } from "../lib/billing";
+import { due, getShop, voidBill, convertToGst, shareBill, billText, waLink, deleteEstimates, totals, gstLabel, isSale, docName, docShort, DEFAULT_SHOP, type Shop } from "../lib/billing";
 import { canMerge, mergeable, mergeBills, mergeLines, splitBill, splittable, returnable, returnableBill, buildReturn, saveReturn } from "../lib/docs";
 import { usePrivate, visibleBill, lockNow, isEstimate } from "../lib/privacy";
 import { Icon } from "../components/Icon";
@@ -15,6 +15,7 @@ import { rupees, toPaise, when } from "../lib/format";
 import { Head, Thumb } from "../components/common";
 import { VoiceNotes } from "../components/Voice";
 import { InvoiceSheet, PrintBill, type PrintFormat } from "../components/Invoice";
+import { DeleteEstimates } from "../components/DeleteEstimates";
 
 export default function Bills({ args }: { args: string[] }) {
   return args[0] ? <BillView id={args[0]} /> : <BillList />;
@@ -33,6 +34,7 @@ function BillList() {
   const [q, setQ] = useState("");
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [del, setDel] = useState<Bill[] | null>(null);
+  const [delAll, setDelAll] = useState(false);
   const [merge, setMerge] = useState<Bill[] | null>(null);
   const since = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - range); return d.toISOString(); }, [range]);
   const bills = useLiveQuery(() => db.bills.where("at").aboveOrEqual(since).reverse().sortBy("at"), [since], []);
@@ -43,7 +45,7 @@ function BillList() {
   const sum = (f: (b: Bill) => number) => fin.reduce((a, b) => a + f(b), 0);
   const ests = list.filter(b => b.bill_type === "estimate");
   const cns = list.filter(b => b.status === "final" && b.bill_type === "return");
-  const manage = open && can(me, "void");
+  const manage = open && can(me, "estimates.delete");
   const canBill = can(me, "bill");
   const selected = bills.filter(b => sel.has(b.id));
   const selEsts = selected.filter(b => b.bill_type === "estimate");
@@ -55,6 +57,7 @@ function BillList() {
     <div>
       <Head title="Bills" sub={open ? "Estimates are showing. They hide again when you lock or leave the app." : "Every bill stays on record. Cancelled bills are kept and marked."}>
         {open && <button className="btn" onClick={() => lockNow()}><Icon n="lock" size={16} />Lock</button>}
+        {manage && <button className="btn bad" onClick={() => setDelAll(true)}>Delete all estimates</button>}
         <button className="btn p" onClick={() => go("bill")}><Icon n="plus" size={18} />New bill</button>
       </Head>
       <div className={"grid " + (open ? "g4" : "g3")} style={{ marginBottom: 12 }}>
@@ -96,6 +99,7 @@ function BillList() {
           {!list.length && <tr><td colSpan={8} className="empty">No bills in this range.</td></tr>}
         </tbody></table></div>
       {del && <DeleteEstimates bills={del} onClose={() => { setDel(null); setSel(new Set()); }} />}
+      {delAll && <DeleteEstimates all onClose={() => { setDelAll(false); setSel(new Set()); }} />}
       {merge && <MergeDialog sources={merge} onClose={() => setMerge(null)} onDone={b => { setMerge(null); setSel(new Set()); go("bills/" + b.id); }} />}
     </div>
   );
@@ -111,7 +115,7 @@ function MergeDialog({ sources, onClose, onDone }: { sources: Bill[]; onClose: (
   useEffect(() => { getShop().then(setShop); }, []);
   const lines = useMemo(() => mergeLines(sources), [sources]);
   const preview = useMemo(() => totals({ ...sources[0], items: lines, bill_type: type, gst_rate: shop.gst_rate, gst_mode: shop.gst_mode, discount_pct: 0,
-    discount: sources.reduce((a, s) => a + totals(s, shop.state).discount, 0), packing: sources.reduce((a, s) => a + s.packing, 0) }, shop.state), [sources, lines, type, shop]);
+    discount: sources.reduce((a, s) => a + totals(s, shop.state, shop.gstin).discount, 0), packing: sources.reduce((a, s) => a + s.packing, 0) }, shop.state, shop.gstin), [sources, lines, type, shop]);
   const already = lines.filter(l => l.stock_done).reduce((a, l) => a + l.qty, 0);
   const challans = sources.every(s => s.bill_type === "challan");
   const run = async () => {
@@ -129,37 +133,12 @@ function MergeDialog({ sources, onClose, onDone }: { sources: Bill[]; onClose: (
         </div>
         <div className="row between sm"><span>{lines.length} lines (combined from {sources.reduce((a, s) => a + s.items.length, 0)})</span><b className="mono">{preview.total_qty} pcs</b></div>
         {preview.discount ? <div className="row between sm"><span>Discount carried over</span><span className="mono">−{rupees(preview.discount)}</span></div> : null}
-        {preview.gst ? <div className="row between sm"><span>GST {shop.gst_rate}%</span><span className="mono">{rupees(preview.gst)}</span></div> : null}
+        {preview.gst ? <div className="row between sm"><span>GST{gstLabel(preview)}</span><span className="mono">{rupees(preview.gst)}</span></div> : null}
         <div className="net"><span>NET</span><b>{rupees(preview.net)}</b></div>
         {preview.paid || sources.some(s => s.advance) ? <div className="xs mut">Payments and advances on the sources move to the new invoice.</div> : null}
         <div className="note sm">{already ? `${already} pieces already left the racks with the sources — they won't be taken off again. ` : ""}
           The sources stay on record, marked “{challans ? "invoiced" : "merged"} into” the new number. Cancelling the new invoice brings them back.</div>
         <button className="btn p big" disabled={busy} onClick={run}>{busy ? "Saving…" : `Make ${type === "gst" ? "GST invoice" : "estimate"}`}</button>
-      </div>
-    </Modal>
-  );
-}
-
-function DeleteEstimates({ bills, onClose }: { bills: Bill[]; onClose: () => void }) {
-  const { me } = useApp();
-  const [back, setBack] = useState(false);
-  const [typed, setTyped] = useState("");
-  const [busy, setBusy] = useState(false);
-  const total = bills.reduce((a, b) => a + b.net, 0);
-  const paid = bills.filter(b => b.paid || b.advance).length;
-  const word = bills.length > 1 ? "DELETE" : "YES";
-  return (
-    <Modal title={`Delete ${bills.length} estimate${bills.length > 1 ? "s" : ""}`} onClose={onClose}>
-      <div className="stack">
-        <div className="sm">{bills.length} estimate{bills.length > 1 ? "s" : ""} worth <b>{rupees(total)}</b> will be removed from every device and the cloud. This cannot be undone.</div>
-        {paid > 0 && <div className="note warn sm">{paid} of them have payments recorded. Those payments disappear with them, which changes the customer's balance.</div>}
-        <Switch on={back} onChange={setBack} label="Put the pieces back on the racks" hint="Turn on only if the goods never left the shop (a quotation). Leave off if they were delivered." />
-        <label className="f">Type {word} to confirm<input className="in mono" value={typed} onChange={e => setTyped(e.target.value.toUpperCase())} /></label>
-        <button className="btn bad big" disabled={typed !== word || busy} onClick={async () => {
-          setBusy(true);
-          const n = await deleteEstimates(bills, back, me?.name || "");
-          toast(`${n} estimate${n > 1 ? "s" : ""} deleted${back ? " · pieces back on racks" : ""}`); onClose();
-        }}>{busy ? "Deleting…" : "Delete permanently"}</button>
       </div>
     </Modal>
   );
@@ -209,11 +188,12 @@ function BillView({ id }: { id: string }) {
             <div className="pad stack">
               {b.status === "final" && b.bill_type === "estimate" && <button className="btn p" onClick={async () => {
                 if (!confirm("Make a GST invoice for this estimate? The estimate stays on record as 'converted'.")) return;
-                const g = await convertToGst(b, shop, me?.id || ""); toast("GST invoice " + g.no); go("bills/" + g.id);
+                try { if (!shop.gstin?.trim()) toast("Add the shop's GSTIN in Settings → Shop profile: tax invoices should carry it.", true); const g = await convertToGst(b, shop, me?.id || ""); toast("GST invoice " + g.no); go("bills/" + g.id); }
+                catch (e: any) { toast(e.message || "Could not make the GST invoice", true); }
               }}>Convert to GST invoice</button>}
               {b.bill_type === "challan" && mergeable(b) && <button className="btn p" onClick={() => setConv(true)}>Convert challan to invoice</button>}
-              {returnableBill(b) && can(me, "bill") && <button className="btn" onClick={() => setRet(true)}>Sales return (credit note)</button>}
-              {splittable(b) && b.items.length > 1 && can(me, "bill") && <button className="btn" onClick={() => setSplit(true)}>Split — move lines to a new bill</button>}
+              {returnableBill(b) && can(me, "billing.returns") && <button className="btn" onClick={() => setRet(true)}>Sales return (credit note)</button>}
+              {splittable(b) && b.items.length > 1 && can(me, "billing.merge") && <button className="btn" onClick={() => setSplit(true)}>Split — move lines to a new bill</button>}
               {b.status === "final" && (boss ? <button className="btn bad" onClick={async () => {
                 const r = prompt(b.merged_from?.length ? "Reason for cancelling (the merged bills / challans come back as they were):" : "Reason for cancelling this bill (kept on record):"); if (!r) return;
                 await voidBill(b, r, me?.name || ""); toast(b.bill_type === "return" ? "Credit note cancelled — pieces taken off the racks again" : "Bill cancelled — pieces returned to their racks");
@@ -274,7 +254,7 @@ function ReturnDialog({ b, cns, shop, onClose }: { b: Bill; cns: Bill[]; shop: S
   const [refund, setRefund] = useState<"" | Payment["mode"]>("");
   const [busy, setBusy] = useState(false);
   const picks = b.items.map(l => ({ line_id: l.id, qty: parseInt(qty[l.id] || "") || 0 })).filter(p => p.qty > 0);
-  const cn = useMemo(() => totals(buildReturn(b, picks, left, shop, me?.id || ""), shop.state), [JSON.stringify(picks), left, shop]);
+  const cn = useMemo(() => totals(buildReturn(b, picks, left, shop, me?.id || ""), shop.state, shop.gstin), [JSON.stringify(picks), left, shop]);
   const owed = Math.max(0, due(b));
   return (
     <Modal title={`Sales return · ${b.no}`} onClose={onClose}>
@@ -296,7 +276,7 @@ function ReturnDialog({ b, cns, shop, onClose }: { b: Bill; cns: Bill[]; shop: S
           setBusy(true);
           try {
             const draft = buildReturn(b, picks, left, shop, me?.id || "");
-            const done = await saveReturn(draft, b, shop, refund ? { mode: refund, amount: totals(draft, shop.state).net } : undefined);
+            const done = await saveReturn(draft, b, shop, refund ? { mode: refund, amount: totals(draft, shop.state, shop.gstin).net } : undefined);
             toast(`Credit note ${done.no} · ${rupees(done.net)}`); onClose(); go("bills/" + done.id);
           } catch (e: any) { toast(e.message, true); setBusy(false); }
         }}>{busy ? "Saving…" : "Save credit note"}</button>

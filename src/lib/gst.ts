@@ -1,5 +1,5 @@
 import type { Bill, ComplianceRecord, Transport } from "./db";
-import type { Shop } from "./billing";
+import { allocate, type Shop } from "./billing";
 export type GstKind = "irn" | "ewb";
 export const ewbRequired = (b: Bill) => b.status === "final" && ["gst", "challan"].includes(b.bill_type) && b.net > 5_000_000;
 export const irnEligible = (b: Bill) => b.status === "final" && b.bill_type === "gst" && !!b.party_gstin;
@@ -34,26 +34,22 @@ export function validateGst(b: Bill, shop: Shop, kind: GstKind): string[] {
   }
   return errors;
 }
-// Allocate integer paise so exported tax and discount totals equal the saved bill.
-function allocate(total: number, weights: number[]) {
-  const sum = weights.reduce((a, n) => a + n, 0);
-  const out = weights.map(n => sum ? Math.floor(total * n / sum) : 0);
-  let left = total - out.reduce((a, n) => a + n, 0);
-  for (let i = 0; left > 0 && i < out.length; i++, left--) out[i]++;
-  return out;
-}
 export function gstPayload(b: Bill, shop: Shop, kind: GstKind) {
   const errors = validateGst(b, shop, kind); if (errors.length) throw new Error(errors.join("; "));
   const tr = b.transport as Transport;
   const weights = b.items.map(l => l.amount);
   const taxable = b.net - b.adjust - b.gst;
-  const bases = allocate(taxable, weights), cg = allocate(b.cgst, weights), sg = allocate(b.sgst, weights), ig = allocate(b.igst, weights);
+  const mixed = b.items.every(l => l.tax != null && l.taxable != null) && b.items.length > 0;   // lines taxed at different rates
+  const bases = mixed ? b.items.map(l => l.taxable!) : allocate(taxable, weights);
+  const tw = mixed ? b.items.map(l => l.tax!) : weights;
+  const cg = allocate(b.cgst, tw), sg = allocate(b.sgst, tw), ig = allocate(b.igst, tw);
+  const rate = (l: Bill["items"][number]) => l.gst_rate ?? b.gst_rate;
   if (kind === "irn") return {
     Version: "1.1", TranDtls: { TaxSch: "GST", SupTyp: "B2B", RegRev: "N", IgstOnIntra: "N" },
     DocDtls: { Typ: "INV", No: b.no, Dt: gstDate(b.at) },
     SellerDtls: { Gstin: shop.gstin, LglNm: shop.name, Addr1: shop.address, Loc: tr.from_city, Pin: Number(tr.from_pin), Stcd: shop.gstin.slice(0, 2) },
     BuyerDtls: { Gstin: b.party_gstin, LglNm: b.party_name, Pos: tr.to_state_code, Addr1: tr.to_address, Loc: tr.to_city, Pin: Number(tr.to_pin), Stcd: tr.to_state_code },
-    ItemList: b.items.map((l, i) => ({ SlNo: String(i + 1), PrdDesc: [l.item, l.style, l.color].filter(Boolean).join(" "), IsServc: "N", HsnCd: l.hsn || shop.hsn, Qty: l.qty, Unit: unit(l.type), UnitPrice: Number((bases[i] / l.qty / 100).toFixed(6)), TotAmt: money(bases[i]), Discount: 0, AssAmt: money(bases[i]), GstRt: b.gst_rate, IgstAmt: money(ig[i]), CgstAmt: money(cg[i]), SgstAmt: money(sg[i]), TotItemVal: money(bases[i] + cg[i] + sg[i] + ig[i]) })),
+    ItemList: b.items.map((l, i) => ({ SlNo: String(i + 1), PrdDesc: [l.item, l.style, l.color].filter(Boolean).join(" "), IsServc: "N", HsnCd: l.hsn || shop.hsn, Qty: l.qty, Unit: unit(l.type), UnitPrice: Number((bases[i] / l.qty / 100).toFixed(6)), TotAmt: money(bases[i]), Discount: 0, AssAmt: money(bases[i]), GstRt: rate(l), IgstAmt: money(ig[i]), CgstAmt: money(cg[i]), SgstAmt: money(sg[i]), TotItemVal: money(bases[i] + cg[i] + sg[i] + ig[i]) })),
     ValDtls: { AssVal: money(taxable), CgstVal: money(b.cgst), SgstVal: money(b.sgst), IgstVal: money(b.igst), CesVal: 0, StCesVal: 0, Discount: 0, OthChrg: 0, RndOffAmt: money(b.adjust), TotInvVal: money(b.net) },
   };
   return {
@@ -62,7 +58,7 @@ export function gstPayload(b: Bill, shop: Shop, kind: GstKind) {
     toGstin: b.party_gstin || "URP", toTrdName: b.party_name, toAddr1: tr.to_address, toAddr2: "", toPlace: tr.to_city, toPincode: Number(tr.to_pin), actToStateCode: Number(tr.to_state_code), toStateCode: Number(tr.to_state_code), transactionType: 1,
     totalValue: money(taxable), cgstValue: money(b.cgst), sgstValue: money(b.sgst), igstValue: money(b.igst), cessValue: 0, cessNonAdvolValue: 0, otherValue: money(b.adjust), totInvValue: money(b.net),
     transporterId: tr.transporter_id, transporterName: tr.transporter_name, transDocNo: tr.doc_no || "", transDocDate: tr.doc_date ? gstDate(tr.doc_date) : "", transMode: tr.mode, transDistance: String(tr.distance), vehicleNo: tr.vehicle_no, vehicleType: "R",
-    itemList: b.items.map((l, i) => ({ productName: l.item, productDesc: [l.style, l.color].join(" "), hsnCode: Number(l.hsn || shop.hsn), quantity: l.qty, qtyUnit: unit(l.type), taxableAmount: money(bases[i]), cgstRate: b.gst && !b.igst ? b.gst_rate / 2 : 0, sgstRate: b.gst && !b.igst ? b.gst_rate / 2 : 0, igstRate: b.igst ? b.gst_rate : 0, cessRate: 0, cessNonadvol: 0 })),
+    itemList: b.items.map((l, i) => ({ productName: l.item, productDesc: [l.style, l.color].join(" "), hsnCode: Number(l.hsn || shop.hsn), quantity: l.qty, qtyUnit: unit(l.type), taxableAmount: money(bases[i]), cgstRate: b.gst && !b.igst ? rate(l) / 2 : 0, sgstRate: b.gst && !b.igst ? rate(l) / 2 : 0, igstRate: b.igst ? rate(l) : 0, cessRate: 0, cessNonadvol: 0 })),
   };
 }
 export function gstUpload(b: Bill, shop: Shop, kind: GstKind) {

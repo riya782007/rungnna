@@ -1,7 +1,7 @@
 import { db, put, uid, now, deviceId, type Bill, type BillLine, type BillType, type Movement, type Payment } from "./db";
 import { totals, fixLine, finalize, newBill, bumpStock, isSale, isChallan, type Shop } from "./billing";
 import { setTagsSold } from "./rfid";
-import { inStore } from "./scope";
+import { inStore, requirePerm } from "./scope";
 import { assertStoreRow } from "./stores";
 
 /* Documents made from other documents — all offline, all-or-nothing:
@@ -55,11 +55,11 @@ export function mergeLines(sources: Bill[]): BillLine[] {
 /* The new invoice (still unsaved): customer from the first source, lines combined, every payment and advance carried over. */
 export function buildMerged(sources: Bill[], type: BillType, shop: Shop, by: string): Bill {
   const first = [...sources].sort((a, z) => a.at.localeCompare(z.at))[0];
-  const tot = sources.map(s => totals(s, shop.state));
+  const tot = sources.map(s => totals(s, shop.state, shop.gstin));
   const b = newBill(by, shop, type);
   return {
     ...b,
-    party_id: first.party_id, party_name: first.party_name, party_phone: first.party_phone, party_gstin: first.party_gstin, party_state: first.party_state,
+    party_id: first.party_id, party_name: first.party_name, party_phone: first.party_phone, party_gstin: first.party_gstin, party_state: first.party_state, party_address: first.party_address,
     salesman: first.salesman, items: mergeLines(sources),
     discount: tot.reduce((a, t) => a + t.discount, 0), discount_pct: 0,
     packing: tot.reduce((a, t) => a + t.packing, 0),
@@ -77,6 +77,7 @@ export function buildMerged(sources: Bill[], type: BillType, shop: Shop, by: str
 
 /* Save the merged invoice and mark every source "merged into <no>" in one go. */
 export async function mergeBills(sources: Bill[], type: BillType, shop: Shop, by: string): Promise<Bill> {
+  requirePerm("billing.merge", "merging bills");
   const why = canMerge(sources); if (why) throw new Error(why);
   // re-read: another device or tab may have touched them since they were ticked
   const fresh = (await db.bills.bulkGet(sources.map(s => s.id))).filter(Boolean) as Bill[];
@@ -95,6 +96,7 @@ export const splittable = (b: Bill) => inStore(b) && !b.compliance?.irn && !b.co
    the new one gets the next number of the same series, and the sale movements of the moved pieces are
    handed to the new bill (so cancelling either one returns exactly its own pieces). Payments stay on the original. */
 export async function splitBill(b0: Bill, lineIds: string[], shop: Shop, by: string): Promise<{ original: Bill; split: Bill }> {
+  requirePerm("billing.merge", "splitting a bill");
   const b = (await db.bills.get(b0.id)) || b0;
   if (!splittable(b)) throw new Error("This bill can't be split");
   const ids = new Set(lineIds);
@@ -103,20 +105,21 @@ export async function splitBill(b0: Bill, lineIds: string[], shop: Shop, by: str
   if (!staying.length) throw new Error("Leave at least one line on the original bill");
   const fresh = newBill(by, shop, b.bill_type);
   const base: Bill = { ...fresh, party_id: b.party_id, party_name: b.party_name, party_phone: b.party_phone, party_gstin: b.party_gstin,
-    party_state: b.party_state, salesman: b.salesman, gst_rate: b.gst_rate, gst_mode: b.gst_mode, remarks: "Split from " + (b.no || "held bill") };
+ party_address: b.party_address,
+    party_state: b.party_state, salesman: b.salesman, gst_rate: b.gst_rate, gst_mode: b.gst_mode, price_level: b.price_level, remarks: "Split from " + (b.no || "held bill") };
   const movingProducts = new Set(moving.map(l => l.product_id).filter(Boolean) as string[]);
   const pieces = await db.products.bulkGet([...movingProducts]);
   const tagSet = new Set(pieces.flatMap(p => p?.barcodes || []));
-  const tagsMoving = (b.rfid_tags || []).filter(t => tagSet.has(t) && !staying.some(l => l.product_id && pieces.find(p => p?.id === l.product_id)?.barcodes.includes(t)));
+  const tagsMoving = (b.rfid_tags || []).filter(t => tagSet.has(t) && !staying.some(l => l.product_id && (pieces.find(p => p?.id === l.product_id)?.barcodes || []).includes(t)));
 
   if (b.status === "hold") {
-    const split = totals({ ...base, items: moving.map(l => ({ ...l })), rfid_tags: tagsMoving }, shop.state);
-    const original = totals({ ...b, items: staying, rfid_tags: (b.rfid_tags || []).filter(t => !tagsMoving.includes(t)) }, shop.state);
+    const split = totals({ ...base, items: moving.map(l => ({ ...l })), rfid_tags: tagsMoving }, shop.state, shop.gstin);
+    const original = totals({ ...b, items: staying, rfid_tags: (b.rfid_tags || []).filter(t => !tagsMoving.includes(t)) }, shop.state, shop.gstin);
     await db.transaction("rw", [db.bills, db.outbox], async () => { await put("bills", split); await put("bills", original); });
     return { original, split };
   }
 
-  const original = totals({ ...b, items: staying, rfid_tags: (b.rfid_tags || []).filter(t => !tagsMoving.includes(t)) }, shop.state);
+  const original = totals({ ...b, items: staying, rfid_tags: (b.rfid_tags || []).filter(t => !tagsMoving.includes(t)) }, shop.state, shop.gstin);
   const draft: Bill = { ...base, items: moving.map(l => ({ ...l, stock_done: 1 as const })), rfid_tags: tagsMoving };
   const split = await finalize(draft, shop.state, b.party_name, async saved => {
     await put("bills", original);
@@ -161,7 +164,7 @@ export function buildReturn(bill: Bill, picks: { line_id: string; qty: number }[
   }
   const cn0: Bill = {
     ...newBill(by, shop, "return"),
-    party_id: bill.party_id, party_name: bill.party_name, party_phone: bill.party_phone, party_gstin: bill.party_gstin, party_state: bill.party_state,
+    party_id: bill.party_id, party_name: bill.party_name, party_phone: bill.party_phone, party_gstin: bill.party_gstin, party_state: bill.party_state, party_address: bill.party_address,
     salesman: bill.salesman, gst_rate: bill.gst_rate, gst_mode: bill.gst_mode, items,
     return_of: bill.id, return_of_no: bill.no, src_type: bill.bill_type, remarks: "Return against " + bill.no,
   };
@@ -173,6 +176,7 @@ export function buildReturn(bill: Bill, picks: { line_id: string; qty: number }[
 /* Save the credit note: number it (CN/ or ECN/), put each piece back on the rack it left from
    (fullest-first in the order it went out), free its RFID tags, and record any cash refunded. */
 export async function saveReturn(cn0: Bill, bill: Bill, shop: Shop, refund?: { mode: Payment["mode"]; amount: number }): Promise<Bill> {
+  requirePerm("billing.returns", "sales returns");
   await assertStoreRow(bill);
   if (!cn0.items.length) throw new Error("Pick at least one piece to return");
   const prev = await db.bills.where("return_of").equals(bill.id).toArray();
@@ -208,7 +212,7 @@ export async function saveReturn(cn0: Bill, bill: Bill, shop: Shop, refund?: { m
       const free: string[] = [];
       for (const l of saved.items) {
         const p = l.product_id ? await db.products.get(l.product_id) : undefined;
-        free.push(...tags.filter(t => p?.barcodes.includes(t) && p.sold_tags?.[t]).slice(0, l.qty));
+        free.push(...tags.filter(t => (p?.barcodes || []).includes(t) && p?.sold_tags?.[t]).slice(0, l.qty));
       }
       await setTagsSold(free, null);
     }

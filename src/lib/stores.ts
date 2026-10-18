@@ -1,5 +1,5 @@
 import { db, put, now, uid, deviceId, applyMovement, getSetting, setSetting, type Staff, type StoreTransfer, type Movement } from "./db";
-import { currentStore, MAIN_STORE, inStore, ownerOnly } from "./scope";
+import { currentStore, MAIN_STORE, inStore, ownerOnly, requirePerm } from "./scope";
 export { currentStore, MAIN_STORE, inStore } from "./scope";
 
 export async function initStores(me?: Staff | null) {
@@ -46,7 +46,7 @@ export async function dispatchTransfer(to_store: string, items: StoreTransfer["i
       const c = await db.stock.get(item.product_id + "|" + item.from_loc);
       if ((c?.qty || 0) < item.qty) throw new Error("Not enough stock in the source rack");
       for (const tag of item.tags || []) {
-        if (seenTags.has(tag) || !p.barcodes.includes(tag) || p.sold_tags?.[tag]) throw new Error("RFID tag is duplicated or unavailable");
+        if (seenTags.has(tag) || !(p.barcodes || []).includes(tag) || p.sold_tags?.[tag]) throw new Error("RFID tag is duplicated or unavailable");
         seenTags.add(tag);
       }
       if (item.tags?.length && item.tags.length !== item.qty) throw new Error("Tagged quantity must equal scanned tags");
@@ -58,6 +58,7 @@ export async function dispatchTransfer(to_store: string, items: StoreTransfer["i
   });
 }
 export async function receiveTransfer(id: string, racks: Record<string, string>, by: string) {
+  requirePerm("stores.transfer", "receiving a transfer");
   return db.transaction("rw", [db.store_transfers, db.movements, db.stock, db.products, db.locations, db.outbox], async () => {
     const t = await db.store_transfers.get(id);
     if (!t || t.status !== "in_transit" || t.to_store !== currentStore()) throw new Error("Transfer cannot be received at this store");
