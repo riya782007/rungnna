@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it } from "vitest";
 import { db } from "../src/lib/db";
 import { parseVendorList, importVendors, vendorCost } from "../src/lib/vendors";
-import { applyVendorTerms, type PhotoRow } from "../src/lib/purchase-photo";
+import { applyVendorTerms, repricePhotoRows, type PhotoRow } from "../src/lib/purchase-photo";
+import { DEFAULT_RULE } from "../src/lib/pricing";
 import { BILLS, CHALLAN_PAGES } from "./fixtures/rungnna-bills";
 
 const list = parseVendorList(readFileSync(new URL("../src/data/vendors.txt", import.meta.url), "utf8"));
@@ -53,6 +54,22 @@ describe("vendor terms on purchase cost", () => {
   it("adjusts every review row", () => {
     const r = { item: "X", style: "S", color: "", unit: "PCS", hsn: "", qty: "1", cost: "200", rate: "" } as PhotoRow;
     expect(applyVendorTerms([r, { ...r, cost: "50" }], { less_pct: 5, rate_divisor: 1 }).map(x => x.cost)).toEqual(["190.00", "47.50"]);
+  });
+  it("divides a line only once, however often the button is pressed (owner, 18 Oct)", () => {
+    const r = { item: "X", style: "S", color: "", unit: "PCS", hsn: "", qty: "1", cost: "120", rate: "" } as PhotoRow;
+    const once = applyVendorTerms([r], { less_pct: 0, rate_divisor: 1.2 });
+    expect(once[0].cost).toBe("100.00"); expect(once[0].termsDone).toBe(true);
+    expect(applyVendorTerms(once, { less_pct: 0, rate_divisor: 1.2 })[0].cost).toBe("100.00");
+    // a line added after the terms were applied still gets them
+    expect(applyVendorTerms([...once, r], { less_pct: 0, rate_divisor: 1.2 }).map(x => x.cost)).toEqual(["100.00", "100.00"]);
+  });
+  it("shop pricing re-prices every line from its current cost, and says how many", () => {
+    const rule = { ...DEFAULT_RULE, margin: { ...DEFAULT_RULE.margin, mode: "multiply" as const, factor: 2.5, round_to: 1 } };
+    const r = { item: "X", style: "S", color: "", unit: "PCS", hsn: "", qty: "1", cost: "100", rate: "999" } as PhotoRow;
+    const { rows, priced } = repricePhotoRows([r, { ...r, cost: "" }, { ...r, unit: "BOX" }], rule);
+    expect(priced).toBe(1);
+    expect(Number(rows[0].rate)).toBeGreaterThan(200); expect(Number(rows[0].rate) % 2).toBe(0);   // from cost, even
+    expect(rows[1].rate).toBe("999"); expect(rows[2].rate).toBe("999");                            // nothing to price from: untouched
   });
 });
 

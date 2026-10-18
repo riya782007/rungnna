@@ -7,8 +7,8 @@ import { api, blobToB64 } from "../lib/ai";
 import { compress, savePhoto } from "../lib/image";
 import { getRule, type PricingRule } from "../lib/pricing";
 import {
-  savePhotoPurchase, validatePhotoRows, pricePhotoRows, applyVendorTerms,
-  autoArticle, autoArticleCount, draftLabelProducts, type PhotoRow,
+  savePhotoPurchase, validatePhotoRows, pricePhotoRows, applyVendorTerms, repricePhotoRows,
+  autoArticle, autoArticleCount, draftLabelProducts, labelCountFor, type PhotoRow,
 } from "../lib/purchase-photo";
 import { purchaseLabelJobs } from "../lib/purchase-labels";
 import { DEFAULT_CFG, LabelView, validateLabelPrint, loadLabelCfg, useLabelPrint, tscCommands, expandJobs, type LabelCfg, type Job } from "../pages/Labels";
@@ -20,9 +20,10 @@ import { SupplierNo } from "./SupplierNo";
 import { checkBill, checkSummary, matchSupplier, fallbackBillNo, type LineFix } from "../lib/billCheck";
 import { newParty } from "../lib/billing";
 
-const blank = (): PhotoRow => ({ item: "", style: "", color: "", unit: "PCS", hsn: "", qty: "", cost: "", rate: "" });
-const captions: Record<string, string> = { item: "Item", style: "Style/article", color: "Colour", unit: "Unit", hsn: "HSN", qty: "Qty", cost: "Cost ₹", rate: "Rate ₹" };
-const FIELDS = ["item", "style", "color", "unit", "hsn", "qty", "cost", "rate"] as const;
+const blank = (): PhotoRow => ({ item: "", style: "", color: "", unit: "PCS", hsn: "", qty: "", pack: "1", cost: "", rate: "" });
+const captions: Record<string, string> = { item: "Item", style: "Style/article", color: "Colour", unit: "Unit", hsn: "HSN", qty: "Qty", pack: "X (pcs/pkt)", cost: "Cost ₹", rate: "Rate ₹" };
+/* pack = the "X1" / "X3" after the rate on his stickers: pieces in one packet (his old software's QTY box) */
+const FIELDS = ["item", "style", "color", "unit", "hsn", "qty", "pack", "cost", "rate"] as const;
 type Field = (typeof FIELDS)[number];
 
 type Draft = { store: string; rows: PhotoRow[]; supplier: string; billNo: string; rack: string; photoId?: string; warnings: string; total: string;
@@ -68,6 +69,8 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
   // the same printer settings the Labels page uses, so a sticker printed here is that sticker
   useEffect(() => { loadLabelCfg().then(setCfg); }, []);
 
+  /* the two "apply" buttons confirm in green that they did something (owner, 18 Oct) */
+  const [done, setDone] = useState<{ pricing?: string; pricingSig?: string; terms?: string }>({});
   const set = (patch: Partial<Draft>) => { setReviewed(false); setD(x => ({ ...x, ...patch })); };
   const row = (i: number, key: Field, value: string) =>
     set({ rows: d.rows.map((r, k) => k === i ? { ...r, [key]: value, ...(key === "style" ? { autoStyle: false } : {}) } : r) });
@@ -100,7 +103,8 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       const text = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v) : "");
       const raw = out.rows.map((r: any) => ({
         item: text(r.item), style: text(r.style), color: text(r.color), unit: text(r.unit) || "PCS",
-        hsn: text(r.hsn), qty: text(r.qty), cost: text(r.cost), rate: text(r.rate), amount: text(r.amount), box: text(r.box),
+        hsn: text(r.hsn), qty: text(r.qty), pack: /^\d{1,5}$/.test(text(r.pack).trim()) && Number(text(r.pack)) > 0 ? String(Number(text(r.pack))) : "1",
+        cost: text(r.cost), rate: text(r.rate), amount: text(r.amount), box: text(r.box),
       }));
       // the bill checked against itself: ditto marks written out, each line's amount, the Net
       const checked = checkBill(raw, text(out.invoice_total));
@@ -125,16 +129,29 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         ].filter(Boolean).join("\n"),
         photoId: await savePhoto(files[0]),
       });
+      setDone({});   // a new bill: nothing has been applied to it yet
     } catch (e: any) { setError(e.message); } finally { lock.current = false; setBusy(false); }
   };
 
-  const price = async () => {
+  /* the two "apply" buttons say plainly, in green, that they did something (owner, 18 Oct) */
+  const costSig = (rows: PhotoRow[]) => rows.map(r => r.cost + "|" + r.unit).join(";");
+  const price = async (rowsIn = d.rows, note = "") => {
     try {
       const rule = await getRule(); setPricing(rule);
       // fill any still-blank article the same way the bill reader does, so a hand-typed line
       // behaves exactly like a read one
-      set({ rows: pricePhotoRows(autoArticle(d.rows), rule) });
+      const { rows, priced } = repricePhotoRows(autoArticle(rowsIn), rule);
+      set({ rows });
+      const how = rule.margin.mode === "percent" ? `+${rule.margin.percent}%` : `${rule.margin.mode === "divide" ? "÷" : "×"}${rule.margin.factor}`;
+      setDone(x => ({ ...x, pricing: `${note}Shop pricing applied: ${priced} line${priced === 1 ? "" : "s"} priced (${how}, even rates)`, pricingSig: costSig(rows) }));
     } catch (e: any) { setError(e.message); }
+  };
+  const applyTerms = (v: NonNullable<typeof vendor>) => {
+    const todo = d.rows.filter(r => !r.termsDone).length;
+    const terms = [(v.rate_divisor || 1) !== 1 ? `cost ÷ ${v.rate_divisor}` : "", v.less_pct ? `${v.less_pct}% less` : ""].filter(Boolean).join(", ");
+    setDone(x => ({ ...x, terms: `Vendor terms applied: ${terms} on ${todo} line${todo === 1 ? "" : "s"}` }));
+    // the rates were worked out from the old cost: work them out again from the new one
+    void price(applyVendorTerms(d.rows, v), `${terms} done · `);
   };
 
   /* Build the labels for a purchase exactly as the Labels page would. */
@@ -184,7 +201,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
   try {
     const rows = validatePhotoRows(d.rows);
     total = (rows.reduce((n, r) => n + r.qty * r.cost, 0) / 100).toFixed(2);
-    labelCount = rows.reduce((n, r) => n + r.qty, 0);
+    labelCount = labelCountFor(rows);
     if (labelCount > 5000) validation = "More than 5000 labels: split this purchase into smaller batches.";
   } catch (e: any) { validation = e.message; }
 
@@ -222,7 +239,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
     {!!d.rows.length && <div className="row"><b className="grow">{d.supplierName || "Purchase bill"}{d.billNo ? <span className="xs mut"> · {d.billNo}</span> : null}</b>
       <button className="btn sm" disabled={busy} onClick={() => setCam(true)}><Camera size={15} />Photo of another page</button>
       <button className="btn sm" disabled={busy} onClick={() => set({ rows: [...d.rows, blank()] })}><Plus size={15} />Line</button>
-      <button className="linkbtn" disabled={busy} onClick={() => { if (confirm("Clear this bill and start again? Nothing has been saved.")) set({ rows: [], billNo: "", total: "", warnings: "", check: undefined, supplierName: "", photoId: undefined }); }}>Start over</button></div>}
+      <button className="linkbtn" disabled={busy} onClick={() => { if (confirm("Clear this bill and start again? Nothing has been saved.")) set({ rows: [], billNo: "", total: "", warnings: "", check: undefined, supplierName: "", photoId: undefined }); setDone({}); }}>Start over</button></div>}
     <input ref={file} type="file" hidden accept="image/jpeg,image/png,image/webp" multiple onChange={e => { void read(Array.from(e.target.files || [])); e.target.value = ""; }} />
     {busy && !!d.rows.length && <div role="status">Working…</div>}
     {cam && <Suspense fallback={<div role="status">Opening camera…</div>}>
@@ -269,16 +286,20 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       {!!invented && <div className="note sm">{invented} line{invented === 1 ? "" : "s"} had no article number on the bill. An article was built from the item and its rate (e.g. CHOTI-273) so lines at different rates stay separate — and so buying the same thing again at the same rate matches the same product. Edit any of them if the supplier has a code.</div>}
 
       <div className="row">
-        {vendor && (!!vendor.less_pct || (vendor.rate_divisor || 1) !== 1) && <button className="btn" disabled={busy} title="Printed cost ÷ rate divisor, then less %. Press once." onClick={() => set({ rows: applyVendorTerms(d.rows, vendor) })}>Apply vendor terms{vendor.less_pct ? ` (${vendor.less_pct}% less)` : ""}{(vendor.rate_divisor || 1) !== 1 ? ` (÷${vendor.rate_divisor})` : ""}</button>}
-        <button className="btn" disabled={busy} onClick={price}>Apply shop pricing</button>
+        {vendor && (!!vendor.less_pct || (vendor.rate_divisor || 1) !== 1) && (d.rows.length && d.rows.every(r => r.termsDone)
+          ? <span className="pill ok applied" role="status">✓ Vendor terms applied{(vendor.rate_divisor || 1) !== 1 ? ` (÷${vendor.rate_divisor})` : ""}{vendor.less_pct ? ` (${vendor.less_pct}% less)` : ""}</span>
+          : <button className="btn" disabled={busy} title="Printed cost ÷ rate divisor, then less %. Each line only once." onClick={() => applyTerms(vendor)}>
+              Apply vendor terms{vendor.less_pct ? ` (${vendor.less_pct}% less)` : ""}{(vendor.rate_divisor || 1) !== 1 ? ` (÷${vendor.rate_divisor})` : ""}{d.rows.some(r => r.termsDone) ? ` to ${d.rows.filter(r => !r.termsDone).length} new lines` : ""}</button>)}
+        <button className="btn" disabled={busy} onClick={() => void price()}>{done.pricing && done.pricingSig === costSig(d.rows) ? "Apply shop pricing again" : "Apply shop pricing"}</button>
         <span>Goods cost ₹{total}</span>
         <label className="f">Supplier payable ₹<input className="in" inputMode="decimal" value={d.total} onChange={e => set({ total: e.target.value })} /></label></div>
 
+      {done.pricing && done.pricingSig === costSig(d.rows) && <div className="note ok applied-note sm" role="status">✓ {done.pricing}</div>}
       {pricing && <div className="row sm"><span>Pricing: {pricing.margin.mode === "percent" ? `+${pricing.margin.percent}%` : `${pricing.margin.mode === "divide" ? "÷" : "×"}${pricing.margin.factor}`} · round ₹{pricing.margin.round_to} {pricing.margin.round_dir}</span><a href="#/settings">Pricing settings</a></div>}
 
       {!!preview.length && <div className="stack">
-        <div className="row"><b>{labelCount} labels</b><span className="xs mut">One per PCS / PAIR / SET · {cfg.w}×{cfg.h}mm · {cfg.output === "tspl" && directPrintSupported() ? "straight to the TSC printer" : "browser print sheet"}</span></div>
-        <div className="label-preview">{preview.map((p, i) => <LabelView key={i} cfg={cfg} p={p} qtyOnLabel={1} line={i + 1} />)}
+        <div className="row"><b>{labelCount} labels</b><span className="xs mut">One per packet (X = pieces in it; X1 = one per piece) · {cfg.w}×{cfg.h}mm · {cfg.output === "tspl" && directPrintSupported() ? "straight to the TSC printer" : "browser print sheet"}</span></div>
+        <div className="label-preview">{preview.map((p, i) => <LabelView key={i} cfg={cfg} p={p} qtyOnLabel={p.pack || 1} line={i + 1} />)}
           {d.rows.length > preview.length && <span className="xs mut">+{d.rows.length - preview.length} more designs</span>}</div>
       </div>}
 

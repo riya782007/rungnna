@@ -304,8 +304,9 @@ export function LabelView({ cfg, p, qtyOnLabel = 1, line }: { cfg: LabelCfg; p: 
     <div className="lbl lbl-shop" style={{ width: cfg.w + "mm", height: cfg.h + "mm", padding: cfg.pad + "mm", columnGap: cfg.pad + "mm", fontSize: fs + "pt" }}>
       <div className="t">
         {s.item && p.item && <div>{p.item}</div>}
-        {s.style && p.style && <div>{p.style}</div>}
-        {s.color && p.color && <div>{p.color}</div>}
+        {/* style and colour share the second line: four lines don't fit above the rate on a 15 mm sticker
+            and the fourth ran into "9170X1PCS" (owner's photo, 18 Oct) */}
+        {((s.style && p.style) || (s.color && p.color)) && <div>{[s.style && p.style, s.color && p.color].filter(Boolean).join(" ")}</div>}
         {s.tk && p.tk && <div>TK {p.tk}</div>}
         {/* the owner reads the cost code and the bill line together, on the third line */}
         {(s.cost_code && pp.cost_code) || ((s.line ?? true) && line) ? <div>{s.cost_code && pp.cost_code ? pp.cost_code : ""}{(s.line ?? true) && line ? <span className="lno lno-end" title="Line of the bill these goods are on">{line}</span> : null}</div> : null}

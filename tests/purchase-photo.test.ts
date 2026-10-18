@@ -2,7 +2,8 @@ import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { db, now } from "../src/lib/db";
 import { newParty, newBill, DEFAULT_SHOP, totals } from "../src/lib/billing";
-import { savePhotoPurchase, validatePhotoRows, pricePhotoRows, type PhotoRow } from "../src/lib/purchase-photo";
+import { savePhotoPurchase, validatePhotoRows, pricePhotoRows, draftLabelProducts, labelCountFor, type PhotoRow } from "../src/lib/purchase-photo";
+import { purchaseLabelJobs, productForLabel } from "../src/lib/purchase-labels";
 import { DEFAULT_RULE } from "../src/lib/pricing";
 import { MAIN_STORE, setScope, setScopePerms } from "../src/lib/scope";
 import { supplierLedger } from "../src/lib/suppliers";
@@ -25,6 +26,24 @@ describe("reviewed photo purchases", () => {
     await savePhotoPurchase([row], input);
     await savePhotoPurchase([{ ...row, rate: "115" }], { ...input, billNo: "SUP-2" });
     expect((await db.products.toArray())[0]).toMatchObject({ rate: 11600, item: "BALI", cost_code: "OAX1PAIR", price_locked: 1 });   // 115 typed → 116 kept, as on its label
+  });
+  it("carries pieces-per-packet (the X3 after the rate) from the bill to the stickers (owner, 18 Oct)", async () => {
+    const r = { ...row, unit: "PCS", qty: "24", pack: "12", rate: "236" };
+    expect(validatePhotoRows([r])[0].pack).toBe(12);
+    expect(validatePhotoRows([{ ...r, pack: "" }])[0].pack).toBe(1);          // blank = X1
+    expect(() => validatePhotoRows([{ ...r, pack: "2.5" }])).toThrow("Line 1: Pieces per packet");
+    expect(labelCountFor(validatePhotoRows([r]))).toBe(2);
+    expect(draftLabelProducts([r], "owner", DEFAULT_RULE)[0].pack).toBe(12);
+    const pur = await savePhotoPurchase([r], input);
+    expect(pur.items[0]).toMatchObject({ qty: 24, pack: 12, pkts: 2 });
+    const prod = (await db.products.toArray())[0];
+    expect(prod.pack).toBe(12);
+    const jobs = purchaseLabelJobs(pur, [prod]);
+    expect(jobs).toEqual([expect.objectContaining({ qtyOnLabel: 12, copies: 2, line: 1 })]);
+    expect(productForLabel(prod, 12).cost_code).toMatch(/X12PCS$/);
+    // a line without a pack prints one sticker per piece, X1, as before
+    const one = await savePhotoPurchase([{ ...row, style: "K1", unit: "PCS", qty: "3" }], { ...input, billNo: "SUP-9" });
+    expect(purchaseLabelJobs(one, await db.products.toArray())).toEqual([expect.objectContaining({ qtyOnLabel: 1, copies: 3 })]);
   });
   it("rejects oversized label batches before committing inventory", async () => {
     await expect(savePhotoPurchase([{ ...row, qty: "5001" }], input)).rejects.toThrow("5000");
