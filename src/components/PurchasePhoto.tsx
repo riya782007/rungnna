@@ -274,7 +274,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
 
       {!!preview.length && <div className="stack">
         <div className="row"><b>{labelCount} labels</b><span className="xs mut">One per PCS / PAIR / SET · {cfg.w}×{cfg.h}mm · {cfg.output === "tspl" && directPrintSupported() ? "straight to the TSC printer" : "browser print sheet"}</span></div>
-        <div className="label-preview">{preview.map((p, i) => <LabelView key={i} cfg={cfg} p={p} qtyOnLabel={1} />)}
+        <div className="label-preview">{preview.map((p, i) => <LabelView key={i} cfg={cfg} p={p} qtyOnLabel={1} line={i + 1} />)}
           {d.rows.length > preview.length && <span className="xs mut">+{d.rows.length - preview.length} more designs</span>}</div>
       </div>}
 

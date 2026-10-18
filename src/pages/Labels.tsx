@@ -27,7 +27,7 @@ export type LabelCfg = {
   w: number; h: number; cols: number; gapX: number; gapY: number;
   sheetW: number; sheetH: number; top: number; left: number; rows: number;
   qr: number; font: number; pad: number; offX: number; offY: number;
-  shop: string; format: "shop" | "rungnna"; layout: "shop" | "stack"; show: { shop: boolean; item: boolean; style: boolean; color: boolean; rate: boolean; tk: boolean; code: boolean; qty: boolean; cost_code: boolean };
+  shop: string; format: "shop" | "rungnna"; layout: "shop" | "stack"; show: { shop: boolean; item: boolean; style: boolean; color: boolean; rate: boolean; tk: boolean; code: boolean; qty: boolean; cost_code: boolean; line?: boolean };
   batch?: number;        // stickers handed to the printer at a time (0 = all at once) — see lib/labelBatches
   testFirst?: boolean;   // a long run starts with one test row
   edgeR?: number;        // sheet: page x (mm) where the printer stops printing; a sticker past it is laid out narrower
@@ -79,11 +79,11 @@ export const DEFAULT_CFG: LabelCfg = {
   output: "browser",
   preset: "rjrow", mode: "roll", driverPaper: true, w: 33, h: 15, cols: 3, gapX: 1.3, gapY: 0, sheetW: 101.6, sheetH: 152.4, top: 0, left: 0, edgeR: 104, rows: 9,
   qr: 8, font: 6, rateScale: 1.8, pad: 1.4, offX: 2.5, offY: 0, shop: "RUNGNNA", format: "shop", layout: "shop",
-  show: { shop: true, item: true, style: true, color: true, rate: true, tk: false, code: false, qty: true, cost_code: true },
+  show: { shop: true, item: true, style: true, color: true, rate: true, tk: false, code: false, qty: true, cost_code: true, line: true },
   cur: "9",
 };
 
-export type Job = { p: Product; qtyOnLabel: number; copies: number };
+export type Job = { p: Product; qtyOnLabel: number; copies: number; line?: number };   // line: see lib/purchase-labels
 /** One entry per sticker, in queue order (capped at 5000). */
 export const expandJobs = (jobs: Job[]) => jobs.flatMap(j => Array.from({ length: Math.max(0, Math.min(5000, j.copies)) }, () => j)).slice(0, 5000);
 
@@ -197,7 +197,7 @@ export default function Labels({ args }: { args: string[] }) {
     return saved;
     });
     if (!saved) return;
-    const job = { p: saved, qtyOnLabel: Math.max(1, parseInt(qty) || 1), copies: n };
+    const job = { p: saved, qtyOnLabel: Math.max(1, parseInt(qty) || 1), copies: n, line: jobs.length + 1 };
     setJobs(j => [...j, job]);
     if (print) printer.start(expandJobs([...jobs, job]));
     toast(`${n} labels queued · ${label(saved)}`);
@@ -282,7 +282,7 @@ export default function Labels({ args }: { args: string[] }) {
             </div>
           )}
         </div>
-        <div className="stack"><div className="labelprev"><LabelView cfg={cfg} p={jobs[0]?.p || form} qtyOnLabel={jobs[0]?.qtyOnLabel || parseInt(qty) || 1} /></div><details><summary>Printer settings</summary><LabelSettings cfg={cfg} upd={upd} onTest={() => { if (!printer.busy) setAligning(true); }} sample={jobs[0]?.p || { ...form, code: form.code }} qty={jobs[0]?.qtyOnLabel || parseInt(qty) || 1} /></details></div>
+        <div className="stack"><div className="labelprev"><LabelView cfg={cfg} p={jobs[0]?.p || form} qtyOnLabel={jobs[0]?.qtyOnLabel || parseInt(qty) || 1} line={jobs[0]?.line || jobs.length + 1} /></div><details><summary>Printer settings</summary><LabelSettings cfg={cfg} upd={upd} onTest={() => { if (!printer.busy) setAligning(true); }} sample={jobs[0]?.p || { ...form, code: form.code }} qty={jobs[0]?.qtyOnLabel || parseInt(qty) || 1} /></details></div>
       </div>
       {printer.panel}
       {aligning && createPortal(<AlignSheet cfg={cfg} />, document.getElementById("printroot")!)}
@@ -290,7 +290,7 @@ export default function Labels({ args }: { args: string[] }) {
   );
 }
 
-export function LabelView({ cfg, p, qtyOnLabel = 1 }: { cfg: LabelCfg; p: Product; qtyOnLabel?: number }) {
+export function LabelView({ cfg, p, qtyOnLabel = 1, line }: { cfg: LabelCfg; p: Product; qtyOnLabel?: number; line?: number }) {
   const pp = productForLabel(p, qtyOnLabel);
   const { svg } = useMemo(() => qrSvg(ownPayload(pp, cfg.format || "shop")), [p.code, p.item, p.type, p.style, p.color, p.tk, p.rate, p.item_code, pp.pack, p.ref, cfg.format]);
   const s = cfg.show, fs = cfg.font;
@@ -301,7 +301,7 @@ export function LabelView({ cfg, p, qtyOnLabel = 1 }: { cfg: LabelCfg; p: Produc
        them at the top, the rate big along the bottom ("9320X1PCS"), and RUNGNNA standing up at the right edge. */
     <div className="lbl lbl-shop" style={{ width: cfg.w + "mm", height: cfg.h + "mm", padding: cfg.pad + "mm", columnGap: cfg.pad + "mm", fontSize: fs + "pt" }}>
       <div className="t">
-        {s.item && p.item && <div>{p.item}</div>}
+        {(s.line ?? true) && line ? <div><span className="lno" title="Line of the bill these goods are on">{line}</span>{s.item && p.item ? p.item : ""}</div> : s.item && p.item && <div>{p.item}</div>}
         {s.style && p.style && <div>{p.style}</div>}
         {s.color && p.color && <div>{p.color}</div>}
         {s.tk && p.tk && <div>TK {p.tk}</div>}
@@ -318,7 +318,7 @@ export function LabelView({ cfg, p, qtyOnLabel = 1 }: { cfg: LabelCfg; p: Produc
       <div className="q" style={{ width: q + "mm", height: q + "mm" }} dangerouslySetInnerHTML={{ __html: svg }} />
       <div className="t">
         {s.shop && cfg.shop && <div style={{ fontWeight: 800, letterSpacing: ".08em", fontSize: fs * 0.9 + "pt" }}>{cfg.shop}</div>}
-        {s.item && p.item && <div style={{ fontWeight: 700 }}>{p.item}</div>}
+        {(s.line ?? true) && line ? <div style={{ fontWeight: 700 }}><span className="lno">{line}</span>{s.item ? p.item : ""}</div> : s.item && p.item && <div style={{ fontWeight: 700 }}>{p.item}</div>}
         {s.style && p.style && <div>{p.style}</div>}
         {s.color && p.color && <div>{p.color}</div>}
         {s.tk && p.tk && <div>TK {p.tk}</div>}
@@ -411,7 +411,7 @@ function LabelSettings({ cfg, upd, sample, qty, onTest }: { cfg: LabelCfg; upd: 
             <button key={k} className="chip" aria-pressed={cfg.show[k]} onClick={() => upd({ show: { ...cfg.show, [k]: !cfg.show[k] } })}>{k.toUpperCase()}</button>))}
         </div>
       </div>
-      <div className="labelprev"><LabelView cfg={cfg} p={demo} qtyOnLabel={qty} /></div>
+      <div className="labelprev"><LabelView cfg={cfg} p={demo} qtyOnLabel={qty} line={5} /></div>
       <PrinterSetup cfg={cfg} onTest={onTest} />
     </div>
   );
@@ -588,7 +588,7 @@ export function PrintSheet({ cfg, jobs }: { cfg: LabelCfg; jobs: Job[] }) {
           {r.map((j, k) => {
             const x = cfg.offX + k * (cfg.w + cfg.gapX), w = Math.min(cfg.w, (cfg.edgeR ?? 1e9) - x);
             return <div key={k} style={{ position: "absolute", left: x + "mm", top: cfg.offY + "mm" }}>
-              <LabelView cfg={w < cfg.w ? { ...cfg, w } : cfg} p={j.p} qtyOnLabel={j.qtyOnLabel} /></div>;
+              <LabelView cfg={w < cfg.w ? { ...cfg, w } : cfg} p={j.p} qtyOnLabel={j.qtyOnLabel} line={j.line} /></div>;
           })}
         </div>))}
     </>);
@@ -602,7 +602,7 @@ export function PrintSheet({ cfg, jobs }: { cfg: LabelCfg; jobs: Job[] }) {
         {pg.map((j, k) => {
           const b = cellBox(cfg, k % cfg.cols, Math.floor(k / cfg.cols));
           return <div key={k} style={{ position: "absolute", left: b.x + "mm", top: b.y + "mm" }}>
-            <LabelView cfg={b.w < cfg.w ? { ...cfg, w: b.w } : cfg} p={j.p} qtyOnLabel={j.qtyOnLabel} /></div>;
+            <LabelView cfg={b.w < cfg.w ? { ...cfg, w: b.w } : cfg} p={j.p} qtyOnLabel={j.qtyOnLabel} line={j.line} /></div>;
         })}
       </div>))}
   </>);

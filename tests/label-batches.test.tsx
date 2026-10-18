@@ -87,3 +87,16 @@ describe("a computer can never waste more than one row before someone checks it"
     expect(printerSig({ ...DEFAULT_CFG, shop: "RJ" })).toBe(printerSig(DEFAULT_CFG));
   });
 });
+
+import { purchaseLabelJobs } from "../src/lib/purchase-labels";
+describe("each sticker says which line of the bill its goods are on", () => {
+  it("purchase labels carry the bill line, and the sticker prints it in a small box before the item", () => {
+    const mk = (id: string, item: string) => ({ id, code: id, item, style: "S", color: "", type: "PCS", pack: 1, rate: 32000, cost_code: "KX", barcodes: [] } as any);
+    const purchase = { status: "final", items: [{ product_id: "a", qty: 2, pack: 1 }, { product_id: "b", qty: 3, pack: 1 }] } as any;
+    const jobs = purchaseLabelJobs(purchase, [mk("a", "EARING"), mk("b", "KADA")]);
+    expect(jobs.map(j => j.line)).toEqual([1, 2]);
+    const html = renderToStaticMarkup(<PrintSheet cfg={DEFAULT_CFG} jobs={[jobs[1]]} />);
+    expect(html).toMatch(/class="lno"[^>]*>2<\/span>KADA/);
+    expect(renderToStaticMarkup(<PrintSheet cfg={{ ...DEFAULT_CFG, show: { ...DEFAULT_CFG.show, line: false } }} jobs={[jobs[1]]} />)).not.toContain('class="lno"');
+  });
+});

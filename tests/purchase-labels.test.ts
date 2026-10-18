@@ -7,7 +7,7 @@ import { newPurchase, lineOf } from "../src/lib/stockin";
 const p = { ...blankProduct("owner"), id: "p", item: "BALI", type: "PAIR", rate: 10000 };
 const purchase = () => ({ ...newPurchase("owner", "rack"), status: "final" as const, items: [{ ...lineOf(p), qty: 6, pack: 2 }] });
 it("prepares all named purchase products with packet-aware copy counts", () => {
-  expect(purchaseLabelJobs(purchase(), [p])).toEqual([{ p, qtyOnLabel: 2, copies: 3 }]);
+  expect(purchaseLabelJobs(purchase(), [p])).toEqual([{ p, qtyOnLabel: 2, copies: 3, line: 1 }]);   // line: the bill line, printed on the sticker
 });
 it("does not silently print an incomplete purchase", () => {
   expect(() => purchaseLabelJobs(purchase(), [])).toThrow("missing");
@@ -21,7 +21,7 @@ it("rejects unsaved purchases and unsafe quantities", () => {
 });
 it("prints the actual quantity on a partly filled final packet", () => {
   const x = purchase(); x.items[0].qty = 5;
-  expect(purchaseLabelJobs(x, [p])).toEqual([{ p, qtyOnLabel: 2, copies: 2 }, { p, qtyOnLabel: 1, copies: 1 }]);
+  expect(purchaseLabelJobs(x, [p])).toEqual([{ p, qtyOnLabel: 2, copies: 2, line: 1 }, { p, qtyOnLabel: 1, copies: 1, line: 1 }]);
 });
 it("encodes exactly the printed quantity, even when the saved product has a different pack", () => {
   const original = { ...p, pack: 12, cost_code: "OAX12PAIR" };
