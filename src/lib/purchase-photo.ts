@@ -12,7 +12,24 @@ export type PhotoRow = { item: string; style: string; color: string; unit: strin
   /** the supplier's terms (÷ rate divisor, less %) are already in this line's cost: never applied twice */
   termsDone?: boolean;
   /** pieces in one packet: the "X3" printed after the rate on the sticker (old software's QTY). Blank = 1. */
-  pack?: string };
+  pack?: string;
+  /** the cost exactly as the bill was read, so vendor terms can be undone and a cost divided too often is caught */
+  billCost?: string };
+
+/** Lines whose cost is under a tenth of their selling rate: almost always a cost divided (or misread) too often.
+    1-based line numbers. */
+export function suspiciousCosts(rows: PhotoRow[]): number[] {
+  const out: number[] = [];
+  rows.forEach((r, i) => {
+    const c = Number(r.cost), s = Number(r.rate);
+    if (c > 0 && s > 0 && s / c > 10) out.push(i + 1);
+  });
+  return out;
+}
+/** Put every line's cost back to what the bill said (undoes vendor terms; lines typed by hand keep theirs). */
+export function restoreBillCosts(rows: PhotoRow[]): PhotoRow[] {
+  return rows.map(r => (r.billCost ? { ...r, cost: r.billCost, termsDone: false } : r));
+}
 
 /** Pieces per packet for a review line: a whole number 1–10000, blank meaning 1. */
 export function packOf(r: Pick<PhotoRow, "pack">): number {

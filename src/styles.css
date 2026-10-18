@@ -795,3 +795,5 @@ html{scrollbar-gutter:stable}
 /* bill reader: the apply buttons say, in green, that they worked */
 .pill.applied{font-size:12.5px;padding:6px 12px;border:1px solid rgba(18,196,106,.35)}
 .note.applied-note{padding:8px 12px;margin:6px 0;font-weight:600}
+.purchase-photo .pos-t td.line-no{font-weight:700;text-align:center;color:var(--muted);min-width:26px}
+.in.cost-low{border-color:var(--bad)!important;background:var(--bad-l)}

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it } from "vitest";
 import { db } from "../src/lib/db";
 import { parseVendorList, importVendors, vendorCost } from "../src/lib/vendors";
-import { applyVendorTerms, repricePhotoRows, type PhotoRow } from "../src/lib/purchase-photo";
+import { applyVendorTerms, repricePhotoRows, suspiciousCosts, restoreBillCosts, type PhotoRow } from "../src/lib/purchase-photo";
 import { DEFAULT_RULE } from "../src/lib/pricing";
 import { BILLS, CHALLAN_PAGES } from "./fixtures/rungnna-bills";
 
@@ -62,6 +62,18 @@ describe("vendor terms on purchase cost", () => {
     expect(applyVendorTerms(once, { less_pct: 0, rate_divisor: 1.2 })[0].cost).toBe("100.00");
     // a line added after the terms were applied still gets them
     expect(applyVendorTerms([...once, r], { less_pct: 0, rate_divisor: 1.2 }).map(x => x.cost)).toEqual(["100.00", "100.00"]);
+  });
+  it("catches a cost divided over and over, and puts the bill's cost back (owner's bill, 18 Oct)", () => {
+    const r = { item: "EARRINGS", style: "2584", color: "", unit: "PCS", hsn: "", qty: "2", cost: "170", billCost: "170", rate: "170" } as PhotoRow;
+    let rows = [r];
+    for (let k = 0; k < 28; k++) rows = rows.map(x => ({ ...x, termsDone: false }));   // the old screen let it run 28 times:
+    let cost = 170; for (let k = 0; k < 28; k++) cost /= 1.2;                            // 170 → 1.03
+    rows = [{ ...r, cost: cost.toFixed(2), termsDone: true }, { ...r, style: "K1", cost: "100", rate: "250" }];
+    expect(rows[0].cost).toBe("1.03");
+    expect(suspiciousCosts(rows)).toEqual([1]);
+    const back = restoreBillCosts(rows);
+    expect(back[0]).toMatchObject({ cost: "170", termsDone: false });
+    expect(applyVendorTerms(back, { less_pct: 0, rate_divisor: 1.2 })[0].cost).toBe("141.67");   // applied once again, once
   });
   it("shop pricing re-prices every line from its current cost, and says how many", () => {
     const rule = { ...DEFAULT_RULE, margin: { ...DEFAULT_RULE.margin, mode: "multiply" as const, factor: 2.5, round_to: 1 } };

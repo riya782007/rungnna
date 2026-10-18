@@ -7,7 +7,7 @@ import { api, blobToB64 } from "../lib/ai";
 import { compress, savePhoto } from "../lib/image";
 import { getRule, type PricingRule } from "../lib/pricing";
 import {
-  savePhotoPurchase, validatePhotoRows, pricePhotoRows, applyVendorTerms, repricePhotoRows,
+  savePhotoPurchase, validatePhotoRows, pricePhotoRows, applyVendorTerms, repricePhotoRows, suspiciousCosts, restoreBillCosts,
   autoArticle, autoArticleCount, draftLabelProducts, labelCountFor, type PhotoRow,
 } from "../lib/purchase-photo";
 import { purchaseLabelJobs } from "../lib/purchase-labels";
@@ -21,7 +21,7 @@ import { checkBill, checkSummary, matchSupplier, fallbackBillNo, type LineFix } 
 import { newParty } from "../lib/billing";
 
 const blank = (): PhotoRow => ({ item: "", style: "", color: "", unit: "PCS", hsn: "", qty: "", pack: "1", cost: "", rate: "" });
-const captions: Record<string, string> = { item: "Item", style: "Style/article", color: "Colour", unit: "Unit", hsn: "HSN", qty: "Qty", pack: "X (pcs/pkt)", cost: "Cost ₹", rate: "Rate ₹" };
+const captions: Record<string, string> = { item: "Item", style: "Style/article", color: "Colour", unit: "Unit", hsn: "HSN", qty: "Qty", pack: "Pieces per packet (X)", cost: "Cost ₹", rate: "Rate ₹" };
 /* pack = the "X1" / "X3" after the rate on his stickers: pieces in one packet (his old software's QTY box) */
 const FIELDS = ["item", "style", "color", "unit", "hsn", "qty", "pack", "cost", "rate"] as const;
 type Field = (typeof FIELDS)[number];
@@ -108,7 +108,9 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       }));
       // the bill checked against itself: ditto marks written out, each line's amount, the Net
       const checked = checkBill(raw, text(out.invoice_total));
-      const read: PhotoRow[] = checked.rows.map(({ amount: _a, box: _b, ...r }) => r);
+      // keep the bill's own cost on each line; a "selling rate" equal to the cost is just the supplier's price
+      // read twice (owner's bill, 18 Oct: rate 170 = cost 170), so it is left for shop pricing to fill
+      const read: PhotoRow[] = checked.rows.map(({ amount: _a, box: _b, ...r }) => ({ ...r, billCost: r.cost, rate: r.rate && Number(r.rate) === Number(r.cost) ? "" : r.rate }));
       // bills that print no article get one built from item + rate, so the lines neither collide nor merge
       const rows = pricePhotoRows(autoArticle(read), rule);
       const boxes = out.rows.filter((r: any) => r?.box && String(r.box).trim() && String(r.box).trim() !== "0").length;
@@ -124,7 +126,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         check: { summary: checkSummary(checked), ok: checked.addsUp === true && !checked.doubts.length, fixes: checked.fixes, doubts: checked.doubts },
         warnings: [
           ...(Array.isArray(out.warnings) ? out.warnings.map(String) : []),
-          boxes ? `${boxes} line(s) showed a box/packet count. Labels print one per piece; set packet sizes on the product if you want packet stickers.` : "",
+          boxes ? `${boxes} line(s) showed a box/packet count. Stickers print one per piece unless you fill "Pieces per packet (X)".` : "",
           fellBack && readBy ? `Read by ${readBy} — an earlier provider was unavailable, so check these lines a little harder than usual.` : "",
         ].filter(Boolean).join("\n"),
         photoId: await savePhoto(files[0]),
@@ -196,6 +198,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
 
 
   const vendor = suppliers.find(s => s.id === d.supplier);
+  const lowCost = suspiciousCosts(d.rows);
   const invented = autoArticleCount(d.rows);
   let total = "—", labelCount = 0, validation = "";
   try {
@@ -238,7 +241,10 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
     </div>}
     {!!d.rows.length && <div className="row"><b className="grow">{d.supplierName || "Purchase bill"}{d.billNo ? <span className="xs mut"> · {d.billNo}</span> : null}</b>
       <button className="btn sm" disabled={busy} onClick={() => setCam(true)}><Camera size={15} />Photo of another page</button>
-      <button className="btn sm" disabled={busy} onClick={() => set({ rows: [...d.rows, blank()] })}><Plus size={15} />Line</button>
+      <button className="btn sm" disabled={busy} title="Adds a blank line at the top" onClick={() => {
+        set({ rows: [blank(), ...d.rows] });
+        setTimeout(() => (document.querySelector('input[aria-label="item line 1"]') as HTMLInputElement | null)?.focus(), 50);
+      }}><Plus size={15} />Line</button>
       <button className="linkbtn" disabled={busy} onClick={() => { if (confirm("Clear this bill and start again? Nothing has been saved.")) set({ rows: [], billNo: "", total: "", warnings: "", check: undefined, supplierName: "", photoId: undefined }); setDone({}); }}>Start over</button></div>}
     <input ref={file} type="file" hidden accept="image/jpeg,image/png,image/webp" multiple onChange={e => { void read(Array.from(e.target.files || [])); e.target.value = ""; }} />
     {busy && !!d.rows.length && <div role="status">Working…</div>}
@@ -270,10 +276,11 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
           onChange={e => set({ billNo: e.target.value, autoBillNo: false })} /></label>
         <RackPicker value={d.rack} onChange={rack => set({ rack })} /></div>
 
-      <div className="tw"><table className="pos-t"><thead><tr>{[...FIELDS.map(f => captions[f]), ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
+      <div className="tw"><table className="pos-t"><thead><tr>{["#", ...FIELDS.map(f => captions[f]), ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
         {d.rows.map((r, i) => <tr key={i}>
+          <td className="line-no" data-l="Line" title="Line number: the same small boxed number printed on this line's stickers">{i + 1}</td>
           {FIELDS.map(k => <td key={k} data-l={captions[k]}>
-            <input className={"in" + ((k === "style" && r.autoStyle) || d.check?.fixes.some(f => f.line === i + 1 && f.field === k) ? " auto-filled" : "")} aria-label={`${k} line ${i + 1}`}
+            <input className={"in" + ((k === "style" && r.autoStyle) || d.check?.fixes.some(f => f.line === i + 1 && f.field === k) ? " auto-filled" : "") + (k === "cost" && lowCost.includes(i + 1) ? " cost-low" : "")} aria-label={`${k} line ${i + 1}`}
               title={k === "style" && r.autoStyle ? "The bill printed no article number — this was built from the item and its rate. Edit it if you have the supplier's own code." : undefined}
               value={r[k] ?? ""} onChange={e => row(i, k, e.target.value)}
               style={{ minWidth: k === "item" ? 170 : k === "style" ? 120 : 56 }} /></td>)}
@@ -287,13 +294,17 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
 
       <div className="row">
         {vendor && (!!vendor.less_pct || (vendor.rate_divisor || 1) !== 1) && (d.rows.length && d.rows.every(r => r.termsDone)
-          ? <span className="pill ok applied" role="status">✓ Vendor terms applied{(vendor.rate_divisor || 1) !== 1 ? ` (÷${vendor.rate_divisor})` : ""}{vendor.less_pct ? ` (${vendor.less_pct}% less)` : ""}</span>
+          ? <span className="pill ok applied" role="status">✓ Vendor terms applied{(vendor.rate_divisor || 1) !== 1 ? ` (÷${vendor.rate_divisor})` : ""}{vendor.less_pct ? ` (${vendor.less_pct}% less)` : ""}{d.rows.some(r => r.billCost) && <button className="linkbtn" style={{ marginLeft: 8 }} onClick={() => { set({ rows: restoreBillCosts(d.rows) }); setDone({}); }}>Undo</button>}</span>
           : <button className="btn" disabled={busy} title="Printed cost ÷ rate divisor, then less %. Each line only once." onClick={() => applyTerms(vendor)}>
               Apply vendor terms{vendor.less_pct ? ` (${vendor.less_pct}% less)` : ""}{(vendor.rate_divisor || 1) !== 1 ? ` (÷${vendor.rate_divisor})` : ""}{d.rows.some(r => r.termsDone) ? ` to ${d.rows.filter(r => !r.termsDone).length} new lines` : ""}</button>)}
         <button className="btn" disabled={busy} onClick={() => void price()}>{done.pricing && done.pricingSig === costSig(d.rows) ? "Apply shop pricing again" : "Apply shop pricing"}</button>
         <span>Goods cost ₹{total}</span>
         <label className="f">Supplier payable ₹<input className="in" inputMode="decimal" value={d.total} onChange={e => set({ total: e.target.value })} /></label></div>
 
+      {!!lowCost.length && <div className="note bad sm" role="alert">
+        <b>Check the cost on line{lowCost.length === 1 ? "" : "s"} {lowCost.join(", ")}:</b> it is less than a tenth of the selling rate. A cost like ₹1.03 against a rate of ₹170 usually means the vendor terms (÷) were applied again and again, or the cost was misread.
+        {d.rows.some(r => r.billCost && r.billCost !== r.cost) && <> <button className="linkbtn" onClick={() => { set({ rows: restoreBillCosts(d.rows) }); setDone({}); }}>Put the bill's costs back</button></>}
+      </div>}
       {done.pricing && done.pricingSig === costSig(d.rows) && <div className="note ok applied-note sm" role="status">✓ {done.pricing}</div>}
       {pricing && <div className="row sm"><span>Pricing: {pricing.margin.mode === "percent" ? `+${pricing.margin.percent}%` : `${pricing.margin.mode === "divide" ? "÷" : "×"}${pricing.margin.factor}`} · round ₹{pricing.margin.round_to} {pricing.margin.round_dir}</span><a href="#/settings">Pricing settings</a></div>}
 
