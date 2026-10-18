@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { InvoiceSheet } from "../src/components/Invoice";
-import { LabelView, DEFAULT_CFG } from "../src/pages/Labels";
+import { LabelView, DEFAULT_CFG, PRESETS, PrintSheet } from "../src/pages/Labels";
 import { DEFAULT_SHOP, newBill, totals } from "../src/lib/billing";
 import { manualLine } from "../src/lib/pos";
 import { blankProduct } from "../src/lib/products";
@@ -18,5 +18,7 @@ function save(name: string, body: string) {
   writeFileSync(`dist/print-trials/${name}.html`, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Print trial</title><style>${css}</style><style>#printroot{display:block;width:max-content;max-width:100%;margin:16px auto}</style></head><body><div id="printroot">${body}</div><script type="module">import { preparePrint } from '/src/lib/printing.ts'; await preparePrint(document, () => new Promise(r => requestAnimationFrame(r)));</script></body></html>`);
 }
 for (const format of ["80mm", "58mm"] as const) save(`receipt-${format}`, renderToStaticMarkup(createElement(InvoiceSheet, { b: bill, shop: DEFAULT_SHOP, format })));
-save("label-50x20", renderToStaticMarkup(createElement(LabelView, { cfg: DEFAULT_CFG, p: product, qtyOnLabel: 1 })));
+save("label-50x20", renderToStaticMarkup(createElement(LabelView, { cfg: { ...DEFAULT_CFG, ...PRESETS.find(p => p.key === "rj")!.cfg }, p: product, qtyOnLabel: 1 })));
+const shopProduct = { ...product, item: "F-RING", style: "K521011/P", color: "WXZ/13", item_code: "202", rate: 914600, type: "PCS" };
+save("label-shop-3across", renderToStaticMarkup(createElement(PrintSheet, { cfg: DEFAULT_CFG, jobs: Array.from({ length: 9 }, () => ({ p: shopProduct, qtyOnLabel: 1, copies: 1 })) })));
 console.log("Rendered non-production receipt and sticker samples in dist/print-trials");

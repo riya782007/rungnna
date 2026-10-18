@@ -5,7 +5,7 @@ import { moneyInput } from "./pos";
 import { ownerOnly } from "./scope";
 import { getRule, priceFromCost, type PricingRule } from "./pricing";
 
-export type PhotoRow = { item: string; style: string; color: string; unit: string; hsn: string; qty: string; cost: string; rate: string };
+export type PhotoRow = { item: string; style: string; color: string; unit: string; hsn: string; qty: string; cost: string; rate: string; pack?: string; stickers?: string };
 export function pricePhotoRows(rows: PhotoRow[], rule: PricingRule): PhotoRow[] {
   return rows.map(r => {
     if (r.rate.trim() || !r.cost.trim() || !/^(PCS|PAIR|SET)$/i.test(r.unit.trim())) return r;
@@ -20,22 +20,26 @@ export function validatePhotoRows(rows: PhotoRow[]) {
   if (!rows.length || rows.length > 300) throw new Error("Review 1–300 purchase lines");
   return rows.map((r, i) => {
     const qty = Number(r.qty);
+    const pack = r.pack?.trim() ? Number(r.pack) : 1;
+    const print_qty = r.stickers?.trim() ? Number(r.stickers) : undefined;
     if (!r.item.trim() || !r.style.trim()) throw new Error(`Line ${i + 1}: enter product name and article/style`);
     if (!Number.isSafeInteger(qty) || qty < 1 || qty > 1000000) throw new Error(`Line ${i + 1}: quantity must be a positive whole number`);
+    if (!Number.isSafeInteger(pack) || pack < 1 || pack > 1000000) throw new Error(`Line ${i + 1}: pieces per packet must be a positive whole number`);
+    if (print_qty !== undefined && (!Number.isSafeInteger(print_qty) || print_qty < 0 || print_qty > 5000)) throw new Error(`Line ${i + 1}: stickers must be 0–5000, or leave blank for one per packet`);
     if (!r.cost.trim() || !r.rate.trim()) throw new Error(`Line ${i + 1}: review cost and selling rate`);
     const cost = moneyInput(r.cost), rate = moneyInput(r.rate);
     if (cost <= 0 || rate <= 0) throw new Error(`Line ${i + 1}: enter positive cost and selling rate`);
     if (!Number.isSafeInteger(qty * cost)) throw new Error("Purchase amount is too large");
     if (!/^(PCS|PAIR|SET)$/i.test(r.unit)) throw new Error(`Line ${i + 1}: convert dozen/box/packet to PCS, PAIR or SET before saving`);
     if (r.hsn && !/^\d{4,8}$/.test(r.hsn)) throw new Error(`Line ${i + 1}: check HSN`);
-    return { ...r, qty, cost, rate };
+    return { ...r, qty, cost, rate, pack, print_qty };
   });
 }
 
 export async function savePhotoPurchase(rows: PhotoRow[], input: { by: string; rack: string; supplierId: string; billNo: string; photoId?: string; note: string; invoiceTotal?: string }): Promise<Purchase> {
   ownerOnly();
   const checked = validatePhotoRows(rows);
-  if (checked.reduce((n, r) => n + r.qty, 0) > 5000) throw new Error("Purchase exceeds the 5000-label batch limit. Split it before saving.");
+  if (checked.reduce((n, r) => n + (r.print_qty ?? Math.ceil(r.qty / r.pack)), 0) > 5000) throw new Error("Purchase exceeds the 5000-label batch limit. Reduce stickers or split it before saving.");
   const invoice_total = input.invoiceTotal?.trim() ? moneyInput(input.invoiceTotal) : undefined;
   if (invoice_total !== undefined && invoice_total <= 0) throw new Error("Check supplier invoice total");
   return db.transaction("rw", [db.products, db.purchases, db.parties, db.movements, db.stock, db.outbox, db.settings, db.config, db.locations, db.stores], async () => {
@@ -52,10 +56,10 @@ export async function savePhotoPurchase(rows: PhotoRow[], input: { by: string; r
       seen.add(key);
       const old = await findByKey({ model: row.style, style: row.style, color: row.color, vendor_id: supplier.id });
       if (old && old.type !== row.unit.toUpperCase()) throw new Error("Unit differs from the existing article. Review before saving.");
-      const code = priceFromCost(row.cost, rule, old?.pack || 1, row.unit).cost_code;
-      const p: Product = old ? { ...old, item: row.item, hsn: row.hsn || old.hsn, cost: row.cost, rate: row.rate, price_locked: 1, cost_code: code } : { ...blankProduct(input.by), item: row.item, style: row.style, model: row.style, color: row.color, type: row.unit, hsn: row.hsn, rate: row.rate, cost: row.cost, cost_code: code, price_locked: 1, vendor_id: supplier.id, vendor_name: supplier.name, pack: 1 };
+      const code = priceFromCost(row.cost, rule, old?.pack || row.pack, row.unit).cost_code;
+      const p: Product = old ? { ...old, item: row.item, hsn: row.hsn || old.hsn, cost: row.cost, rate: row.rate, price_locked: 1, cost_code: code } : { ...blankProduct(input.by), item: row.item, style: row.style, model: row.style, color: row.color, type: row.unit, hsn: row.hsn, rate: row.rate, cost: row.cost, cost_code: code, price_locked: 1, vendor_id: supplier.id, vendor_name: supplier.name, pack: row.pack };
       const saved = await saveProduct(p);
-      purchase.items.push({ ...lineOf(saved, !old), id: uid(), qty: row.qty, pkts: 0, pack: 1, cost: row.cost });
+      purchase.items.push({ ...lineOf(saved, !old), id: uid(), qty: row.qty, pkts: 0, pack: 1, label_pack: row.pack, ...(row.print_qty !== undefined ? { print_qty: row.print_qty } : {}), cost: row.cost });
     }
     const saved = await finalizePurchase(purchase);
     await setSetting("purchase_photo_draft", null);

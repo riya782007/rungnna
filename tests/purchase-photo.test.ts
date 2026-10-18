@@ -6,6 +6,7 @@ import { savePhotoPurchase, validatePhotoRows, pricePhotoRows, type PhotoRow } f
 import { DEFAULT_RULE } from "../src/lib/pricing";
 import { MAIN_STORE, setScope } from "../src/lib/scope";
 import { supplierLedger } from "../src/lib/suppliers";
+import { purchaseLabelJobs } from "../src/lib/purchase-labels";
 
 const row: PhotoRow = { item: "BALI", style: "K5209", color: "G", unit: "PAIR", hsn: "7117", qty: "4", cost: "25.50", rate: "100" };
 const input = { by: "owner", rack: "rack", supplierId: "supplier", billNo: "SUP-1", note: "Reviewed" };
@@ -29,6 +30,36 @@ describe("reviewed photo purchases", () => {
   it("rejects oversized label batches before committing inventory", async () => {
     await expect(savePhotoPurchase([{ ...row, qty: "5001" }], input)).rejects.toThrow("5000");
     expect(await db.purchases.count()).toBe(0); expect(await db.products.count()).toBe(0);
+  });
+  it("defaults sticker counts to packets while saving the exact purchased quantity", async () => {
+    const p = await savePhotoPurchase([{ ...row, qty: "13", pack: "6", stickers: "" }], input);
+    const products = await db.products.toArray();
+    expect(p.total_qty).toBe(13); expect((await db.stock.toArray())[0].qty).toBe(13);
+    expect(p.items[0]).toMatchObject({ qty: 13, pack: 1, label_pack: 6 });
+    expect(p.items[0].print_qty).toBeUndefined();
+    expect(purchaseLabelJobs(p, products).map(j => [j.qtyOnLabel, j.copies])).toEqual([[6, 2], [1, 1]]);
+  });
+  it("persists exact sticker overrides without changing the purchased stock", async () => {
+    const p = await savePhotoPurchase([{ ...row, qty: "60", pack: "6", stickers: "4" }], input);
+    const saved = (await db.purchases.get(p.id))!;
+    expect(saved.items[0]).toMatchObject({ qty: 60, label_pack: 6, print_qty: 4 });
+    expect((await db.stock.toArray())[0].qty).toBe(60);
+    expect(purchaseLabelJobs(saved, await db.products.toArray())).toMatchObject([{ qtyOnLabel: 6, copies: 4 }]);
+  });
+  it("saves purchases with zero stickers and limits actual stickers rather than stock units", async () => {
+    const p = await savePhotoPurchase([{ ...row, qty: "6000", pack: "6", stickers: "0" }], input);
+    expect((await db.purchases.get(p.id))!.items[0].print_qty).toBe(0);
+    expect((await db.stock.toArray())[0].qty).toBe(6000);
+    expect(purchaseLabelJobs(p, await db.products.toArray())).toEqual([]);
+    const next = await savePhotoPurchase([{ ...row, qty: "6000", pack: "6", stickers: "" }], { ...input, billNo: "SUP-2" });
+    expect(purchaseLabelJobs(next, await db.products.toArray())).toMatchObject([{ qtyOnLabel: 6, copies: 1000 }]);
+  });
+  it("keeps an existing product's standard packet size when this purchase uses another size", async () => {
+    await savePhotoPurchase([{ ...row, pack: "12" }], input);
+    const p = await savePhotoPurchase([{ ...row, qty: "24", pack: "6", stickers: "4" }], { ...input, billNo: "SUP-2" });
+    const products = await db.products.toArray();
+    expect(products[0].pack).toBe(12);
+    expect(purchaseLabelJobs(p, products)).toMatchObject([{ qtyOnLabel: 6, copies: 4 }]);
   });
   it("keeps tax/freight in supplier payable, not per-item inventory cost", async () => {
     const p = await savePhotoPurchase([row], { ...input, invoiceTotal: "120.36" });
@@ -59,7 +90,7 @@ describe("reviewed photo purchases", () => {
     expect(await db.products.count()).toBe(0); expect(await db.outbox.count()).toBe(0);
   });
   it("does not guess missing prices or convert packaging quantities", () => {
-    for (const patch of [{ item: "" }, { cost: "" }, { rate: "" }, { qty: "1.5" }, { unit: "DOZEN" }, { hsn: "bad" }]) expect(() => validatePhotoRows([{ ...row, ...patch }])).toThrow();
+    for (const patch of [{ item: "" }, { cost: "" }, { rate: "" }, { qty: "1.5" }, { unit: "DOZEN" }, { hsn: "bad" }, { pack: "0" }, { pack: "1.5" }, { stickers: "-1" }, { stickers: "1.5" }, { stickers: "5001" }]) expect(() => validatePhotoRows([{ ...row, ...patch }])).toThrow();
   });
   it("restricts purchase-photo saves to owners", async () => {
     setScope(MAIN_STORE, "salesman"); await expect(savePhotoPurchase([row], input)).rejects.toThrow("Owner only");

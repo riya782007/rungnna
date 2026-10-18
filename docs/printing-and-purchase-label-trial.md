@@ -1,5 +1,9 @@
 # Receipt and purchase-label trial
 
+For the newer three-across sticker layout, sticker-count controls and QZ Tray
+printing, see [the 18 October sticker-printing handoff](sticker-printing-setup.md).
+The trial notes below describe the earlier receipt and label implementation.
+
 ## What the photographs establish
 
 The failed print contains the browser date/title and almost no bill content. That
