@@ -16,17 +16,25 @@ import { entryWait, recordEntryAttempt, personForPin, staffForRolePasscode } fro
 import { codeMatches, getOpenCode, setOpenCode, DEFAULT_OPEN_CODE } from "../lib/openCode";
 import { getPrivate, setCode, lockNow, usePrivate } from "../lib/privacy";
 import { DeleteEstimates } from "../components/DeleteEstimates";
-import { getRule, saveRule, validateKey, priceFromCost, DEFAULT_RULE, type PricingRule, type RoundTo } from "../lib/pricing";
-import { rupees, toPaise } from "../lib/format";
 import { getTaxonomy, addTo, removeFrom, addColour, removeColour, colourCodeFor, type Taxonomy } from "../lib/taxonomy";
 import { initLang, setLang, type Lang } from "../lib/i18n";
 import { closeFinancialYear, lockedUpto, setVoucherLock } from "../lib/finance";
 import { SecuritySettings } from "../components/OwnerSecurity";
-import { gstRequest } from "../lib/compliance";
-import { RECEIPT_CUTS, receiptCut, receiptCutSetup, type ReceiptCut } from "../lib/printing";
 import { CloudSyncControl } from "../components/CloudSyncControl";
+import { PricingCard, StickerLookCard, SupplierTermsCard, PrintingCard, GstCard, SaveState } from "../components/SettingsCards";
 
-export default function Settings() {
+/* Settings in five plain groups, one at a time (owner, 18 Oct: the long page left half the screen empty and
+   things were hard to find). Each group is a tab; its cards flow into balanced columns. */
+type TabKey = "shop" | "prices" | "suppliers" | "people" | "backup";
+const TABS: { key: TabKey; label: string; intro: string }[] = [
+  { key: "shop", label: "Shop & bills", intro: "Your shop's details on every bill, bill printing, GST and the financial year." },
+  { key: "prices", label: "Prices & stickers", intro: "How a cost becomes a selling rate and a secret cost code, and what the stickers look like." },
+  { key: "suppliers", label: "Suppliers", intro: "Each supplier's rate ÷ and less %, used when their bill is read." },
+  { key: "people", label: "People & safety", intro: "Who works here, what they may do, passcodes and the private estimates." },
+  { key: "backup", label: "Backup & devices", intro: "Cloud saving, a backup file for the pen drive, and the AI / WhatsApp connections." },
+];
+
+export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
   const { me, setMe } = useApp();
   const staff = useLiveQuery(() => db.staff.toArray(), [], []);
   const [sync, setSync] = useState<SyncState>();
@@ -36,131 +44,128 @@ export default function Settings() {
   useEffect(() => onSync(setSync) as any, []);
   useEffect(() => { getSetting<Pattern[]>("patterns", []).then(setPats); }, []);
   const admin = can(me, "settings"), boss = can(me, "staff");
+  const tabs = TABS.filter(t => t.key === "people" || t.key === "backup" || t.key === "shop" || admin);
+  const tab: TabKey = (tabs.find(t => t.key === tabArg)?.key) || "shop";
+  const cur = TABS.find(t => t.key === tab)!;
+
+  const meCard = (
+    <div className="card pad stack">
+      <div className="row"><span className="avatar" style={{ width: 44, height: 44, fontSize: 17 }}>{me?.name.slice(0, 1)}</span>
+        <span className="grow"><b>{me?.name}</b><div className="xs mut">{roleName(me)}{me?.role_id ? "" : " · " + (me ? ROLE_NOTE[me.role] : "")}</div></span>
+        <button className="btn sm" onClick={() => setMe(null)}>Switch person</button></div>
+      {me && isRoleLogin(me) && <div className="xs mut">Signed in with this role's passcode. The owner changes it on Roles &amp; Permissions.</div>}
+      {me && !isRoleLogin(me) && <button className="btn sm" onClick={async () => {
+        const p = prompt(me.pin ? "New 4-digit personal PIN" : "Set a 4-digit PIN so nobody else can use your name") ?? null;
+        if (p === null) return; if (!/^\d{4}$/.test(p)) return toast("PIN must be 4 digits", true);
+        const u = { ...me, pin: p }; await put("staff", u); setMe(u); toast(p ? "PIN saved" : "PIN removed");
+      }}>{me.pin ? "Change my PIN" : "Set my PIN"}</button>}
+      {me?.role === "owner" && !me.pin && <div className="note warn sm">Set a PIN — it's needed to approve big discounts and to keep your owner access safe.</div>}
+    </div>);
 
   return (
     <div>
       <Head title="Settings" sub={"This device · " + deviceId()} />
-      <div className="split">
-        <div className="stack">
-          <div className="card pad stack">
-            <div className="row"><span className="avatar" style={{ width: 44, height: 44, fontSize: 17 }}>{me?.name.slice(0, 1)}</span>
-              <span className="grow"><b>{me?.name}</b><div className="xs mut">{roleName(me)}{me?.role_id ? "" : " · " + (me ? ROLE_NOTE[me.role] : "")}</div></span>
-              <button className="btn sm" onClick={() => setMe(null)}>Switch person</button></div>
-            {me && isRoleLogin(me) && <div className="xs mut">Signed in with this role's passcode. The owner changes it on Roles &amp; Permissions.</div>}
-            {me && !isRoleLogin(me) && <button className="btn sm" onClick={async () => {
-              const p = prompt(me.pin ? "New 4-digit personal PIN" : "Set a 4-digit PIN so nobody else can use your name") ?? null;
-              if (p === null) return; if (!/^\d{4}$/.test(p)) return toast("PIN must be 4 digits", true);
-              const u = { ...me, pin: p }; await put("staff", u); setMe(u); toast(p ? "PIN saved" : "PIN removed");
-            }}>{me.pin ? "Change my PIN" : "Set my PIN"}</button>}
-            {me?.role === "owner" && !me.pin && <div className="note warn sm">Set a PIN — it's needed to approve big discounts and to keep your owner access safe.</div>}
+      <nav className="tabs set-tabs" aria-label="Settings sections">
+        {tabs.map(t => <a key={t.key} href={"#/settings/" + t.key} className={t.key === tab ? "on" : ""} aria-current={t.key === tab ? "page" : undefined}>{t.label}</a>)}
+      </nav>
+      <p className="set-tab-intro">{cur.intro}</p>
+
+      {tab === "shop" && <div className="set-grid">
+        {admin && <ShopProfile />}
+        {admin && <PrintingCard />}
+        {boss && <GstCard />}
+        {can(me, "lock") && <OperationsCard by={me?.id || ""} />}
+        <div className="card"><header><h3>Elsewhere</h3></header><div className="pad stack">
+          {boss && <a className="btn" href="#/bank">Bank reconciliation →</a>}
+          <a className="btn" href="#/stores">{boss ? "Store setup & transfers →" : "Stock transfers →"}</a>
+        </div></div>
+      </div>}
+
+      {tab === "prices" && admin && <div className="set-grid">
+        <PricingCard />
+        <StickerLookCard />
+        <TaxonomyCard />
+      </div>}
+
+      {tab === "suppliers" && admin && <div className="set-grid set-grid-1">
+        <SupplierTermsCard />
+      </div>}
+
+      {tab === "people" && <div className="set-grid">
+        {meCard}
+        {boss && <div className="card"><header><h3>Shop passcode</h3></header>
+          <div className="pad stack">
+            <div className="set-intro">The common entry code opens the sign-in screen on every counter. Each person then uses their own PIN or role passcode; the entry code does not grant owner access.</div>
+            <OpenCodeSetting />
+          </div></div>}
+        {boss && <div className="card"><header><h3>People</h3><span className="grow" /><a className="btn sm" href="#/roles">Roles &amp; permissions</a></header>
+          <div className="list" style={{ border: 0, borderRadius: 0, boxShadow: "none" }}>
+            {staff.filter(s => !s.deleted && !isRoleLogin(s)).map(s => (
+              <div key={s.id} className="li person-row">
+                <div className="person-info"><div className="person-name"><b>{s.name}</b>{me?.id === s.id && <span className="pill ok">you</span>}{!s.active && <span className="pill warn">disabled</span>}</div>
+                  <div className="xs mut">{roleName(s)}{s.role_id ? "" : " · " + ROLE_NOTE[s.role]}{s.pin ? " · PIN set" : ""}</div></div>
+                <div className="person-actions">
+                <RoleSelect value={s} allowOwner={me?.role === "owner"} disabled={s.id === me?.id || (s.role === "owner" && me?.role !== "owner")}
+                  onChange={async v => { await put("staff", { ...s, ...v }); toast("Role changed"); }} />
+                {(s.role !== "owner" || me?.role === "owner") && <button className="btn sm" onClick={async () => {
+                  const value = prompt(`New 4-digit PIN for ${s.name}`); if (value === null) return;
+                  if (!/^\d{4}$/.test(value)) return toast("PIN must be 4 digits", true);
+                  const changed = { ...s, pin: value }; await put("staff", changed); if (s.id === me?.id) setMe(changed); toast("Personal PIN saved");
+                }}>Set PIN</button>}
+                <button className="btn sm" onClick={async () => { const n = prompt("Name", s.name); if (n) await put("staff", { ...s, name: n }); }}>Rename</button>
+                {s.id !== me?.id && <button className="btn sm" onClick={async () => { await put("staff", { ...s, active: s.active ? 0 : 1 }); }}>{s.active ? "Disable" : "Enable"}</button>}
+                </div>
+              </div>))}
           </div>
-
-          {boss && <div className="card"><header><h3>Shop passcode</h3></header>
-            <div className="pad stack">
-              <div className="sm mut">The common entry code opens the sign-in screen on every counter. Each person then uses their own PIN or role passcode; the entry code does not grant owner access.</div>
-              <OpenCodeSetting />
-            </div></div>}
-
-          <div className="card"><header><h3>Cloud backup</h3><span className="grow" />
-            <span className={"pill " + (!sync?.cloudEnabled || !sync?.user ? "warn" : sync?.status === "idle" && !sync.pending ? "ok" : sync?.status === "error" ? "bad" : "warn")}>{!sync?.cloudEnabled ? "offline mode" : !sync?.user ? "not connected" : sync?.status === "idle" && !sync.pending ? "all saved" : sync?.status}</span></header>
-            <div className="pad stack">
-              <CloudSyncControl />
-              <div className="sm mut">{sync?.pending || 0} changes waiting{sync?.last ? ` · last saved ${when(sync.last)}` : ""}</div>
-              {sync?.error && <div className="note bad">{sync.error}</div>}
-              <StuckChanges />
-              {sync?.user ? <div className="row"><span className="sm grow">Connected as <b>{sync.user}</b></span><button className="btn sm" disabled={!sync.cloudEnabled} onClick={() => syncNow()}>Sync now</button>{admin && <button className="btn sm" onClick={signOut}>Disconnect</button>}</div>
-                : <ShopLogin />}
-            </div></div>
-
-          {boss && <div className="card"><header><h3>People</h3><span className="grow" /><a className="btn sm" href="#/roles">Roles &amp; permissions</a></header>
-            <div className="list" style={{ border: 0, borderRadius: 0, boxShadow: "none" }}>
-              {staff.filter(s => !s.deleted && !isRoleLogin(s)).map(s => (
-                <div key={s.id} className="li person-row">
-                  <div className="person-info"><div className="person-name"><b>{s.name}</b>{me?.id === s.id && <span className="pill ok">you</span>}{!s.active && <span className="pill warn">disabled</span>}</div>
-                    <div className="xs mut">{roleName(s)}{s.role_id ? "" : " · " + ROLE_NOTE[s.role]}{s.pin ? " · PIN set" : ""}</div></div>
-                  <div className="person-actions">
-                  <RoleSelect value={s} allowOwner={me?.role === "owner"} disabled={s.id === me?.id || (s.role === "owner" && me?.role !== "owner")}
-                    onChange={async v => { await put("staff", { ...s, ...v }); toast("Role changed"); }} />
-                  {(s.role !== "owner" || me?.role === "owner") && <button className="btn sm" onClick={async () => {
-                    const value = prompt(`New 4-digit PIN for ${s.name}`); if (value === null) return;
-                    if (!/^\d{4}$/.test(value)) return toast("PIN must be 4 digits", true);
-                    const changed = { ...s, pin: value }; await put("staff", changed); if (s.id === me?.id) setMe(changed); toast("Personal PIN saved");
-                  }}>Set PIN</button>}
-                  <button className="btn sm" onClick={async () => { const n = prompt("Name", s.name); if (n) await put("staff", { ...s, name: n }); }}>Rename</button>
-                  {s.id !== me?.id && <button className="btn sm" onClick={async () => { await put("staff", { ...s, active: s.active ? 0 : 1 }); }}>{s.active ? "Disable" : "Enable"}</button>}
-                  </div>
-                </div>))}
+          <div className="pad stack" style={{ borderTop: "1px solid var(--line-2)" }}>
+            <div className="sm b">Add a person</div>
+            <div className="grid g3">
+              <input className="in" placeholder="Name" value={nm} onChange={e => setNm(e.target.value)} />
+              <RoleSelect value={{ role, role_id: roleId }} allowOwner={me?.role === "owner"} onChange={v => { setRole(v.role); setRoleId(v.role_id || ""); }} />
+              <input className="in mono" placeholder="4-digit personal PIN" inputMode="numeric" maxLength={4} value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, ""))} />
             </div>
-            <div className="pad stack" style={{ borderTop: "1px solid var(--line-2)" }}>
-              <div className="grid g3">
-                <input className="in" placeholder="Name" value={nm} onChange={e => setNm(e.target.value)} />
-                <RoleSelect value={{ role, role_id: roleId }} allowOwner={me?.role === "owner"} onChange={v => { setRole(v.role); setRoleId(v.role_id || ""); }} />
-                <input className="in mono" placeholder="4-digit personal PIN" inputMode="numeric" maxLength={4} value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, ""))} />
-              </div>
-              <button className="btn" onClick={async () => { if (!nm.trim()) return; if (!/^\d{4}$/.test(pin)) return toast("Set a 4-digit personal PIN", true); await put("staff", { ...newStaff(nm.trim(), role, pin), role_id: roleId }); setNm(""); setPin(""); toast("Added"); }}>Add person</button>
-            </div></div>}
-        </div>
-        <div className="stack">
-          {boss && <PrivateCard />}
-          {admin && <PrintingSettings />}
-          {boss && <><SecuritySettings /><GstSettings /><a className="btn" href="#/bank">Bank reconciliation</a><a className="btn" href="#/stores">Store setup &amp; transfers</a></>}
-          {!boss && <a className="btn" href="#/stores">Stock transfers</a>}
-          {can(me, "lock") && <OperationsCard by={me?.id || ""} />}
-          {admin && <ShopProfile />}
-          {admin && <PricingCard />}
-          {admin && <TaxonomyCard />}
-          {admin && <Keys />}
-          {admin && <div className="card"><header><h3>Label layouts learnt</h3></header>
-            <div className="pad stack">
-              {!pats.length && <div className="mut sm">None yet. When a label isn't understood, the scan screen asks once which piece is which.</div>}
-              {pats.map(p => (
-                <div key={p.id} className="row sm"><span className="grow"><b>{p.name}</b> · {p.count} pieces → {p.map.map(m => m || "–").join(", ")}</span>
-                  <DeleteButton className="btn sm bad" onDelete={async () => { if (!await confirmDelete("Forget this learned label layout?")) return; const n = pats.filter(x => x.id !== p.id); setPats(n); await setSetting("patterns", n); }}>Forget</DeleteButton></div>))}
-            </div></div>}
-          {boss && <div className="card"><header><h3>Backup file</h3></header>
-            <div className="pad stack">
-              <div className="sm mut">Everything on this device in one file. Keep a copy on a pen drive every week.</div>
-              <div className="row">
-                <button className="btn" onClick={async () => { const b = await exportAll(); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `rungnna-backup-${new Date().toISOString().slice(0, 10)}.json`; a.click(); }}>Download backup</button>
-                <input ref={file} type="file" accept="application/json" hidden onChange={async e => { const f = e.target.files?.[0]; if (!f) return; try { await importAll(f); toast("Backup restored"); } catch (x: any) { toast(x.message, true); } }} />
-                {admin && <button className="btn" onClick={() => file.current?.click()}>Restore from file</button>}
-              </div>
-            </div></div>}
-        </div>
-      </div>
+            <button className="btn" onClick={async () => { if (!nm.trim()) return; if (!/^\d{4}$/.test(pin)) return toast("Set a 4-digit personal PIN", true); await put("staff", { ...newStaff(nm.trim(), role, pin), role_id: roleId }); setNm(""); setPin(""); toast("Added"); }}>Add person</button>
+          </div></div>}
+        {boss && <PrivateCard />}
+        {boss && <SecuritySettings />}
+      </div>}
+
+      {tab === "backup" && <div className="set-grid">
+        <div className="card"><header><h3>Cloud backup</h3><span className="grow" />
+          <span className={"pill " + (!sync?.cloudEnabled || !sync?.user ? "warn" : sync?.status === "idle" && !sync.pending ? "ok" : sync?.status === "error" ? "bad" : "warn")}>{!sync?.cloudEnabled ? "offline mode" : !sync?.user ? "not connected" : sync?.status === "idle" && !sync.pending ? "✓ all saved" : sync?.status}</span></header>
+          <div className="pad stack">
+            <div className="set-intro">Every bill, product and payment is saved to the cloud and shared with the other counters automatically.</div>
+            <CloudSyncControl />
+            <div className="sm mut">{sync?.pending || 0} changes waiting{sync?.last ? ` · last saved ${when(sync.last)}` : ""}</div>
+            {sync?.error && <div className="note bad">{sync.error}</div>}
+            <StuckChanges />
+            {sync?.user ? <div className="row"><span className="sm grow">Connected as <b>{sync.user}</b></span><button className="btn sm" disabled={!sync.cloudEnabled} onClick={() => syncNow()}>Sync now</button>{admin && <button className="btn sm" onClick={signOut}>Disconnect</button>}</div>
+              : <ShopLogin />}
+          </div></div>
+        {boss && <div className="card"><header><h3>Backup file</h3></header>
+          <div className="pad stack">
+            <div className="set-intro">Everything on this device in one file. Keep a copy on a pen drive every week.</div>
+            <div className="row">
+              <button className="btn" onClick={async () => { const b = await exportAll(); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `rungnna-backup-${new Date().toISOString().slice(0, 10)}.json`; a.click(); }}>Download backup</button>
+              <input ref={file} type="file" accept="application/json" hidden onChange={async e => { const f = e.target.files?.[0]; if (!f) return; try { await importAll(f); toast("Backup restored"); } catch (x: any) { toast(x.message, true); } }} />
+              {admin && <button className="btn" onClick={() => file.current?.click()}>Restore from file</button>}
+            </div>
+          </div></div>}
+        {admin && <Keys />}
+        {admin && <div className="card"><header><h3>Label layouts learnt</h3></header>
+          <div className="pad stack">
+            <div className="set-intro">Supplier labels the scan screen has learnt to read.</div>
+            {!pats.length && <div className="mut sm">None yet. When a label isn't understood, the scan screen asks once which piece is which.</div>}
+            {pats.map(p => (
+              <div key={p.id} className="row sm"><span className="grow"><b>{p.name}</b> · {p.count} pieces → {p.map.map(m => m || "–").join(", ")}</span>
+                <DeleteButton className="btn sm bad" onDelete={async () => { if (!await confirmDelete("Forget this learned label layout?")) return; const n = pats.filter(x => x.id !== p.id); setPats(n); await setSetting("patterns", n); }}>Forget</DeleteButton></div>))}
+          </div></div>}
+      </div>}
     </div>
   );
 }
 
 const ROLES: Staff["role"][] = ["owner", "manager", "cashier", "salesman", "helper", "packer"];
-
-function PrintingSettings() {
-  const [width, setWidth] = useState("80mm");
-  const [cut, setCut] = useState<ReceiptCut>("partial");
-  const [copies, setCopies] = useState("1");
-  useEffect(() => { getSetting("invoice_copies", 1).then(n => setCopies(String(n || 1))); }, []);
-  useEffect(() => {
-    getSetting("thermal_width", "80mm").then(setWidth);
-    getSetting("receipt_cut", "partial").then(value => setCut(receiptCut(value)));
-  }, []);
-  return <section className="stack"><h3>Printing</h3>
-    <label className="f">Thermal paper width<select className="in" value={width} onChange={async e => { const value = e.target.value; setWidth(value); await db.transaction("rw", db.settings, async () => { await setSetting("thermal_width", value); await setSetting("print_fmt", value); }); toast("Printer preference saved"); }}><option value="58mm">58 mm</option><option value="80mm">80 mm</option></select></label>
-    <label className="f">Receipt cutter (driver setup)<select className="in" value={cut} onChange={async e => {
-      const value = receiptCut(e.target.value);
-      try { await setSetting("receipt_cut", value); setCut(value); toast("Preference saved; match it in Windows printer preferences"); }
-      catch { toast("Could not save cutter preference", true); }
-    }}>{Object.entries(RECEIPT_CUTS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-    <span className="sm">{receiptCutSetup(cut)}</span>
-    <label className="f">Tax invoice copies (A4 / A5)<select className="in" value={copies} onChange={async e => { setCopies(e.target.value); await setSetting("invoice_copies", Number(e.target.value)); toast("Saved"); }}>
-      <option value="1">1 — Original only</option><option value="2">2 — Original + Duplicate (transporter)</option><option value="3">3 — Original, Duplicate, Triplicate (GST rule 48)</option></select></label>
-    <span className="sm">Receipt size: fitted to each bill</span><a className="btn" href="#/labels">Label printer settings</a>
-  </section>;
-}
-function GstSettings() {
-  const [status, setStatus] = useState("Download JSON only");
-  useEffect(() => { gstRequest().then(j => setStatus(j.configured ? j.sandbox ? "Sandbox provider connected" : "Production provider connected" : "Download JSON only")).catch(() => {}); }, []);
-  return <section className="stack"><h3>E-invoice &amp; e-way bill</h3><span className="pill">{status}</span></section>;
-}
 
 function OperationsCard({ by }: { by: string }) {
   const [language, setLanguage] = useState<Lang>("en");
@@ -341,13 +346,17 @@ function OpenCodeSetting() {
 /* Shop profile: printed on every bill, shared by all counters. */
 function ShopProfile() {
   const [s, setS] = useState<Shop>(DEFAULT_SHOP);
+  const [saved, setSaved] = useState<Shop>(DEFAULT_SHOP);
+  const [justSaved, setJustSaved] = useState(false);
+  const dirty = JSON.stringify(s) !== JSON.stringify(saved);
   const [cc, setCc] = useState("");
   const [def, setDef] = useState("estimate");
-  useEffect(() => { getShop().then(setS); counterCode().then(setCc); getSetting("default_bill_type", "estimate").then(setDef); }, []);
-  const f = (k: keyof Shop, lbl: string, ph = "") => <label className="f">{lbl}<input className="in" value={String(s[k] ?? "")} placeholder={ph} onChange={e => setS({ ...s, [k]: k === "gst_rate" ? Number(e.target.value) || 0 : e.target.value })} /></label>;
+  useEffect(() => { getShop().then(x => { setS(x); setSaved(x); }); counterCode().then(setCc); getSetting("default_bill_type", "estimate").then(setDef); }, []);
+  const f = (k: keyof Shop, lbl: string, ph = "") => <label className="f">{lbl}<input className="in" value={String(s[k] ?? "")} placeholder={ph} onChange={e => { setJustSaved(false); setS({ ...s, [k]: k === "gst_rate" ? Number(e.target.value) || 0 : e.target.value }); }} /></label>;
   return (
-    <div className="card"><header><h3>Shop profile (printed on bills)</h3></header>
+    <div className="card"><header><h3>Shop profile (printed on bills)</h3><span className="grow" /><SaveState dirty={dirty} /></header>
       <div className="pad stack">
+        <div className="set-intro">Printed at the top and bottom of every bill, on every counter.</div>
         <div className="grid g2">
           {f("name", "Shop name")}{f("tagline", "Tagline")}
           {f("phone", "Phone")}{f("whatsapp", "WhatsApp number")}
@@ -358,112 +367,13 @@ function ShopProfile() {
           <label className="f">GST on rates<select className="in" value={s.gst_mode} onChange={e => setS({ ...s, gst_mode: e.target.value as any })}><option value="exclusive">Added on top of rate</option><option value="inclusive">Already included in rate</option></select></label>
         </div>
         {f("address", "Address")}{f("bank", "Bank details", "HDFC · A/c 123… · IFSC …")}{f("terms", "Terms (bottom of bill)")}
-        <button className="btn p" onClick={async () => { await saveShop(s); toast("Shop profile saved — every counter gets it"); }}>Save shop profile</button>
+        <button className={"btn" + (dirty ? " p" : "")} disabled={!dirty} onClick={async () => { await saveShop(s); setSaved(s); setJustSaved(true); toast("Shop profile saved — every counter gets it"); }}>{dirty ? "Save shop profile" : "Saved"}</button>
+        {justSaved && !dirty && <div className="note ok applied-note sm" role="status">✓ Saved. The next bill on every counter prints these details.</div>}
         <div className="grid g2">
           <label className="f">This counter's code (in bill numbers)<input className="in mono" value={cc} maxLength={4} onChange={e => setCc(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))} onBlur={() => cc && setSetting("counter_code", cc)} /></label>
           <label className="f">New bills start as<select className="in" value={def} onChange={e => { setDef(e.target.value); setSetting("default_bill_type", e.target.value); }}><option value="estimate">Estimate</option><option value="gst">GST invoice</option></select></label>
         </div>
         <div className="xs mut">Each counter numbers its own bills (e.g. RJ/26-27/C1-0001), so two counters can bill offline at the same time without ever clashing. Give every counter a different code.</div>
-      </div></div>
-  );
-}
-
-/* Owner/admin: the fixed rule that turns a COST into the sell rate + the secret
-   cost code on every label — so the same cost always encodes the same way, on
-   every device. The 10-letter code word is the whole secret, so it lives only in
-   the shop's own synced config, never in the app code. */
-function PricingCard() {
-  const [rule, setRule] = useState<PricingRule>(DEFAULT_RULE);
-  const [sample, setSample] = useState("120");   // ₹ cost to preview
-  const [keyErr, setKeyErr] = useState<string | null>(null);
-  useEffect(() => { getRule().then(r => { setRule(r); setKeyErr(validateKey(r.code.key)); }); }, []);
-
-  const m = rule.margin, c = rule.code;
-  const setM = (patch: Partial<PricingRule["margin"]>) => setRule(r => ({ ...r, margin: { ...r.margin, ...patch } }));
-  const setC = (patch: Partial<PricingRule["code"]>) => setRule(r => ({ ...r, code: { ...r.code, ...patch } }));
-
-  const preview = (() => {
-    const paise = toPaise(sample);
-    if (!paise) return null;
-    if (c.method === "letters" && validateKey(c.key)) return null; // don't preview with a broken key
-    try { return priceFromCost(paise, rule, 12, "PCS"); } catch { return null; }
-  })();
-
-  const save = async () => {
-    const err = c.method === "letters" ? validateKey(c.key) : null;
-    if (err) { setKeyErr(err); toast(err, true); return; }
-    await saveRule(rule);
-    toast("Pricing rule saved — every counter now encodes the same way");
-  };
-
-  return (
-    <div className="card"><header><h3>Pricing &amp; cost code</h3><span className="grow" /><span className="pill ok">used on every label</span></header>
-      <div className="pad stack">
-        <div className="xs mut">Enter a cost on the Labels screen and the sell rate + secret code fill in by themselves. Change the rule here and it reaches every counter.</div>
-
-        {/* --- margin: cost -> sell rate --- */}
-        <div className="grid g2">
-          <label className="f">Sell price is cost
-            <select className="in" value={m.mode} onChange={e => setM({ mode: e.target.value as any })}>
-              <option value="multiply">× a factor</option>
-              <option value="divide">÷ a factor</option>
-              <option value="percent">+ a percent markup</option>
-            </select></label>
-          {m.mode === "percent"
-            ? <label className="f">Markup %<input className="in mono" inputMode="decimal" value={m.percent} onChange={e => setM({ percent: Number(e.target.value) || 0 })} /></label>
-            : <label className="f">Factor<input className="in mono" inputMode="decimal" value={m.factor} onChange={e => setM({ factor: Number(e.target.value) || 0 })} /></label>}
-          <label className="f">Round the price to
-            <select className="in" value={m.round_to} onChange={e => setM({ round_to: Number(e.target.value) as RoundTo })}>
-              <option value={0}>Exact (paise)</option><option value={1}>₹1</option><option value={5}>₹5</option>
-              <option value={10}>₹10</option><option value={50}>₹50</option><option value={100}>₹100</option>
-            </select></label>
-          <label className="f">Rounding
-            <select className="in" value={m.round_dir} onChange={e => setM({ round_dir: e.target.value as any })}>
-              <option value="nearest">Nearest</option><option value="up">Always up</option>
-            </select></label>
-        </div>
-
-        {/* --- how the cost is hidden on the label --- */}
-        <div className="grid g2">
-          <label className="f">Hide the cost as
-            <select className="in" value={c.method} onChange={e => { setC({ method: e.target.value as any }); setKeyErr(e.target.value === "letters" ? validateKey(c.key) : null); }}>
-              <option value="letters">Code word (letters)</option>
-              <option value="shift">Maths shift (× / +)</option>
-              <option value="plain">Plain number (no hiding)</option>
-            </select></label>
-          <label className="f">Code prefix (optional)<input className="in mono" value={c.prefix} maxLength={4} onChange={e => setC({ prefix: e.target.value.toUpperCase() })} /></label>
-
-          {c.method === "letters" && (
-            <label className="f" style={{ gridColumn: "1/-1" }}>Secret code word — 10 different letters, one per digit 0–9
-              <input className={"in mono" + (keyErr ? " bad" : "")} value={c.key} maxLength={10}
-                onChange={e => { const k = e.target.value.toUpperCase().replace(/[^A-Z]/g, ""); setC({ key: k }); setKeyErr(validateKey(k)); }} />
-              {keyErr ? <span className="xs bad">{keyErr}</span>
-                : <span className="xs mut">{c.key.split("").map((ch, i) => `${i}=${ch}`).join("  ")}</span>}
-            </label>
-          )}
-          {c.method === "shift" && <>
-            <label className="f">Multiply cost by<input className="in mono" inputMode="decimal" value={c.mult} onChange={e => setC({ mult: Number(e.target.value) || 1 })} /></label>
-            <label className="f">Then add<input className="in mono" inputMode="decimal" value={c.add} onChange={e => setC({ add: Number(e.target.value) || 0 })} /></label>
-          </>}
-          <label className="row sm" style={{ gridColumn: "1/-1" }}><input type="checkbox" checked={c.suffix_pack} onChange={e => setC({ suffix_pack: e.target.checked })} /> Append the packing to the code (e.g. X12PCS)</label>
-        </div>
-
-        {/* --- live preview --- */}
-        <div className="note stack" style={{ gap: 6 }}>
-          <div className="row sm" style={{ flexWrap: "nowrap" }}>
-            <label className="f" style={{ margin: 0 }}>Try a cost ₹<input className="in mono" style={{ width: 110 }} inputMode="decimal" value={sample} onChange={e => setSample(e.target.value)} /></label>
-            <span className="grow" />
-          </div>
-          {preview ? (
-            <div className="row sm" style={{ gap: 16 }}>
-              <span>Sell rate: <b className="mono">{rupees(preview.rate)}</b></span>
-              <span>Label code: <b className="mono">{preview.cost_code}</b></span>
-            </div>
-          ) : <div className="xs mut">{c.method === "letters" && keyErr ? "Fix the code word to see the preview." : "Enter a cost to preview."}</div>}
-        </div>
-
-        <button className="btn p" onClick={save} disabled={c.method === "letters" && !!keyErr}>Save pricing rule</button>
-        <div className="xs mut">Tip: the code word is the whole secret — anyone who knows it can read a cost off a shelf tag. Share it only with people you trust, and change it here if it ever leaks.</div>
       </div></div>
   );
 }
@@ -493,7 +403,7 @@ function TaxonomyCard() {
         {!t[field].length && <span className="xs mut">None yet.</span>}
       </div>
       <div className="row" style={{ gap: 6 }}>
-        <input className="in" style={{ minHeight: 34 }} placeholder={"Add " + label.toLowerCase().replace(/s$/, "")} value={value}
+        <input className="in" style={{ minHeight: 34 }} placeholder={"Add " + label.toLowerCase().replace(/ies$/, "y").replace(/s$/, "")} value={value}
           onChange={e => setValue(e.target.value)} onKeyDown={async e => { if (e.key === "Enter" && value.trim()) { setT(await addTo(field, value.trim())); setValue(""); } }} />
         <button className="btn sm" onClick={async () => { if (value.trim()) { setT(await addTo(field, value.trim())); setValue(""); } }}>Add</button>
       </div>

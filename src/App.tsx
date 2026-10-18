@@ -15,6 +15,7 @@ const StockAI = lazy(() => import("./components/StockAI"));
 import { OwnerGate } from "./components/OwnerSecurity";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { getSetting, setSetting } from "./lib/db";
+import { getRule } from "./lib/pricing";
 
 /* Pages load on first visit (fast start); the service worker keeps every piece for offline use. */
 const Billing = lazy(() => import("./pages/Billing"));
@@ -84,6 +85,8 @@ function Shell() {
   const { me, setMe, ready, store, switchStore } = useApp();
   const stores = useLiveQuery(() => db.stores.filter(s => !s.deleted && !!s.active).toArray(), [], []);
   const [route, args] = useRoute();
+  // the owner's pricing switches (e.g. even sticker rates) apply on this counter as soon as they sync in
+  useLiveQuery(async () => { try { await getRule(); } catch { /* keeps the last known rule */ } return 0; }, [], 0);
   const [pal, setPal] = useState(false);
   const [compact, setCompact] = useState(true);
   useEffect(() => { getSetting("compact_menu", true).then(setCompact); }, []);
@@ -159,7 +162,7 @@ function Shell() {
     case "import": page = <Import />; break;
     case "bank": page = <Bank />; break;
     case "stores": page = <Stores />; break;
-    case "settings": page = <Settings />; break;
+    case "settings": page = <Settings tab={args[0]} />; break;
     case "roles": page = <Roles />; break;
     case "add": page = <AddInventory />; break;
     case "dealers": page = <Dealers />; break;

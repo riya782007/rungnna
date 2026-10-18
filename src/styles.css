@@ -1043,3 +1043,29 @@ html{scrollbar-gutter:stable}
 .roles-page .role-editor>.row{flex-wrap:wrap}
 .roles-page .role-editor .in.grow{min-width:min(220px,100%)!important}
 @media(max-width:700px){.roles-page .passcode-chip{letter-spacing:.1em}.roles-page .role-card>summary>.grow{min-width:100%}}
+/* Settings (owner, 18 Oct): five tabs, cards in balanced columns, every field explained */
+.set-tabs{margin:2px 0 6px;position:sticky;top:0;z-index:5}
+.set-tabs a{font-size:15px;height:38px}
+.set-tab-intro{margin:6px 2px 14px;color:var(--muted);font-size:14px}
+.set-grid{columns:2 440px;column-gap:16px}
+.set-grid>*{break-inside:avoid;margin:0 0 16px;display:block;width:100%}
+.set-grid.set-grid-1{columns:1}
+.set-intro{font-size:13.5px;line-height:1.45;color:var(--ink-2)}
+.set-sub{font-weight:700;font-size:13px;letter-spacing:.02em;text-transform:uppercase;color:var(--muted);margin-top:6px;padding-top:10px;border-top:1px solid var(--line-2)}
+.set-field .set-help,.set-switch .set-help{display:block;font-size:12px;line-height:1.35;color:var(--muted);font-weight:400;margin-top:2px}
+.set-switch{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--bg);cursor:pointer}
+.set-switch input{width:20px;height:20px;margin-top:1px;flex:none;accent-color:var(--ok)}
+.set-key{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+.set-key span{display:inline-flex;flex-direction:column;align-items:center;min-width:26px;padding:2px 4px;border:1px solid var(--line);border-radius:6px;font-family:ui-monospace,monospace;font-weight:700;font-size:13px;background:var(--bg)}
+.set-key small{font-size:10px;color:var(--muted);font-weight:500}
+.set-try{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--bg);display:flex;flex-direction:column;gap:10px}
+.set-steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:3px;font-size:14px}
+.set-dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:0;font-size:14px}
+.set-dl dt{color:var(--muted)} .set-dl dd{margin:0;font-weight:500}
+.set-terms{border:1px solid var(--line);border-radius:12px;overflow:hidden;max-height:60vh;overflow-y:auto}
+.set-terms-h,.set-terms-r{display:grid;grid-template-columns:80px minmax(0,1fr) 90px 90px 76px;gap:8px;align-items:center;padding:6px 10px}
+.set-terms-h{position:sticky;top:0;background:var(--fill);font-size:12px;font-weight:700;color:var(--muted);z-index:1}
+.set-terms-r{border-top:1px solid var(--line-2)}
+.set-terms-r .in{min-height:34px;height:34px}
+.set-terms-r.dirty{background:var(--warn-l)}
+@media(max-width:600px){.set-terms-h,.set-terms-r{grid-template-columns:56px minmax(0,1fr) 64px 64px 60px;gap:6px;padding:6px}}

@@ -55,6 +55,8 @@ export interface CodeRule {
 export interface PricingRule {
   margin: MarginRule;
   code: CodeRule;
+  /** sticker rates are whole even rupees (975 → 976) so half, the wholesale rate, has no paise. On unless the owner turns it off. */
+  even_rate?: boolean;
   updated_at?: string;
 }
 
@@ -72,9 +74,9 @@ const KEY = "pricing_rule";
    device-local copy if the shop config hasn't loaded yet. */
 export async function getRule(): Promise<PricingRule> {
   const c = await db.config.get(KEY);
-  if (c?.value) return normalizeRule(c.value);
-  const local = await getSetting<PricingRule | null>(KEY, null);
-  return normalizeRule(local || DEFAULT_RULE);
+  const r = c?.value ? normalizeRule(c.value) : normalizeRule((await getSetting<PricingRule | null>(KEY, null)) || DEFAULT_RULE);
+  evenOn = r.even_rate !== false;
+  return r;
 }
 
 export async function saveRule(rule: PricingRule) {
@@ -85,6 +87,7 @@ export async function saveRule(rule: PricingRule) {
   const { put } = await import("./db");
   await put("config", { id: KEY, value: r, updated_at: now() } as Config);
   await setSetting(KEY, r);
+  evenOn = r.even_rate !== false;
   return r;
 }
 
@@ -117,6 +120,7 @@ function normalizeRule(r: PricingRule): PricingRule {
       prefix: c.prefix || "",
       suffix_pack: c.suffix_pack !== false,
     },
+    even_rate: r.even_rate !== false,
     updated_at: r.updated_at,
   };
 }
@@ -134,20 +138,27 @@ function roundRupees(rupees: number, to: RoundTo, dir: "nearest" | "up"): number
 /* Sell price (paise) computed from cost (paise) by the rule. Deterministic. */
 /* Shop rule (owner, 18 Oct): the rate on a label is always an EVEN number of whole rupees. Half of it is the
    wholesale rate, and "975" would make that ₹37.50: so 75 → 76, 24.50 → 26 (up to the next even rupee). */
+/* The owner can turn it off in Settings → Prices & stickers; then a rate is printed exactly as worked out. */
+let evenOn = true;
+export const evenRatesOn = () => evenOn;
 export function evenRate(paise: number): number {
   if (!(paise > 0)) return 0;
+  if (!evenOn) return Math.round(paise);
   const r = Math.ceil(Math.round(paise) / 100);
   return (r % 2 ? r + 1 : r) * 100;
 }
+/** Settings' worked example: each step from cost to the sticker rate (all paise). */
+export function priceSteps(costPaise: number, rule: PricingRule) {
+  const cost = costPaise / 100, m = rule.margin;
+  const raw = m.mode === "multiply" ? cost * (m.factor || 1) : m.mode === "divide" ? (m.factor ? cost / m.factor : cost) : cost * (1 + (m.percent || 0) / 100);
+  const rounded = Math.round(roundRupees(raw, m.round_to, m.round_dir) * 100);
+  const even = rule.even_rate !== false;
+  const r = Math.ceil(rounded / 100);
+  return { raw: Math.round(raw * 100), rounded, final: !(rounded > 0) ? 0 : even ? (r % 2 ? r + 1 : r) * 100 : rounded };
+}
 
 export function sellFromCost(costPaise: number, rule: PricingRule): number {
-  const cost = costPaise / 100;
-  const m = rule.margin;
-  let sell: number;
-  if (m.mode === "multiply") sell = cost * (m.factor || 1);
-  else if (m.mode === "divide") sell = m.factor ? cost / m.factor : cost;
-  else sell = cost * (1 + (m.percent || 0) / 100);
-  return evenRate(Math.round(roundRupees(sell, m.round_to, m.round_dir) * 100));
+  return priceSteps(costPaise, rule).final;
 }
 
 /* The encrypted cost code — the same cost ALWAYS gives the same code. */
