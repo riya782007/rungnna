@@ -8,7 +8,8 @@ import { db, getSetting, setSetting, recordMovement, type Product } from "../lib
 import { qrSvg } from "../lib/qr";
 import { ownPayload } from "../lib/parse";
 import { blankProduct, saveProduct, findByScan, distinct, DEFAULT_ITEMS, DEFAULT_TYPES, label, itemCodeFor } from "../lib/products";
-import { Head, LocationSelect, DeadToggle , MoneyInput } from "../components/common";
+import { Head, DeadToggle , MoneyInput } from "../components/common";
+import { RackPicker } from "../components/RackPicker";
 import { WedgeInput } from "../components/Scanner";
 import { useApp, toast } from "../lib/app";
 import { can, roleName } from "../lib/roles";
@@ -263,7 +264,7 @@ export default function Labels({ args }: { args: string[] }) {
                   onKeyDown={e => e.key === "Enter" && addJob()} /></label>
               </div>
               <label className="row sm"><input type="checkbox" checked={addStock} onChange={e => setAddStock(e.target.checked)} /> These are new packets — also add them to stock</label>
-              {addStock && <LocationSelect value={loc} onChange={setLoc} label="Into rack" buckets={false} />}
+              {addStock && <RackPicker value={loc} onChange={setLoc} label="Into rack" />}
               <div className="row"><button className="btn p" disabled={queueBusy} onClick={() => addJob(true)}>Print barcode</button><button className="btn" disabled={queueBusy} onClick={() => addJob()}>Add to queue</button></div>
             </div>
           </div>

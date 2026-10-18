@@ -15,7 +15,7 @@ import { DEFAULT_CFG, LabelView, validateLabelPrint, loadLabelCfg, useLabelPrint
 import { directPrintSupported } from "../lib/tsc";
 import { currentStore } from "../lib/scope";
 import { toast } from "../lib/app";
-import { LocationSelect } from "./common";
+import { RackPicker } from "./RackPicker";
 import { checkBill, checkSummary, matchSupplier, fallbackBillNo, type LineFix } from "../lib/billCheck";
 import { newParty } from "../lib/billing";
 
@@ -250,7 +250,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         <label className="f">Supplier bill no.<input className={"in" + (d.autoBillNo ? " auto-filled" : "")} value={d.billNo}
           title={d.autoBillNo ? "The bill printed no number, so its date and total stand in for one. That still stops the same bill being saved twice." : undefined}
           onChange={e => set({ billNo: e.target.value, autoBillNo: false })} /></label>
-        <LocationSelect value={d.rack} onChange={rack => set({ rack })} buckets={false} /></div>
+        <RackPicker value={d.rack} onChange={rack => set({ rack })} /></div>
 
       <div className="tw"><table className="pos-t"><thead><tr>{[...FIELDS.map(f => captions[f]), ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
         {d.rows.map((r, i) => <tr key={i}>
@@ -259,7 +259,10 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
               title={k === "style" && r.autoStyle ? "The bill printed no article number — this was built from the item and its rate. Edit it if you have the supplier's own code." : undefined}
               value={r[k] ?? ""} onChange={e => row(i, k, e.target.value)}
               style={{ minWidth: k === "item" ? 170 : k === "style" ? 120 : 56 }} /></td>)}
-          <td><button className="iconbtn" title="Remove line" aria-label="Remove line" onClick={() => set({ rows: d.rows.filter((_, k) => k !== i) })}><Trash2 size={16} /></button></td>
+          <td><button className="iconbtn" title="Remove line" aria-label="Remove line" onClick={() => {
+            if (!confirm(`Remove line ${i + 1}: ${[r.item, r.style].filter(Boolean).join(" ") || "(empty)"}${r.qty ? ` · ${r.qty} ${r.unit || "PCS"}` : ""}?`)) return;
+            set({ rows: d.rows.filter((_, k) => k !== i) });
+          }}><Trash2 size={16} /></button></td>
         </tr>)}</tbody></table></div>
 
       {!!invented && <div className="note sm">{invented} line{invented === 1 ? "" : "s"} had no article number on the bill. An article was built from the item and its rate (e.g. CHOTI-273) so lines at different rates stay separate — and so buying the same thing again at the same rate matches the same product. Edit any of them if the supplier has a code.</div>}
