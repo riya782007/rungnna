@@ -25,7 +25,7 @@ describe("TSPL for the TSC printer", () => {
   it("prints the requested copies of a correctly sized label", () => {
     const t = job({ ...DEFAULT_CFG, ...PRESETS.find(x => x.key === "rj")!.cfg } as LabelCfg);
     expect(t).toMatch(/^SIZE 50 mm, 20 mm\r\n/); expect(t).toContain("PRINT 1,3\r\n"); expect(t).toContain("QRCODE ");
-    expect(t).toContain('"924.50X12PCS"');   // the shop's own mark before the rate, as on its old stickers expect(t).toContain('"RUNGNNA"');
+    expect(t).toContain('"926X12PCS"');   // ₹24.50 prints as 26: label rates are even whole rupees   // the shop's own mark before the rate, as on its old stickers expect(t).toContain('"RUNGNNA"');
   });
   it("keeps every text line clear of the QR and inside the label on every roll preset", () => {
     for (const pre of PRESETS.filter(x => x.cfg.mode === "roll" && (x.cfg.cols || 1) === 1)) {
@@ -63,7 +63,7 @@ describe("TSPL never prints a wrong price or quantity", () => {
     let t = "";
     try { t = labelTSPL(cfg, pp, 144, 1, ownPayload(pp)); } catch (e: any) { expect(e.message).toMatch(/fit|Too much|QR|room/); return; }
     const joined = [...new Set(words(t))].join("");
-    expect(joined).toContain("91245.50X144PCS");
+    expect(joined).toContain("91246X144PCS");
     expect(joined).toContain("OAX12PCS".replace("12", "144"));
   });
 });
@@ -71,9 +71,9 @@ describe("TSPL never prints a wrong price or quantity", () => {
 describe("the rate mark", () => {
   it("prints 9 before the rate, as the shop's old stickers do, and ₹ only when chosen", () => {
     const pp = productForLabel(p, 12);
-    expect(renderToStaticMarkup(<LabelView cfg={DEFAULT_CFG} p={pp} qtyOnLabel={12} />)).toContain("924.50X12PCS");
-    expect(renderToStaticMarkup(<LabelView cfg={{ ...DEFAULT_CFG, cur: "₹" }} p={pp} qtyOnLabel={12} />)).toContain("₹24.50X12PCS");
+    expect(renderToStaticMarkup(<LabelView cfg={DEFAULT_CFG} p={pp} qtyOnLabel={12} />)).toContain("926X12PCS");
+    expect(renderToStaticMarkup(<LabelView cfg={{ ...DEFAULT_CFG, cur: "₹" }} p={pp} qtyOnLabel={12} />)).toContain("₹26X12PCS");
     // a printer with no ₹ in its fonts still gets a readable mark
-    expect(labelTSPL({ ...DEFAULT_CFG, cols: 1, mode: "roll", w: 50, h: 20, qr: 15, cur: "₹" } as LabelCfg, pp, 12, 1, "x")).toContain("Rs.24.50");
+    expect(labelTSPL({ ...DEFAULT_CFG, cols: 1, mode: "roll", w: 50, h: 20, qr: 15, cur: "₹" } as LabelCfg, pp, 12, 1, "x")).toContain("Rs.26");
   });
 });

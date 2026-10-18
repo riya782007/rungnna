@@ -4,7 +4,7 @@ import { newPurchase, lineOf, finalizePurchase } from "./stockin";
 import { moneyInput } from "./pos";
 import { requirePerm } from "./scope";
 import { vendorCost } from "./vendors";
-import { getRule, priceFromCost, type PricingRule } from "./pricing";
+import { getRule, priceFromCost, evenRate, type PricingRule } from "./pricing";
 
 export type PhotoRow = { item: string; style: string; color: string; unit: string; hsn: string; qty: string; cost: string; rate: string;
   /** set when autoArticle() invented the article because the bill printed none */
@@ -62,7 +62,7 @@ export function validatePhotoRows(rows: PhotoRow[]) {
     if (!Number.isSafeInteger(qty * cost)) throw new Error("Purchase amount is too large");
     if (!/^(PCS|PAIR|SET)$/i.test(r.unit)) throw new Error(`Line ${i + 1}: convert dozen/box/packet to PCS, PAIR or SET before saving`);
     if (r.hsn && !/^\d{4,8}$/.test(r.hsn)) throw new Error(`Line ${i + 1}: check HSN`);
-    return { ...r, qty, cost, rate };
+    return { ...r, qty, cost, rate: evenRate(rate) };   // the product keeps the same even rate its label shows
   });
 }
 

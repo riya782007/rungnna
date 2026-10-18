@@ -16,7 +16,7 @@ beforeEach(async () => {
 });
 describe("reviewed photo purchases", () => {
   it("calculates missing selling rates without changing printed rates or guessing packaging", () => {
-    expect(pricePhotoRows([{ ...row, rate: "" }], DEFAULT_RULE)[0].rate).toBe("65.00");
+    expect(pricePhotoRows([{ ...row, rate: "" }], DEFAULT_RULE)[0].rate).toBe("66.00");   // 65 → 66: label rates are even (owner, 18 Oct)
     for (const patch of [{ rate: "100" }, { rate: "", cost: "unclear" }, { rate: "", unit: "DOZEN" }]) {
       const r = { ...row, ...patch }; expect(pricePhotoRows([r], DEFAULT_RULE)[0]).toEqual(r);
     }
@@ -24,7 +24,7 @@ describe("reviewed photo purchases", () => {
   it("uses reviewed rates and names for existing articles, with deterministic cost codes", async () => {
     await savePhotoPurchase([row], input);
     await savePhotoPurchase([{ ...row, rate: "115" }], { ...input, billNo: "SUP-2" });
-    expect((await db.products.toArray())[0]).toMatchObject({ rate: 11500, item: "BALI", cost_code: "OAX1PAIR", price_locked: 1 });
+    expect((await db.products.toArray())[0]).toMatchObject({ rate: 11600, item: "BALI", cost_code: "OAX1PAIR", price_locked: 1 });   // 115 typed → 116 kept, as on its label
   });
   it("rejects oversized label batches before committing inventory", async () => {
     await expect(savePhotoPurchase([{ ...row, qty: "5001" }], input)).rejects.toThrow("5000");

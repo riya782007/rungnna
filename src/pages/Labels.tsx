@@ -15,7 +15,7 @@ import { can, roleName } from "../lib/roles";
 import { inStore } from "../lib/scope";
 import { purchaseLabelJobs, productForLabel } from "../lib/purchase-labels";
 import { toPaise } from "../lib/format";
-import { getRule, priceFromCost, type PricingRule } from "../lib/pricing";
+import { getRule, priceFromCost, evenRate, type PricingRule } from "../lib/pricing";
 import { labelTSPL, labelRate, rateMark } from "../lib/label-tspl";
 import { labelBatches, runsOf, DEFAULT_BATCH, type LabelBatch } from "../lib/labelBatches";
 import { printTSPL, directPrintSupported, connectSerial, connectUSB, serialSupported, usbSupported } from "../lib/tsc";
@@ -188,7 +188,7 @@ export default function Labels({ args }: { args: string[] }) {
           cost: form.cost || existing.cost, cost_code: form.cost_code || existing.cost_code, price_locked: form.price_locked ?? existing.price_locked,
           model: form.model || existing.model, vendor_id: form.vendor_id || existing.vendor_id, vendor_name: form.vendor_name || existing.vendor_name }
       : { ...form, pack, item_code, created_by: form.created_by || me?.id || "" };
-    const saved = await saveProduct(p);
+    const saved = await saveProduct({ ...p, rate: evenRate(p.rate) });   // same even rate as the label it prints
     if (!saved.item.trim()) throw new Error("Enter the product name before printing labels");
     if (addStock) {
       if (!loc) { toast("Choose the rack the new stock goes to", true); return; }
@@ -301,15 +301,16 @@ export function LabelView({ cfg, p, qtyOnLabel = 1, line }: { cfg: LabelCfg; p: 
        them at the top, the rate big along the bottom ("9320X1PCS"), and RUNGNNA standing up at the right edge. */
     <div className="lbl lbl-shop" style={{ width: cfg.w + "mm", height: cfg.h + "mm", padding: cfg.pad + "mm", columnGap: cfg.pad + "mm", fontSize: fs + "pt" }}>
       <div className="t">
-        {(s.line ?? true) && line ? <div><span className="lno" title="Line of the bill these goods are on">{line}</span>{s.item && p.item ? p.item : ""}</div> : s.item && p.item && <div>{p.item}</div>}
+        {s.item && p.item && <div>{p.item}</div>}
         {s.style && p.style && <div>{p.style}</div>}
         {s.color && p.color && <div>{p.color}</div>}
         {s.tk && p.tk && <div>TK {p.tk}</div>}
-        {s.cost_code && pp.cost_code && <div>{pp.cost_code}</div>}
+        {/* the owner reads the cost code and the bill line together, on the third line */}
+        {(s.cost_code && pp.cost_code) || ((s.line ?? true) && line) ? <div>{s.cost_code && pp.cost_code ? pp.cost_code : ""}{(s.line ?? true) && line ? <span className="lno lno-end" title="Line of the bill these goods are on">{line}</span> : null}</div> : null}
         {s.code && <div style={{ fontSize: fs * 0.85 + "pt" }}>{p.code}</div>}
       </div>
       <div className="q" style={{ width: q + "mm", height: q + "mm" }} dangerouslySetInnerHTML={{ __html: svg }} />
-      {s.rate && p.rate > 0 && <div className="r" style={{ fontSize: fs * (cfg.rateScale ?? 1.75) + "pt" }}>{cur}{labelRate(p.rate)}{s.qty ? `X${pp.pack}${p.type || "PCS"}` : ""}</div>}
+      {s.rate && p.rate > 0 && <div className="r" style={{ fontSize: fs * (cfg.rateScale ?? 1.75) + "pt" }}>{cur}{labelRate(pp.rate)}{s.qty ? `X${pp.pack}${p.type || "PCS"}` : ""}</div>}
       {s.shop && cfg.shop && <div className="n" style={{ fontSize: fs * 0.95 + "pt" }}>{cfg.shop}</div>}
     </div>
   );
@@ -318,13 +319,13 @@ export function LabelView({ cfg, p, qtyOnLabel = 1, line }: { cfg: LabelCfg; p: 
       <div className="q" style={{ width: q + "mm", height: q + "mm" }} dangerouslySetInnerHTML={{ __html: svg }} />
       <div className="t">
         {s.shop && cfg.shop && <div style={{ fontWeight: 800, letterSpacing: ".08em", fontSize: fs * 0.9 + "pt" }}>{cfg.shop}</div>}
-        {(s.line ?? true) && line ? <div style={{ fontWeight: 700 }}><span className="lno">{line}</span>{s.item ? p.item : ""}</div> : s.item && p.item && <div style={{ fontWeight: 700 }}>{p.item}</div>}
+        {s.item && p.item && <div style={{ fontWeight: 700 }}>{p.item}</div>}
         {s.style && p.style && <div>{p.style}</div>}
         {s.color && p.color && <div>{p.color}</div>}
         {s.tk && p.tk && <div>TK {p.tk}</div>}
         {s.qty && <div>{qtyOnLabel} {p.type || "PCS"}</div>}
-        {s.rate && p.rate > 0 && <div style={{ fontWeight: 800, fontSize: fs * 1.25 + "pt" }}>{cur}{labelRate(p.rate)}</div>}
-        {s.cost_code && pp.cost_code && <div style={{ fontFamily: "monospace", fontWeight: 700, fontSize: fs * 0.95 + "pt" }}>{pp.cost_code}</div>}
+        {s.rate && p.rate > 0 && <div style={{ fontWeight: 800, fontSize: fs * 1.25 + "pt" }}>{cur}{labelRate(pp.rate)}</div>}
+        {(s.cost_code && pp.cost_code) || ((s.line ?? true) && line) ? <div style={{ fontFamily: "monospace", fontWeight: 700, fontSize: fs * 0.95 + "pt" }}>{s.cost_code && pp.cost_code ? pp.cost_code : ""}{(s.line ?? true) && line ? <span className="lno lno-end">{line}</span> : null}</div> : null}
         {s.code && <div style={{ fontFamily: "monospace", fontSize: fs * 0.85 + "pt" }}>{p.code}</div>}
       </div>
     </div>

@@ -773,4 +773,5 @@ html{scrollbar-gutter:stable}
 .lbl-shop .r{grid-column:1 / 3;grid-row:2;justify-self:start;text-align:left;white-space:nowrap;font-weight:500;line-height:1;letter-spacing:.01em;max-width:100%;overflow:hidden}
 .lbl-shop .n{grid-column:3;grid-row:1 / 3;writing-mode:vertical-rl;font-weight:700;letter-spacing:.12em;align-self:center}
 /* the bill line a sticker belongs to: a small boxed number before the item, so staff match stickers to goods */
+.lbl .lno-end{margin:0 0 0 1.2mm}
 .lbl .lno{display:inline-block;border:.15mm solid #000;border-radius:.4mm;padding:0 .35mm;margin-right:.6mm;font-weight:700;font-size:.9em;line-height:1.05}

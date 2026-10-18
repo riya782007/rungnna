@@ -90,13 +90,30 @@ describe("a computer can never waste more than one row before someone checks it"
 
 import { purchaseLabelJobs } from "../src/lib/purchase-labels";
 describe("each sticker says which line of the bill its goods are on", () => {
-  it("purchase labels carry the bill line, and the sticker prints it in a small box before the item", () => {
+  it("purchase labels carry the bill line, printed small on the third line beside the cost code", () => {
     const mk = (id: string, item: string) => ({ id, code: id, item, style: "S", color: "", type: "PCS", pack: 1, rate: 32000, cost_code: "KX", barcodes: [] } as any);
     const purchase = { status: "final", items: [{ product_id: "a", qty: 2, pack: 1 }, { product_id: "b", qty: 3, pack: 1 }] } as any;
     const jobs = purchaseLabelJobs(purchase, [mk("a", "EARING"), mk("b", "KADA")]);
     expect(jobs.map(j => j.line)).toEqual([1, 2]);
     const html = renderToStaticMarkup(<PrintSheet cfg={DEFAULT_CFG} jobs={[jobs[1]]} />);
-    expect(html).toMatch(/class="lno"[^>]*>2<\/span>KADA/);
+    expect(html).toMatch(/<div>KADA<\/div>/);                       // the item line stays whole
+    expect(html).toMatch(/KX<span class="lno lno-end"[^>]*>2<\/span>/); // the line number sits after the cost code, on the third line
     expect(renderToStaticMarkup(<PrintSheet cfg={{ ...DEFAULT_CFG, show: { ...DEFAULT_CFG.show, line: false } }} jobs={[jobs[1]]} />)).not.toContain('class="lno"');
+  });
+});
+
+import { evenRate, sellFromCost, DEFAULT_RULE } from "../src/lib/pricing";
+describe("label rates are always even, so half of them (the wholesale rate) is a whole rupee", () => {
+  it("75 → 76, 76 stays, paise go up to the next even rupee", () => {
+    expect(evenRate(7500)).toBe(7600); expect(evenRate(7600)).toBe(7600);
+    expect(evenRate(2450)).toBe(2600); expect(evenRate(2400)).toBe(2400); expect(evenRate(0)).toBe(0);
+  });
+  it("prices worked out from cost come out even too", () => {
+    for (const cost of [100, 2300, 4100, 9999]) expect((sellFromCost(cost * 100, DEFAULT_RULE) / 100) % 2).toBe(0);
+  });
+  it("the printed rate and the QR inside agree on the even rate", () => {
+    const p = { id: "x", code: "RJ1", item: "KAMAR BELT", style: "KB-12", color: "", type: "PCS", pack: 1, rate: 7500, cost_code: "KXBS", item_code: "205", barcodes: [] } as any;
+    const html = renderToStaticMarkup(<PrintSheet cfg={DEFAULT_CFG} jobs={[{ p, qtyOnLabel: 1, copies: 1 }]} />);
+    expect(html).toContain("976X1PCS"); expect(html).not.toContain("975X1PCS");
   });
 });
