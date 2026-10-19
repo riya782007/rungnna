@@ -252,8 +252,7 @@ export default function Labels({ args }: { args: string[] }) {
         <button className="btn g" disabled={!total || printer.busy} onClick={doPrint}>Print {total || ""} labels</button>
       </Head>
       {printError && <div className="note warn" role="alert">{printError}</div>}
-      <div className="split">
-        <div className="stack">
+      <div className="label-purchase">
           {can(me, "purchases.photo") ? <details className="card purchase-import" open={args[0] === "bill"}>
             <summary className="pad b">From a purchase bill — upload the photo, get the labels</summary>
             <div style={{ borderTop: "1px solid var(--line-2)" }} className="pad">
@@ -263,6 +262,9 @@ export default function Labels({ args }: { args: string[] }) {
           /* shown even when not allowed, so the owner can see it exists and how to reach it */
           : <div className="card pad row"><span className="grow sm"><b>From a purchase bill</b> — needs “Read purchase bill photos”, which {roleName(me) || "this person"} does not have.</span>
               <button className="btn sm" onClick={() => setMe(null)}>Switch person</button></div>}
+      </div>
+      <div className="split">
+        <div className="stack">
           <div className="card">
             <header><h3>Barcode print</h3><span className="xs mut">scan an existing label to copy its details</span></header>
             <div className="pad stack">

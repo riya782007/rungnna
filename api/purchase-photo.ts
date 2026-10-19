@@ -67,6 +67,7 @@ ARTICLE NUMBERS
 - Keep every line separate even when the description repeats. Lines at different rates are different articles.
 
 OTHER
+- Read a packet-size heading or note (e.g. "all articles 12 pcs per packet", "packing: 1 dozen") and carry that explicit pack to every line it applies to. A row-specific pack overrides the heading. A quantity of 12 pieces does not by itself mean 12 pieces per packet.
 - pack is how many pieces one packet/box holds, only when the bill says so in words or numbers ("12 pcs/box", "pkt of 6", "x3", a Pcs/Pkt column). Never work it out from box and qty; leave it empty if not written.
 - Leave ambiguous quantity/cost/rate blank and explain in warnings. Do not silently convert dozens, packets or boxes.
 - Keep tax, discount, freight and any "less %" in warnings with their amounts.

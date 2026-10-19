@@ -44,6 +44,20 @@ For stock correction, open Products, select the item, enter the exact desired to
 6. Print one label from the actual roll, rescan it with the shop's scanner and inspect first/last column alignment, reference/line and quantity. Increase darkness gradually if needed.
 7. Leave government submission unchecked during routine trials. Test an authorized sandbox path separately if that provider is configured.
 
+## Voice-note follow-up: purchase quantities and legacy printing
+
+Karan's attached 21-second voice note says he is repeatedly typing total quantities and pieces per packet in the barcode review. The screenshots show a 26-line KAYAN draft and packet sizes being entered line by line.
+
+- The purchase review now spans the Labels page width; the item, quantity, packet, sticker, cost and rate columns fit a 1366-pixel desktop trial without horizontal scrolling.
+- Printed packet sizes (including 12.0, 12 PCS/BOX, X12 and 1 DZN) are retained. When absent, the exact saved article's packet size is used, then the device's remembered default. Unreadable or fractional packet values remain visible for review and are not silently reset to 1.
+- Set quantities for all lines accepts one packet size and an optional replacement total. Blank total preserves every quantity read from the bill. A replacement total is applied only after the owner explicitly enters it and clicks Apply to all lines. Sticker overrides and individual exceptions are retained. Only the packet size is remembered for future bills; total overrides are cleared for a new upload or completed purchase.
+- For a bill where every line contains one 12-piece packet: enter total quantity 12 and pieces per packet 12 once, then Apply to all lines. For mixed totals: leave total blank and apply only packet size. The app never infers that a single quantity means a packet without evidence or owner input.
+- The photo-to-label path now learns existing numeric item codes from exact articles, saved category mappings and verified owner label evidence, and retains the reference. Ambiguous category codes are left for review. The owner can set a real old-system code once per category and apply an explicit reference across the bill.
+- Label validation occurs before purchase approval commits. Missing old-system identity prevents saving that purchase for printing; it no longer fails only after inventory has been booked. References, packet counts and legacy QR bytes travel through the saved purchase to the actual printed stickers.
+- Arithmetic approval indicators are cleared when review lines change, so a quantity edit cannot retain an obsolete green bill-total check.
+
+Repeatable browser acceptance: scripts/purchase-quantities-browser-check.mjs. It exercises 26 lines, mixed bill totals, bulk X6 and X12, a per-line exception, saved default after fresh authentication, one committed purchase, exact stock and print counts, QR decoding and missing-code approval blocking. These are isolated fixtures, not edits to Karan's current bill.
+
 ## Production follow-up
 
 The initial production smoke found the GST function importing browser billing code at runtime, causing an ESM module-not-found startup error. Allocation math is now isolated in a pure module with a Node-compatible import; a native-Node runtime regression guards this deployment path. The production smoke checks the common-code entry screen, API health, unauthenticated GST response, service-worker control and an actual network-offline reload in a fresh Chrome profile without touching shop records.
@@ -54,7 +68,7 @@ Final checks are recorded below. Large cloud pulls now use ordered timestamp/id 
 
 Verified on the final source:
 
-- **545 tests passed across 68 files**, with no skips or failures: `node node_modules/vitest/vitest.mjs run --maxWorkers=2 --minWorkers=1 --hookTimeout=120000`. A longer hook timeout accommodates Windows Postgres/WASM initialization; tests still execute normally.
+- **552 tests passed across 69 files**, with no skips or failures: `node node_modules/vitest/vitest.mjs run --maxWorkers=2 --minWorkers=1 --hookTimeout=120000`. A longer hook timeout accommodates Windows Postgres/WASM initialization; tests still execute normally.
 - Frontend TypeScript and API TypeScript checks passed. Production Vite/PWA build passed and precached 72 assets. Existing bundle-size/dynamic-import warnings remain.
 - Production browser scan trial passed: exact packet/remainder totals, rapid reads during delayed lookup, yellow rows, correct boxes, stale-bill rejection, focus and mobile display.
 - Production browser access trial passed: common/personal access, direct-route restrictions, role regeneration/deletion, default online sync and owner pause. Reload required fresh identity while the actual scanned billing draft survived. Label darkness 10 / speed 2 appeared; darkness 12 persisted after reload and reauthentication. Zero JavaScript errors and zero external requests.

@@ -815,3 +815,14 @@ html{scrollbar-gutter:stable}
 .note.applied-note{padding:8px 12px;margin:6px 0;font-weight:600}
 .purchase-photo .pos-t td.line-no{font-weight:700;text-align:center;color:var(--muted);min-width:26px}
 .in.cost-low{border-color:var(--bad)!important;background:var(--bad-l)}
+
+/* Purchase review uses the page width, including when opened from Labels. */
+.label-purchase{min-width:0;width:100%}
+.purchase-photo{min-width:0}
+.purchase-quantity-tools{margin:0;padding:12px;border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;gap:8px;background:var(--bg)}
+.purchase-quantity-tools legend{font-weight:600;padding:0 6px}
+.purchase-quantity-tools .f{flex:1 1 180px;max-width:300px}
+.purchase-quantity-tools .row{align-items:flex-end}
+.purchase-photo .purchase-lines th{white-space:normal;min-width:56px}
+.purchase-photo .purchase-lines th:nth-child(8){min-width:100px}
+.purchase-photo .purchase-lines{max-width:100%}

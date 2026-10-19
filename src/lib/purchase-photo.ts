@@ -1,6 +1,8 @@
 import { db, uid, setSetting, type Product, type Purchase, type Party } from "./db";
-import { blankProduct, findByKey, saveProduct } from "./products";
+import { blankProduct, findByKey, saveProduct, itemMap, normUnit, productKey } from "./products";
 import { newPurchase, lineOf, finalizePurchase } from "./stockin";
+import { VERIFIED_ITEM_CODES } from "./verified-labels";
+import { readCount, readPacketSize } from "./purchase-quantities";
 import { moneyInput } from "./pos";
 import { requirePerm } from "./scope";
 import { vendorCost } from "./vendors";
@@ -9,6 +11,9 @@ import { getRule, priceFromCost, evenRate, type PricingRule } from "./pricing";
 export type PhotoRow = { item: string; style: string; color: string; unit: string; hsn: string; qty: string; cost: string; rate: string;
   /** set when autoArticle() invented the article because the bill printed none */
   autoStyle?: boolean;
+  /** Old application identity; supplied by its master or a matching saved article. */
+  item_code?: string; ref?: string;
+  packSource?: "bill" | "saved" | "default" | "manual";
   /** the supplier's terms (÷ rate divisor, less %) are already in this line's cost: never applied twice */
   termsDone?: boolean;
   /** pieces in one packet: the "X3" printed after the rate on the sticker (old software's QTY). Blank = 1. */
@@ -110,6 +115,8 @@ export function validatePhotoRows(rows: PhotoRow[]) {
     if (cost <= 0 || rate <= 0) throw new Error(`Line ${i + 1}: enter positive cost and selling rate`);
     if (!Number.isSafeInteger(qty * cost)) throw new Error("Purchase amount is too large");
     if (!/^(PCS|PAIR|SET)$/i.test(r.unit)) throw new Error(`Line ${i + 1}: convert dozen/box/packet to PCS, PAIR or SET before saving`);
+    if (r.item_code && !/^\d+$/.test(r.item_code.trim())) throw new Error(`Line ${i + 1}: old-software item code must be numeric`);
+    if (/[~\u0000-\u001f\u007f]/.test(r.ref || "")) throw new Error(`Line ${i + 1}: old-software reference cannot contain ~ or control characters`);
     if (r.hsn && !/^\d{4,8}$/.test(r.hsn)) throw new Error(`Line ${i + 1}: check HSN`);
     let pack: number;
     try { pack = packOf(r); } catch (e: any) { throw new Error(`Line ${i + 1}: ${e.message}`); }
@@ -129,9 +136,25 @@ export function draftLabelProducts(rows: PhotoRow[], by: string, rule: PricingRu
     return {
       ...blankProduct(by),
       item: r.item.trim().toUpperCase(), style: r.style.trim().toUpperCase(), model: r.style.trim().toUpperCase(),
-      color: r.color.trim().toUpperCase(), type: unit, pack: packOrOne(r), rate, cost,
+      color: r.color.trim().toUpperCase(), type: unit, item_code: r.item_code, ref: r.ref, pack: packOrOne(r), rate, cost,
       cost_code: cost > 0 ? priceFromCost(cost, rule, packOrOne(r), unit).cost_code : "",
     };
+  });
+}
+
+/** Fill printed packet sizes, known article sizes and learned legacy codes before review. */
+export async function preparePhotoRows(rows: PhotoRow[], supplierId: string, fallbackPack = "1"): Promise<PhotoRow[]> {
+  const [products, learned] = await Promise.all([db.products.filter(p => !p.deleted).toArray(), itemMap()]);
+  const known = { ...VERIFIED_ITEM_CODES, ...learned };
+  return rows.map(row => {
+    const item = row.item.trim().toUpperCase(), unit = normUnit(row.unit);
+    const old = products.find(p => productKey(p) === productKey({ model: row.style, style: row.style, color: row.color, vendor_id: supplierId }));
+    const codes = new Set<string>();
+    for (const p of products) if (p.item.trim().toUpperCase() === item && normUnit(p.type) === unit && /^\d+$/.test(p.item_code || "")) codes.add(p.item_code!);
+    for (const [code, info] of Object.entries(known)) if (info.name.trim().toUpperCase() === item && (!info.unit || normUnit(info.unit) === unit) && /^\d+$/.test(code)) codes.add(code);
+    const item_code = row.item_code?.trim() || old?.item_code || (codes.size === 1 ? [...codes][0] : undefined);
+    const explicitPack = !!row.pack?.trim() && row.packSource !== "default" && row.packSource !== "saved";
+    return { ...row, unit: unit || row.unit, qty: readCount(row.qty), pack: explicitPack ? readPacketSize(row.pack) : String(old?.pack || fallbackPack || "1"), packSource: explicitPack ? row.packSource || "bill" : old?.pack ? "saved" : "default", ...(item_code ? { item_code } : {}), ...(row.ref ? {} : old?.ref ? { ref: old.ref } : {}) };
   });
 }
 
@@ -159,7 +182,7 @@ export async function savePhotoPurchase(rows: PhotoRow[], input: { by: string; r
       const old = await findByKey({ model: row.style, style: row.style, color: row.color, vendor_id: supplier.id });
       if (old && old.type !== row.unit.toUpperCase()) throw new Error("Unit differs from the existing article. Review before saving.");
       const code = priceFromCost(row.cost, rule, row.pack, row.unit).cost_code;
-      const p: Product = old ? { ...old, item: row.item, hsn: row.hsn || old.hsn, cost: row.cost, rate: row.rate, price_locked: 1, cost_code: code, pack: row.pack } : { ...blankProduct(input.by), item: row.item, style: row.style, model: row.style, color: row.color, type: row.unit, hsn: row.hsn, rate: row.rate, cost: row.cost, cost_code: code, price_locked: 1, vendor_id: supplier.id, vendor_name: supplier.name, pack: row.pack };
+      const p: Product = old ? { ...old, item: row.item, hsn: row.hsn || old.hsn, cost: row.cost, rate: row.rate, price_locked: 1, cost_code: code, pack: row.pack, item_code: row.item_code || old.item_code, ref: row.ref ?? old.ref } : { ...blankProduct(input.by), item: row.item, style: row.style, model: row.style, color: row.color, item_code: row.item_code, ref: row.ref, type: row.unit, hsn: row.hsn, rate: row.rate, cost: row.cost, cost_code: code, price_locked: 1, vendor_id: supplier.id, vendor_name: supplier.name, pack: row.pack };
       const saved = await saveProduct(p);
       // Packet-entry totals are recomputed as pkts × pack by stock-in. A partial
       // packet keeps the supplier's exact unit total; label_pack retains its sticker size.
