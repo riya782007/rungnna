@@ -1,7 +1,7 @@
 import { DeleteButton } from "./DeleteButton";
 import { SelectAll } from "./SelectAll";
 import { confirmDelete } from "../lib/confirm-delete";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 const BillCamera = lazy(() => import("./CustomerCamera"));
 import { useLiveQuery } from "dexie-react-hooks";
 import { Camera, Plus, Trash2 } from "lucide-react";
@@ -48,6 +48,11 @@ export function askBillCamera() { (window as any).__rjBillCamera = true; window.
 export default function PurchasePhoto({ by, camera = false }: { by: string; camera?: boolean }) {
   const [d, setD] = useState<Draft>({ store: currentStore(), rows: [], supplier: "", billNo: "", rack: "", warnings: "", total: "" });
   const [selection, setSelection] = useState<Set<string>>(new Set());
+  const packetFocus = useRef<HTMLInputElement | null>(null);
+  useLayoutEffect(() => {
+    const next = packetFocus.current; packetFocus.current = null;
+    if (next?.isConnected) { next.focus(); next.select(); }
+  }, [d.rows]);
   const draftRef = useRef(d); draftRef.current = d;
   const removeRows = async (ids: string[]) => {
     if (busy || lock.current) return;
@@ -303,7 +308,12 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         set({ rows: [blank(packetDefault), ...d.rows] });
         setTimeout(() => (document.querySelector('input[aria-label="item line 1"]') as HTMLInputElement | null)?.focus(), 50);
       }}><Plus size={15} />Line</button>
-      <DeleteButton className="linkbtn" disabled={busy} onDelete={async () => { if (await confirmDelete("Clear this bill and start again? Nothing has been saved.")) { set({ rows: [], billNo: "", total: "", warnings: "", check: undefined, supplierName: "", photoId: undefined }); setDone({}); setSelection(new Set()); } }}>Start over</DeleteButton></div>}
+      <button type="button" className="linkbtn" disabled={busy} onClick={async () => {
+        if (busy || lock.current || !await confirmDelete("Clear this bill and start again? Nothing has been saved.")) return;
+        set({ rows: [], supplier: "", billNo: "", total: "", warnings: "", check: undefined, supplierName: "", photoId: undefined, autoBillNo: undefined });
+        setDone({}); setSelection(new Set()); setError(""); setJobs([]); setSaved(null);
+        setBulkQty(""); setBulkPack(packetDefault); setBulkRef(""); setQuantityNote("");
+      }}>Start over</button></div>}
     <input ref={file} type="file" hidden accept="image/jpeg,image/png,image/webp" multiple onChange={e => { void read(Array.from(e.target.files || [])); e.target.value = ""; }} />
     {busy && !!d.rows.length && <div role="status">Working…</div>}
     {cam && <Suspense fallback={<div role="status">Opening camera…</div>}>
@@ -372,10 +382,22 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
           <td className="line-no" data-l="Line" title="Line number: the same small boxed number printed on this line's stickers"><input type="checkbox" aria-label={"Select purchase line " + (i + 1)} checked={selection.has(r.review_id!)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(r.review_id!) : next.delete(r.review_id!); return next; })} />{i + 1}</td>
           {FIELDS.map(k => <td key={k} data-l={captions[k]}>
             <input className={"in" + ((k === "style" && r.autoStyle) || d.check?.fixes.some(f => f.line === i + 1 && f.field === k) ? " auto-filled" : "") + (k === "cost" && lowCost.includes(i + 1) ? " cost-low" : "")} aria-label={`${k} line ${i + 1}`}
-              title={k === "stickers" ? "Leave blank for one per packet; 0 prints none; enter a number for exactly that many stickers" : k === "style" && r.autoStyle ? "The bill printed no article number — this was built from the item and its rate. Edit it if you have the supplier's own code." : undefined}
+              title={k === "pack" ? "Enter saves and copies this packet size to the next line. Type a new number to change it." : k === "stickers" ? "Leave blank for one per packet; 0 prints none; enter a number for exactly that many stickers" : k === "style" && r.autoStyle ? "The bill printed no article number — this was built from the item and its rate. Edit it if you have the supplier's own code." : undefined}
               inputMode={k === "cost" || k === "rate" ? "decimal" : ["qty", "pack", "stickers"].includes(k) ? "numeric" : undefined}
               placeholder={k === "stickers" ? defaultStickers(r) : undefined}
               value={r[k] ?? ""} onChange={e => row(i, k, e.target.value)}
+              onKeyDown={k === "pack" ? e => {
+                if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+                e.preventDefault(); e.stopPropagation();
+                if (e.repeat || busy || lock.current) return;
+                try {
+                  if (!e.currentTarget.value.trim()) throw new Error("Enter pieces per packet first");
+                  const pack = applyPhotoQuantities([r], "", e.currentTarget.value)[0].pack;
+                  packetFocus.current = e.currentTarget.closest("tbody")?.querySelector<HTMLInputElement>(`input[aria-label="pack line ${i + 2}"]`) ?? null;
+                  set({ rows: d.rows.map((line, index) => index === i || index === i + 1 ? { ...line, pack, packSource: "manual" as const } : line) });
+                  setError("");
+                } catch (error: any) { setError(error.message); }
+              } : undefined}
               style={{ minWidth: k === "item" ? 130 : k === "style" ? 110 : 56 }} /></td>)}
           <td><DeleteButton className="iconbtn" aria-label="Remove line" disabled={busy} onDelete={() => removeRows([r.review_id!])}><Trash2 size={16} /></DeleteButton></td>
         </tr>)}</tbody></table></div>
