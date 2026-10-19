@@ -90,3 +90,14 @@ describe("Enter repeats purchase counts independently", () => {
     expect(repeatPhotoCount(lines(), 3, "qty", "3")).toHaveLength(4);
   });
 });
+
+
+it("saves a purchase-specific reference and keeps it when the same article is purchased again", async () => {
+  const save = (code: string, billNo: string) => savePhotoPurchase([{ ...row, pack: "3", entry_code: code }], { by: "o", rack: "rack", supplierId: "supplier", billNo, note: "" });
+  const first = await save("K201026", "REF-1");
+  await save("A211026", "REF-2");
+  const restored = await db.purchases.get(first.id);
+  expect(restored!.items[0].entry_code).toBe("K201026");
+  const jobs = purchaseLabelJobs(restored!, await db.products.toArray());
+  expect((jobs[0].p as typeof jobs[0]["p"] & { entry_code?: string }).entry_code).toBe("K201026");
+});

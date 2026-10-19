@@ -1,3 +1,4 @@
+import { checkedEntryReference } from "./entry-reference";
 import { db, uid, setSetting, type Product, type Purchase, type Party } from "./db";
 import { blankProduct, findByKey, saveProduct, itemMap, normUnit, productKey } from "./products";
 import { newPurchase, lineOf, finalizePurchase } from "./stockin";
@@ -11,6 +12,7 @@ import { getRule, priceFromCost, evenRate, type PricingRule } from "./pricing";
 export type PhotoRow = { item: string; style: string; color: string; unit: string; hsn: string; qty: string; cost: string; rate: string;
   /** set when autoArticle() invented the article because the bill printed none */
   autoStyle?: boolean;
+  entry_code?: string; // editable maker initial + date for this purchase line
   review_id?: string;
   /** Old application identity; supplied by its master or a matching saved article. */
   item_code?: string; ref?: string;
@@ -121,7 +123,8 @@ export function validatePhotoRows(rows: PhotoRow[]) {
     if (r.hsn && !/^\d{4,8}$/.test(r.hsn)) throw new Error(`Line ${i + 1}: check HSN`);
     let pack: number;
     try { pack = packOf(r); } catch (e: any) { throw new Error(`Line ${i + 1}: ${e.message}`); }
-    return { ...r, qty, cost, rate: evenRate(rate), pack, print_qty };   // the product keeps the same even rate its label shows
+    const entry_code = checkedEntryReference(r.entry_code);
+    return { ...r, entry_code, qty, cost, rate: evenRate(rate), pack, print_qty };   // the product keeps the same even rate its label shows
   });
 }
 
@@ -138,6 +141,7 @@ export function draftLabelProducts(rows: PhotoRow[], by: string, rule: PricingRu
       ...blankProduct(by),
       item: r.item.trim().toUpperCase(), style: r.style.trim().toUpperCase(), model: r.style.trim().toUpperCase(),
       color: r.color.trim().toUpperCase(), type: unit, item_code: r.item_code, ref: r.ref, pack: packOrOne(r), rate, cost,
+      entry_code: r.entry_code,
       cost_code: cost > 0 ? priceFromCost(cost, rule, packOrOne(r), unit).cost_code : "",
     };
   });
@@ -189,7 +193,7 @@ export async function savePhotoPurchase(rows: PhotoRow[], input: { by: string; r
       // packet keeps the supplier's exact unit total; label_pack retains its sticker size.
       const partial = row.qty % row.pack !== 0;
       purchase.items.push({ ...lineOf(saved, !old), id: uid(), qty: row.qty, pkts: partial ? 0 : Math.floor(row.qty / row.pack), pack: partial ? 1 : row.pack,
-        label_pack: row.pack, ...(row.print_qty !== undefined ? { print_qty: row.print_qty } : {}), cost: row.cost });
+        entry_code: row.entry_code, label_pack: row.pack, ...(row.print_qty !== undefined ? { print_qty: row.print_qty } : {}), cost: row.cost });
     }
     const saved = await finalizePurchase(purchase);
     await setSetting("purchase_photo_draft", null);

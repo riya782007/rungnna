@@ -13,7 +13,8 @@ export function purchaseLabelJobs(purchase: Purchase, products: Product[]): Purc
   if (purchase.deleted || purchase.status !== "final") throw new Error("Save the purchase before printing labels");
   const map = new Map(products.map(p => [p.id, p]));
   const jobs = purchase.items.flatMap((line, i) => {
-    const p = map.get(line.product_id), pack = line.label_pack ?? line.pack ?? 1;
+    const stored = map.get(line.product_id);
+    const p = stored ? { ...stored, entry_code: line.entry_code } : undefined, pack = line.label_pack ?? line.pack ?? 1;
     if (line.print_qty !== undefined && (!Number.isSafeInteger(line.print_qty) || line.print_qty < 0 || line.print_qty > 5000)) throw new Error("Check purchase sticker quantities");
     if (line.print_qty === 0) return [];
     if (!p || p.deleted || !p.item.trim()) throw new Error("A purchase item is missing its product/name. Review it before printing.");
