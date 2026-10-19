@@ -1,3 +1,4 @@
+import { entryReference } from "../lib/entry-reference";
 import { DeleteButton } from "./DeleteButton";
 import { SelectAll } from "./SelectAll";
 import { confirmDelete } from "../lib/confirm-delete";
@@ -25,9 +26,9 @@ import { checkBill, checkSummary, matchSupplier, fallbackBillNo, type LineFix } 
 import { newParty } from "../lib/billing";
 
 const blank = (pack = "1"): PhotoRow => ({ review_id: uid(), item: "", style: "", color: "", unit: "PCS", hsn: "", qty: "", pack, packSource: "default", stickers: "", cost: "", rate: "" });
-const captions: Record<string, string> = { item: "Item", style: "Style/article", color: "Colour", unit: "Unit", hsn: "HSN", qty: "Total qty", pack: "Pieces per packet (X)", stickers: "Stickers", cost: "Cost ₹", rate: "Rate ₹" };
+const captions: Record<string, string> = { item: "Item", style: "Style/article", color: "Colour", unit: "Unit", entry_code: "Reference Code", hsn: "HSN", qty: "Total qty", pack: "Pieces per packet (X)", stickers: "Stickers", cost: "Cost ₹", rate: "Rate ₹" };
 /* pack = the "X1" / "X3" after the rate on his stickers: pieces in one packet (his old software's QTY box) */
-const FIELDS = ["item", "style", "unit", "rate", "stickers", "qty", "pack", "color", "cost"] as const;
+const FIELDS = ["entry_code", "item", "style", "unit", "rate", "stickers", "qty", "pack", "color", "cost"] as const;
 type Field = (typeof FIELDS)[number];
 const defaultStickers = (r: PhotoRow) => {
   const qty = Number(r.qty), pack = Number(r.pack || "1");
@@ -85,6 +86,15 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
     window.addEventListener(BILL_CAMERA, open);
     return () => window.removeEventListener(BILL_CAMERA, open);
   }, []);
+  const maker = useLiveQuery(() => db.staff.get(by), [by]);
+  useEffect(() => {
+    if (!ready || !maker || maker.login === "role") return;
+    const code = entryReference(maker.name);
+    if (!code) return;
+    setD(current => current.rows.some(r => r.entry_code === undefined)
+      ? { ...current, rows: current.rows.map(r => r.entry_code === undefined ? { ...r, entry_code: code } : r) }
+      : current);
+  }, [ready, maker, d.rows]);
   const suppliers = useLiveQuery(() => db.parties.filter(p => p.kind === "supplier" && !p.deleted).toArray(), [], []);
 
   useEffect(() => { void Promise.all([getSetting<Draft | null>("purchase_photo_draft", null), getSetting<string>("purchase_label_pack", "1"), getRule()]).then(async ([old, pack, rule]) => {
@@ -383,9 +393,10 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
           <td data-l="Supplier S.No." className="supplier-number mono" title="Saved supplier roll number">{vendor?.vendor_code || "—"}</td>
           {FIELDS.map(k => <td key={k} data-l={captions[k]}>
             <input className={"in" + ((k === "style" && r.autoStyle) || d.check?.fixes.some(f => f.line === i + 1 && f.field === k) ? " auto-filled" : "") + (k === "cost" && lowCost.includes(i + 1) ? " cost-low" : "")} aria-label={`${k} line ${i + 1}`}
-              title={["qty", "pack", "stickers"].includes(k) ? `Enter copies this ${captions[k].toLowerCase()} to the next line. Type a new number to change it.${k === "stickers" ? " Blank means one per packet; 0 prints none." : ""}` : k === "style" && r.autoStyle ? "The bill printed no article number — this was built from the item and its rate. Edit it if you have the supplier's own code." : undefined}
+              title={k === "entry_code" ? "Editable maker initial + entry date (DDMMYY). This assumed code does not encode price." : ["qty", "pack", "stickers"].includes(k) ? `Enter copies this ${captions[k].toLowerCase()} to the next line. Type a new number to change it.${k === "stickers" ? " Blank means one per packet; 0 prints none." : ""}` : k === "style" && r.autoStyle ? "The bill printed no article number — this was built from the item and its rate. Edit it if you have the supplier's own code." : undefined}
               inputMode={k === "cost" || k === "rate" ? "decimal" : ["qty", "pack", "stickers"].includes(k) ? "numeric" : undefined}
-              placeholder={k === "stickers" ? defaultStickers(r) : undefined}
+              maxLength={k === "entry_code" ? 24 : undefined}
+              placeholder={k === "entry_code" ? "e.g. K201026" : k === "stickers" ? defaultStickers(r) : undefined}
               value={r[k] ?? ""} onChange={e => row(i, k, e.target.value)}
               onKeyDown={["qty", "pack", "stickers"].includes(k) ? e => {
                 if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
@@ -398,7 +409,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
                   setError("");
                 } catch (error: any) { setError(error.message); }
               } : undefined}
-              style={{ minWidth: k === "item" ? 130 : k === "style" ? 110 : 56 }} /></td>)}
+              style={{ minWidth: k === "item" ? 130 : ["style", "entry_code"].includes(k) ? 110 : 56 }} /></td>)}
           <td><DeleteButton className="iconbtn" aria-label="Remove line" disabled={busy} onDelete={() => removeRows([r.review_id!])}><Trash2 size={16} /></DeleteButton></td>
         </tr>)}</tbody></table></div>
 

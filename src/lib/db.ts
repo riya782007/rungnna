@@ -141,6 +141,7 @@ export interface Bill extends Row {
 
 /* Stock coming in: from a supplier bill, or just a counting session into a rack. */
 export interface PurchaseLine {
+  entry_code?: string; // purchase-specific maker/date reference, stored inside items JSON
   id: string; product_id: string; code: string; item: string; style: string; color: string; pack: number; pkts: number; qty: number; cost: number; rate: number; isNew?: boolean;
   label_pack?: number; // reviewed units per sticker; independent of stock-entry packet accounting
   print_qty?: number;  // blank/absent: one per packet; zero: no stickers; otherwise exact copies

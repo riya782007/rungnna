@@ -68,7 +68,7 @@ export function labelArtworkGeometry(cfg: LabelCfg, p: Product, qtyOnLabel: numb
 }
 
 /** One self-contained artwork is used by the screen, browser printing and TSPL raster. */
-export function renderLabelSvg(cfg: LabelCfg, p: Product, qtyOnLabel = 1, line?: number, labelIndex = 0, qrText?: string): string {
+export function renderLabelSvg(cfg: LabelCfg, p: Product & { entry_code?: string }, qtyOnLabel = 1, line?: number, labelIndex = 0, qrText?: string): string {
   const { width, height, pad, pp, qr, font, brand } = labelArtworkGeometry(cfg, p, qtyOnLabel, qrText);
   const s = cfg.show, stack = cfg.layout === "stack";
   const qx = stack ? pad : width - pad - brand - qr.sizeDots;
@@ -81,11 +81,12 @@ export function renderLabelSvg(cfg: LabelCfg, p: Product, qtyOnLabel = 1, line?:
   if (s.item && p.item) details.push({ text: p.item, weight: stack ? 700 : 500 });
   // Preserve the shop's revised three-line layout: style/color share a line,
   // followed by the encrypted cost and the supplier bill's boxed line number.
+  const referenceStyle = [p.entry_code, p.style].filter(Boolean).join(" ");
   if (stack) {
-    if (s.style && p.style) details.push({ text: p.style });
+    if (s.style && referenceStyle) details.push({ text: referenceStyle });
     if (s.color && p.color) details.push({ text: p.color });
   } else {
-    const styleColor = [s.style && p.style, s.color && p.color].filter(Boolean).join(" ");
+    const styleColor = [s.style && referenceStyle, s.color && p.color].filter(Boolean).join(" ");
     if (styleColor) details.push({ text: styleColor });
   }
   if (s.tk && p.tk) details.push({ text: `TK ${p.tk}` });
