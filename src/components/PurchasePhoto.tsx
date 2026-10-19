@@ -27,7 +27,7 @@ import { newParty } from "../lib/billing";
 const blank = (pack = "1"): PhotoRow => ({ review_id: uid(), item: "", style: "", color: "", unit: "PCS", hsn: "", qty: "", pack, packSource: "default", stickers: "", cost: "", rate: "" });
 const captions: Record<string, string> = { item: "Item", style: "Style/article", color: "Colour", unit: "Unit", hsn: "HSN", qty: "Total qty", pack: "Pieces per packet (X)", stickers: "Stickers", cost: "Cost ₹", rate: "Rate ₹" };
 /* pack = the "X1" / "X3" after the rate on his stickers: pieces in one packet (his old software's QTY box) */
-const FIELDS = ["item", "style", "color", "unit", "qty", "pack", "stickers", "cost", "rate"] as const;
+const FIELDS = ["item", "style", "unit", "rate", "stickers", "qty", "pack", "color", "cost"] as const;
 type Field = (typeof FIELDS)[number];
 const defaultStickers = (r: PhotoRow) => {
   const qty = Number(r.qty), pack = Number(r.pack || "1");
@@ -377,9 +377,10 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       </details>}
 
       <div className="selection-bar"><SelectAll ids={d.rows.map(r => r.review_id!)} selected={selection} onChange={setSelection} label="Select all purchase lines" /><span className="sm">{d.rows.filter(r => selection.has(r.review_id!)).length} selected</span><DeleteButton className="btn sm bad" disabled={busy || !d.rows.some(r => selection.has(r.review_id!))} onDelete={() => removeRows(d.rows.filter(r => selection.has(r.review_id!)).map(r => r.review_id!))}>Delete selected</DeleteButton></div>
-      <div className="tw purchase-lines"><table className="pos-t"><thead><tr>{["#", ...FIELDS.map(f => captions[f]), ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
+      <div className="tw purchase-lines"><table className="pos-t"><thead><tr>{["No.", "Supplier S.No.", ...FIELDS.map(f => captions[f]), ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
         {d.rows.map((r, i) => <tr key={r.review_id || i}>
           <td className="line-no" data-l="Line" title="Line number: the same small boxed number printed on this line's stickers"><input type="checkbox" aria-label={"Select purchase line " + (i + 1)} checked={selection.has(r.review_id!)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(r.review_id!) : next.delete(r.review_id!); return next; })} />{i + 1}</td>
+          <td data-l="Supplier S.No." className="supplier-number mono" title="Saved supplier roll number">{vendor?.vendor_code || "—"}</td>
           {FIELDS.map(k => <td key={k} data-l={captions[k]}>
             <input className={"in" + ((k === "style" && r.autoStyle) || d.check?.fixes.some(f => f.line === i + 1 && f.field === k) ? " auto-filled" : "") + (k === "cost" && lowCost.includes(i + 1) ? " cost-low" : "")} aria-label={`${k} line ${i + 1}`}
               title={["qty", "pack", "stickers"].includes(k) ? `Enter copies this ${captions[k].toLowerCase()} to the next line. Type a new number to change it.${k === "stickers" ? " Blank means one per packet; 0 prints none." : ""}` : k === "style" && r.autoStyle ? "The bill printed no article number — this was built from the item and its rate. Edit it if you have the supplier's own code." : undefined}
