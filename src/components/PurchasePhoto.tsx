@@ -1,8 +1,11 @@
+import { DeleteButton } from "./DeleteButton";
+import { SelectAll } from "./SelectAll";
+import { confirmDelete } from "../lib/confirm-delete";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 const BillCamera = lazy(() => import("./CustomerCamera"));
 import { useLiveQuery } from "dexie-react-hooks";
 import { Camera, Plus, Trash2 } from "lucide-react";
-import { db, put, getSetting, setSetting, type Product, type Purchase } from "../lib/db";
+import { db, put, uid, getSetting, setSetting, type Product, type Purchase } from "../lib/db";
 import { api, blobToB64 } from "../lib/ai";
 import { compress, savePhoto } from "../lib/image";
 import { getRule, type PricingRule } from "../lib/pricing";
@@ -21,7 +24,7 @@ import { SupplierNo } from "./SupplierNo";
 import { checkBill, checkSummary, matchSupplier, fallbackBillNo, type LineFix } from "../lib/billCheck";
 import { newParty } from "../lib/billing";
 
-const blank = (pack = "1"): PhotoRow => ({ item: "", style: "", color: "", unit: "PCS", hsn: "", qty: "", pack, packSource: "default", stickers: "", cost: "", rate: "" });
+const blank = (pack = "1"): PhotoRow => ({ review_id: uid(), item: "", style: "", color: "", unit: "PCS", hsn: "", qty: "", pack, packSource: "default", stickers: "", cost: "", rate: "" });
 const captions: Record<string, string> = { item: "Item", style: "Style/article", color: "Colour", unit: "Unit", hsn: "HSN", qty: "Total qty", pack: "Pieces per packet (X)", stickers: "Stickers", cost: "Cost ₹", rate: "Rate ₹" };
 /* pack = the "X1" / "X3" after the rate on his stickers: pieces in one packet (his old software's QTY box) */
 const FIELDS = ["item", "style", "color", "unit", "hsn", "qty", "pack", "stickers", "cost", "rate"] as const;
@@ -44,6 +47,14 @@ export function askBillCamera() { (window as any).__rjBillCamera = true; window.
 
 export default function PurchasePhoto({ by, camera = false }: { by: string; camera?: boolean }) {
   const [d, setD] = useState<Draft>({ store: currentStore(), rows: [], supplier: "", billNo: "", rack: "", warnings: "", total: "" });
+  const [selection, setSelection] = useState<Set<string>>(new Set());
+  const draftRef = useRef(d); draftRef.current = d;
+  const removeRows = async (ids: string[]) => {
+    if (busy || lock.current) return;
+    const wanted = new Set(ids), rows = draftRef.current.rows.filter(r => wanted.has(r.review_id || ""));
+    if (!rows.length || !await confirmDelete("Remove " + rows.length + " purchase line(s) from this draft?")) return;
+    setReviewed(false); setD(latest => ({ ...latest, rows: latest.rows.filter(r => !wanted.has(r.review_id || "")), check: undefined })); setSelection(new Set());
+  };
   const [ready, setReady] = useState(false), [busy, setBusy] = useState(false), [reviewed, setReviewed] = useState(false), [error, setError] = useState("");
   const [connection, setConnection] = useState(""), [checking, setChecking] = useState(false);
   const [probe, setProbe] = useState<{ provider: string; model: string; ok: boolean; plain: string }[] | null>(null), [probing, setProbing] = useState(false);
@@ -292,7 +303,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         set({ rows: [blank(packetDefault), ...d.rows] });
         setTimeout(() => (document.querySelector('input[aria-label="item line 1"]') as HTMLInputElement | null)?.focus(), 50);
       }}><Plus size={15} />Line</button>
-      <button className="linkbtn" disabled={busy} onClick={() => { if (confirm("Clear this bill and start again? Nothing has been saved.")) set({ rows: [], billNo: "", total: "", warnings: "", check: undefined, supplierName: "", photoId: undefined }); setDone({}); }}>Start over</button></div>}
+      <DeleteButton className="linkbtn" disabled={busy} onDelete={async () => { if (await confirmDelete("Clear this bill and start again? Nothing has been saved.")) { set({ rows: [], billNo: "", total: "", warnings: "", check: undefined, supplierName: "", photoId: undefined }); setDone({}); setSelection(new Set()); } }}>Start over</DeleteButton></div>}
     <input ref={file} type="file" hidden accept="image/jpeg,image/png,image/webp" multiple onChange={e => { void read(Array.from(e.target.files || [])); e.target.value = ""; }} />
     {busy && !!d.rows.length && <div role="status">Working…</div>}
     {cam && <Suspense fallback={<div role="status">Opening camera…</div>}>
@@ -355,9 +366,10 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         </label>)}</div>
       </details>}
 
+      <div className="selection-bar"><SelectAll ids={d.rows.map(r => r.review_id!)} selected={selection} onChange={setSelection} label="Select all purchase lines" /><span className="sm">{d.rows.filter(r => selection.has(r.review_id!)).length} selected</span><DeleteButton className="btn sm bad" disabled={busy || !d.rows.some(r => selection.has(r.review_id!))} onDelete={() => removeRows(d.rows.filter(r => selection.has(r.review_id!)).map(r => r.review_id!))}>Delete selected</DeleteButton></div>
       <div className="tw purchase-lines"><table className="pos-t"><thead><tr>{["#", ...FIELDS.map(f => captions[f]), ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
-        {d.rows.map((r, i) => <tr key={i}>
-          <td className="line-no" data-l="Line" title="Line number: the same small boxed number printed on this line's stickers">{i + 1}</td>
+        {d.rows.map((r, i) => <tr key={r.review_id || i}>
+          <td className="line-no" data-l="Line" title="Line number: the same small boxed number printed on this line's stickers"><input type="checkbox" aria-label={"Select purchase line " + (i + 1)} checked={selection.has(r.review_id!)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(r.review_id!) : next.delete(r.review_id!); return next; })} />{i + 1}</td>
           {FIELDS.map(k => <td key={k} data-l={captions[k]}>
             <input className={"in" + ((k === "style" && r.autoStyle) || d.check?.fixes.some(f => f.line === i + 1 && f.field === k) ? " auto-filled" : "") + (k === "cost" && lowCost.includes(i + 1) ? " cost-low" : "")} aria-label={`${k} line ${i + 1}`}
               title={k === "stickers" ? "Leave blank for one per packet; 0 prints none; enter a number for exactly that many stickers" : k === "style" && r.autoStyle ? "The bill printed no article number — this was built from the item and its rate. Edit it if you have the supplier's own code." : undefined}
@@ -365,10 +377,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
               placeholder={k === "stickers" ? defaultStickers(r) : undefined}
               value={r[k] ?? ""} onChange={e => row(i, k, e.target.value)}
               style={{ minWidth: k === "item" ? 130 : k === "style" ? 110 : 56 }} /></td>)}
-          <td><button className="iconbtn" title="Remove line" aria-label="Remove line" onClick={() => {
-            if (!confirm(`Remove line ${i + 1}: ${[r.item, r.style].filter(Boolean).join(" ") || "(empty)"}${r.qty ? ` · ${r.qty} ${r.unit || "PCS"}` : ""}?`)) return;
-            set({ rows: d.rows.filter((_, k) => k !== i) });
-          }}><Trash2 size={16} /></button></td>
+          <td><DeleteButton className="iconbtn" aria-label="Remove line" disabled={busy} onDelete={() => removeRows([r.review_id!])}><Trash2 size={16} /></DeleteButton></td>
         </tr>)}</tbody></table></div>
 
       {!!invented && <div className="note sm">{invented} line{invented === 1 ? "" : "s"} had no article number on the bill. An article was built from the item and its rate (e.g. CHOTI-273) so lines at different rates stay separate — and so buying the same thing again at the same rate matches the same product. Edit any of them if the supplier has a code.</div>}

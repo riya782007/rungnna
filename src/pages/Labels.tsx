@@ -1,3 +1,6 @@
+import { DeleteButton } from "../components/DeleteButton";
+import { SelectAll } from "../components/SelectAll";
+import { confirmDelete } from "../lib/confirm-delete";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePrintJob } from "../lib/printing";
 import { lazy, Suspense } from "react";
@@ -24,6 +27,8 @@ import { renderLabelSvg } from "../lib/label-artwork";
 import { buildLabelBitmapJob, validateLabelBitmapJob } from "../lib/label-bitmap";
 import { listQzPrinters, printQzTSPL } from "../lib/qz";
 import { labelHeat, DEFAULT_LABEL_DENSITY, DEFAULT_LABEL_SPEED } from "../lib/label-darkness";
+import { bagPayload, bagLabelCfg, type BagLabel } from "../lib/bag-labels";
+import { legacyLabelCopy, validateLegacyCopy } from "../lib/legacy-label-copy";
 import { fakeLetterPool, printedCostCode } from "../lib/label-cost-code";
 
 /* Label settings — every number is in millimetres so what you see is what the printer gets. */
@@ -94,7 +99,7 @@ export const DEFAULT_CFG: LabelCfg = {
   cur: "9",
 };
 
-export type Job = { p: Product; qtyOnLabel: number; copies: number; line?: number; labelIndex?: number };   // line: see lib/purchase-labels
+export type Job = { p: Product; qtyOnLabel: number; copies: number; line?: number; labelIndex?: number; bag?: BagLabel; sourceQr?: string };   // line: see lib/purchase-labels
 export type PrintStartResult = { started: true } | { started: false; message: string; cancelled?: boolean };
 /** One entry per sticker, in queue order (capped at 5000). */
 export const expandJobs = (jobs: Job[]) => jobs.flatMap(j => Array.from({ length: Math.max(0, Math.min(5000, j.copies)) }, () => j)).slice(0, 5000);
@@ -131,12 +136,15 @@ export function validateLabelPrint(cfg: LabelCfg, jobs: Job[]) {
   const lastX = cfg.offX + (cfg.cols - 1) * (cfg.w + cfg.gapX);
   const minWidth = cfg.mode === "sheet" ? cellBox(cfg, cfg.cols - 1, 0).w : Math.min(cfg.w, (cfg.edgeR ?? Infinity) - lastX);
   if (minWidth <= 0) throw new Error("Labels do not fit the printer's right edge");
-  for (const j of jobs) renderLabelSvg(minWidth < cfg.w ? { ...cfg, w: minWidth } : cfg, j.p, j.qtyOnLabel, j.line);
+  for (const j of jobs) { const look = j.bag ? bagLabelCfg(cfg) : cfg; renderLabelSvg(minWidth < cfg.w ? { ...look, w: minWidth } : look, j.p, j.qtyOnLabel, j.line, j.labelIndex, j.bag ? bagPayload(j.bag) : validateLegacyCopy(j)); }
 }
 
 export default function Labels({ args }: { args: string[] }) {
   const { me, setMe } = useApp();
   const [cfg, setCfg] = useState<LabelCfg>(DEFAULT_CFG);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [oldCopy, setOldCopy] = useState<Job | null>(null);
+  const [queueSelection, setQueueSelection] = useState<Set<string>>(new Set());
   const [form, setForm] = useState<Product>(() => blankProduct(""));
   const [qty, setQty] = useState("1");
   const [copies, setCopies] = useState("1");
@@ -235,6 +243,11 @@ export default function Labels({ args }: { args: string[] }) {
     finally { queueLock.current = false; setQueueBusy(false); }
   };
 
+  useEffect(() => { setQueueSelection(new Set()); }, [jobs]);
+  const removeJobs = async (indices: number[]) => {
+    const snapshot = jobs, wanted = new Set(indices);
+    if (await confirmDelete("Remove " + indices.length + " item(s) from the print queue?")) setJobs(latest => latest === snapshot ? latest.filter((_, index) => !wanted.has(index)) : latest);
+  };
   const flat = useMemo(() => expandJobs(jobs), [jobs]);
   const total = flat.length;
 
@@ -252,6 +265,13 @@ export default function Labels({ args }: { args: string[] }) {
         <button className="btn g" disabled={!total || printer.busy} onClick={doPrint}>Print {total || ""} labels</button>
       </Head>
       {printError && <div className="note warn" role="alert">{printError}</div>}
+      <div className="label-dock card" aria-label="Pinned sticker preview">
+        <div className="labelprev"><LabelView cfg={cfg} p={oldCopy?.p || jobs[0]?.p || form} qtyOnLabel={oldCopy?.qtyOnLabel || jobs[0]?.qtyOnLabel || parseInt(qty) || 1} line={oldCopy ? undefined : jobs[0]?.line} sourceQr={oldCopy?.sourceQr || jobs[0]?.sourceQr} /></div>
+        <div className="grow stack" style={{ gap: 3 }}><b>{oldCopy?.p.item || jobs[0]?.p.item || form.item || "Sticker preview"}</b><span className="sm">{oldCopy?.p.type || jobs[0]?.p.type || form.type} · {cfg.w} × {cfg.h} mm · all text bold</span><span className="xs">QR: {oldCopy || cfg.format === "shop" ? "Old software format" : "Rungnna only"}</span>{oldCopy && <span className="xs">Exact old QR copy — original price, packet and reference</span>}</div>
+        <button className="btn" aria-pressed={settingsOpen} onClick={() => setSettingsOpen(open => !open)}>{settingsOpen ? "Back to label workspace" : "Printer settings"}</button>
+      </div>
+      {settingsOpen ? <LabelSettings cfg={cfg} upd={upd} onTest={cfg.output === "qz" ? undefined : () => { if (!printer.busy) setAligning(true); }} sample={jobs[0]?.p || form} qty={jobs[0]?.qtyOnLabel || parseInt(qty) || 1} /> : <>
+      {cfg.format === "rungnna" && !oldCopy && <div className="note warn row" role="status"><span className="grow sm"><b>These new QR codes are for Rungnna billing only.</b> For billing in the older software, use its QR format with the original item code and reference, or scan a working old sticker for an exact copy.</span><button className="btn" onClick={() => upd({ format: "shop" })}>Use old-software QR format</button></div>}
       <div className="label-purchase">
           {can(me, "purchases.photo") ? <details className="card purchase-import" open={args[0] === "bill"}>
             <summary className="pad b">From a purchase bill — upload the photo, get the labels</summary>
@@ -263,16 +283,21 @@ export default function Labels({ args }: { args: string[] }) {
           : <div className="card pad row"><span className="grow sm"><b>From a purchase bill</b> — needs “Read purchase bill photos”, which {roleName(me) || "this person"} does not have.</span>
               <button className="btn sm" onClick={() => setMe(null)}>Switch person</button></div>}
       </div>
-      <div className="split">
+      <div className="label-workspace">
         <div className="stack">
           <div className="card">
             <header><h3>Barcode print</h3><span className="xs mut">scan an existing label to copy its details</span></header>
             <div className="pad stack">
               <WedgeInput autoFocus={false} placeholder="Scan an old label to pre-fill (optional)" onCode={async raw => {
                 const parsed = parseLabel(raw);
-                const p = await findByScan(raw) || (parsed.how === "shop label" || parsed.how === "rungnna" ? await fillFromItemCode(fromParsed(parsed, me?.id || "")) : undefined);
-                if (p) { setForm({ ...p }); setQty(String(p.pack || 1)); if (parsed.how === "shop label") upd({ format: "shop" }); toast("Loaded " + label(p) + (p.item ? "" : " — enter the product name")); } else toast("Not in the system yet — fill it below", true);
+                try {
+                  const found = await findByScan(raw) || (parsed.how === "shop label" || parsed.how === "rungnna" ? await fillFromItemCode(fromParsed(parsed, me?.id || "")) : undefined);
+                  const copy = found && parsed.how === "shop label" ? legacyLabelCopy(raw, found) : null;
+                  const p = copy?.p || found; setOldCopy(copy);
+                  if (p) { setForm({ ...p }); setQty(String(p.pack || 1)); if (copy) upd({ format: "shop" }); toast("Loaded " + label(p) + (p.item ? "" : " — enter the product name")); } else toast("Not in the system yet — fill it below", true);
+                } catch (error: any) { setOldCopy(null); toast(error.message, true); }
               }} />
+              {oldCopy && <div className="note stack" role="status"><b>Copy a working old sticker</b><span className="sm">This copy keeps the original QR exactly, including its old reference and price. Edits in the item form below apply only to newly generated labels.</span><code style={{ overflowWrap: "anywhere" }}>{oldCopy.sourceQr}</code><div className="row"><button className="btn p" disabled={printer.busy} onClick={() => { const n = Number(copies); if (!Number.isSafeInteger(n) || n < 1 || n > 5000) return toast("Check print quantity (1–5000)", true); showStart(printer.start(expandJobs([{ ...oldCopy, p: { ...oldCopy.p, item: oldCopy.p.item || form.item }, copies: n }]))); }}>Print exact old QR copy</button><button className="btn" onClick={() => setOldCopy(null)}>Use edited item instead</button></div></div>}
               <div className="grid g2">
                 <label className="f">ITEM
                   <input className="in" list="litems" value={form.item} onChange={e => set("item", e.target.value.toUpperCase())} autoFocus />
@@ -303,30 +328,31 @@ export default function Labels({ args }: { args: string[] }) {
           </div>
           {jobs.length > 0 && (
             <div className="card">
-              <header><h3>Print queue</h3><span className="pill">{total} labels</span><button className="btn sm" style={{ marginLeft: "auto" }} onClick={() => setJobs([])}>Clear</button></header>
-              <div className="pad stack" style={{ gap: 6 }}>
+              <header><h3>Print queue</h3><span className="pill">{total} labels</span><DeleteButton className="btn sm" style={{ marginLeft: "auto" }} disabled={printer.busy} onDelete={() => removeJobs(jobs.map((_, i) => i))}>Clear</DeleteButton></header>
+              <div className="pad stack" style={{ gap: 6 }}><div className="selection-bar"><SelectAll ids={jobs.map((_, i) => String(i))} selected={queueSelection} onChange={setQueueSelection} label="Select all queued items" /><DeleteButton className="btn sm bad" disabled={printer.busy || !queueSelection.size} onDelete={() => removeJobs(jobs.map((_, i) => i).filter(i => queueSelection.has(String(i))))}>Delete selected</DeleteButton></div>
                 {jobs.map((j, i) => (
-                  <div key={i} className="row sm">
+                  <div key={i} className="row sm"><input type="checkbox" aria-label={"Select queued item " + (i + 1)} checked={queueSelection.has(String(i))} onChange={event => setQueueSelection(old => { const next = new Set(old); event.target.checked ? next.add(String(i)) : next.delete(String(i)); return next; })} />
                     <span className="grow">{label(j.p)} <span className="mono xs mut">{j.p.code}</span></span>
                     <input className="in mono" style={{ width: 80, minHeight: 34 }} value={j.copies} inputMode="numeric"
                       onChange={e => setJobs(js => js.map((x, k) => k === i ? { ...x, copies: parseInt(e.target.value) || 0 } : x))} />
-                    <button className="btn sm bad" onClick={() => setJobs(js => js.filter((_, k) => k !== i))}>✕</button>
+                    <DeleteButton className="btn sm bad" aria-label="Remove queued item" disabled={printer.busy} onDelete={() => removeJobs([i])}>✕</DeleteButton>
                   </div>))}
               </div>
             </div>
           )}
         </div>
-        <div className="stack"><div className="labelprev"><LabelView cfg={cfg} p={jobs[0]?.p || form} qtyOnLabel={jobs[0]?.qtyOnLabel || parseInt(qty) || 1} line={jobs[0]?.line || jobs.length + 1} /></div><details><summary>Printer settings</summary><LabelSettings cfg={cfg} upd={upd} onTest={cfg.output === "qz" ? undefined : () => { if (!printer.busy) setAligning(true); }} sample={jobs[0]?.p || { ...form, code: form.code }} qty={jobs[0]?.qtyOnLabel || parseInt(qty) || 1} /></details></div>
+
       </div>
+      </>}
       {printer.panel}
       {aligning && createPortal(<AlignSheet cfg={cfg} />, document.getElementById("printroot")!)}
     </div>
   );
 }
 
-export function LabelView({ cfg, p, qtyOnLabel = 1, line, labelIndex = 0 }: { cfg: LabelCfg; p: Product; qtyOnLabel?: number; line?: number; labelIndex?: number }) {
+export function LabelView({ cfg, p, qtyOnLabel = 1, line, labelIndex = 0, bag, sourceQr }: { cfg: LabelCfg; p: Product; qtyOnLabel?: number; line?: number; labelIndex?: number; bag?: BagLabel; sourceQr?: string }) {
   let artwork: string;
-  try { artwork = renderLabelSvg(cfg, p, qtyOnLabel, line, labelIndex); }
+  try { artwork = renderLabelSvg(bag ? bagLabelCfg(cfg) : cfg, p, qtyOnLabel, line, labelIndex, bag ? bagPayload(bag) : sourceQr); }
   catch (e: any) { return <div className="sm mut" role="status">{e.message || "Review the sticker settings"}</div>; }
   return <div className="lbl" style={{ width: cfg.w + "mm", height: cfg.h + "mm", padding: 0, display: "block", overflow: "hidden" }} dangerouslySetInnerHTML={{ __html: artwork }} />;
 }
@@ -345,7 +371,7 @@ function LabelSettings({ cfg, upd, sample, qty, onTest }: { cfg: LabelCfg; upd: 
       <input className="in mono" type="number" step={step} value={cfg[k] as number} onChange={e => upd({ [k]: Number(e.target.value) } as any)} /></label>);
   const demo: Product = sample.item || sample.style ? sample : { ...sample, item: "F-RING", type: "PCS", style: "K5208/K-LT", color: "W/LP/B", rate: 2400, item_code: "202", pack: 12, ref: "183" };
   return (
-    <div className="card" style={{ position: "sticky", top: 70 }}>
+    <div className="card label-settings">
       <header><h3>Label size &amp; layout</h3><span className="xs mut">saved on this device</span></header>
       <div className="pad stack">
         <label className="f">Print labels using<select className="in" value={cfg.output || "browser"} onChange={e => upd({ output: e.target.value as LabelCfg["output"], ...(e.target.value === "qz" && cfg.gapY === 0 ? { gapY: 2.6 } : {}) })}><option value="browser">Browser / Windows printer driver</option><option value="qz">QZ Tray → Windows TSC printer</option><option value="tspl" disabled={!directPrintSupported()}>Direct TSC USB / serial (203 dpi only)</option></select></label>
@@ -362,10 +388,10 @@ function LabelSettings({ cfg, upd, sample, qty, onTest }: { cfg: LabelCfg; upd: 
         {cfg.output === "tspl" && serialSupported() && <button className="btn" onClick={() => connectSerial().then(() => toast("Serial printer connected")).catch(e => toast(e.message, true))}>Connect serial printer</button>}
         {cfg.output === "tspl" && usbSupported() && <button className="btn" onClick={() => connectUSB().then(() => toast("USB printer connected")).catch(e => toast(e.message, true))}>Connect TSC USB printer</button>}
         <div className="grid g2">
-          <label className="f">Print darkness (0–15)<input className="in mono" type="number" min={0} max={15} step={1} value={cfg.density ?? DEFAULT_LABEL_DENSITY} onChange={e => upd({ density: Number(e.target.value) })} /></label>
-          <label className="f">Print speed (1–6)<input className="in mono" type="number" min={1} max={6} step={1} value={cfg.speed ?? DEFAULT_LABEL_SPEED} onChange={e => upd({ speed: Number(e.target.value) })} /></label>
+          <label className="f">Print darkness (0–15)<input className="in mono" type="number" min={0} max={15} step={1} disabled={!cfg.output || cfg.output === "browser"} value={cfg.density ?? DEFAULT_LABEL_DENSITY} onChange={e => upd({ density: Number(e.target.value) })} /></label>
+          <label className="f">Print speed (1–6)<input className="in mono" type="number" min={1} max={6} step={1} disabled={!cfg.output || cfg.output === "browser"} value={cfg.speed ?? DEFAULT_LABEL_SPEED} onChange={e => upd({ speed: Number(e.target.value) })} /></label>
         </div>
-        <div className="xs mut">QZ Tray and direct TSC use these settings. Browser printing uses the Windows driver's darkness and speed. Print one check row after a change; too much heat can blur the QR.</div>
+        {(!cfg.output || cfg.output === "browser") ? <div className="note warn" role="status"><b>Browser darkness is set in Windows.</b><div className="sm">On the printer computer open Windows Settings → Printers &amp; scanners → your label printer → Printing preferences. Set Darkness / Density to 10 and Speed to 2, then print one check row. If it is still pale, increase darkness a step and check the QR. These app controls are enabled with QZ Tray or Direct TSC, which send heat settings to the printer.</div></div> : <div className="xs mut">These darkness and speed values are sent to the TSC printer with every job. Print one check row after a change; too much heat can blur the QR.</div>}
         <label className="row sm"><input type="checkbox" checked={!!cfg.compactCostCode} onChange={e => upd({ compactCostCode: e.target.checked })} /> Compact repeated letters in cost code</label>
         <label className="f">Fake letter pool<input className="in mono" value={cfg.fakeLetters ?? "Z"} onChange={e => upd({ fakeLetters: e.target.value.toUpperCase().replace(/[^A-Z]/g, "") })} placeholder="e.g. ZYAB" /></label>
         <div className="xs mut">Enter any letters A–Z, with no length limit. One fake letter is shuffled across stickers; repeated letters in the pool count once. Leave empty for no fake letter. Repeated code letters become dashes; price, quantity, reference and QR data stay the same.</div>
@@ -430,8 +456,8 @@ export function tscCommands(cfg: LabelCfg, list: Job[]) {
   const runs = cfg.compactCostCode && fakeLetterPool(cfg.fakeLetters).length > 1
     ? list.map((j, index) => ({ item: { ...j, labelIndex: j.labelIndex ?? index }, n: 1 })) : runsOf(list);
   return runs.map(({ item: j, n }) => {
-    const product = productForLabel(j.p, j.qtyOnLabel);
-    return labelTSPL({ ...cfg, labelIndex: j.labelIndex }, product, j.qtyOnLabel, n, ownPayload(product, cfg.format || "shop"));
+    const product = j.sourceQr ? { ...j.p, pack: j.qtyOnLabel } : productForLabel(j.p, j.qtyOnLabel);
+    return labelTSPL({ ...(j.bag ? bagLabelCfg(cfg) : cfg), labelIndex: j.labelIndex }, product, j.qtyOnLabel, n, j.bag ? bagPayload(j.bag) : validateLegacyCopy(j) || ownPayload(product, cfg.format || "shop"));
   }).join("");
 }
 
@@ -660,7 +686,7 @@ export function PrintSheet({ cfg, jobs }: { cfg: LabelCfg; jobs: Job[] }) {
           {r.map((j, k) => {
             const x = cfg.offX + k * (cfg.w + cfg.gapX), w = Math.min(cfg.w, (cfg.edgeR ?? 1e9) - x);
             return <div key={k} style={{ position: "absolute", left: x + "mm", top: cfg.offY + "mm" }}>
-              <LabelView cfg={w < cfg.w ? { ...cfg, w } : cfg} p={j.p} qtyOnLabel={j.qtyOnLabel} line={j.line} labelIndex={j.labelIndex ?? i * cfg.cols + k} /></div>;
+              <LabelView cfg={w < cfg.w ? { ...cfg, w } : cfg} p={j.p} qtyOnLabel={j.qtyOnLabel} line={j.line} bag={j.bag} sourceQr={j.sourceQr} labelIndex={j.labelIndex ?? i * cfg.cols + k} /></div>;
           })}
         </div>))}
     </>);
@@ -674,7 +700,7 @@ export function PrintSheet({ cfg, jobs }: { cfg: LabelCfg; jobs: Job[] }) {
         {pg.map((j, k) => {
           const b = cellBox(cfg, k % cfg.cols, Math.floor(k / cfg.cols));
           return <div key={k} style={{ position: "absolute", left: b.x + "mm", top: b.y + "mm" }}>
-            <LabelView cfg={b.w < cfg.w ? { ...cfg, w: b.w } : cfg} p={j.p} qtyOnLabel={j.qtyOnLabel} line={j.line} labelIndex={j.labelIndex ?? i * per + k} /></div>;
+            <LabelView cfg={b.w < cfg.w ? { ...cfg, w: b.w } : cfg} p={j.p} qtyOnLabel={j.qtyOnLabel} line={j.line} bag={j.bag} sourceQr={j.sourceQr} labelIndex={j.labelIndex ?? i * per + k} /></div>;
         })}
       </div>))}
   </>);

@@ -1,3 +1,5 @@
+import { DeleteButton } from "../components/DeleteButton";
+import { confirmDelete } from "../lib/confirm-delete";
 import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, type StoreTransfer } from "../lib/db";
@@ -24,7 +26,7 @@ export default function Stores() {
     <section className="stack"><h3>Transfer out</h3><label className="f">Destination store<select className="in" value={dest} onChange={e => setDest(e.target.value)}><option value="">Choose branch</option>{stores.filter(s => s.id !== currentStore()).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
       <LocationSelect value={rack} onChange={setRack} buckets={false} label="Source rack" />
       <form className="row" onSubmit={e => { e.preventDefault(); run(() => add(raw)); }}><input className="in grow" value={raw} onChange={e => setRaw(e.target.value)} placeholder="Item barcode / RFID" /><button className="btn" disabled={busy || !raw}>Add</button><button type="button" className="btn" onClick={() => setScan(true)}>Scan</button></form>
-      {items.map((item, i) => <div className="row" key={i}><span className="grow">{products.find(p => p.id === item.product_id)?.item} · {products.find(p => p.id === item.product_id)?.code}</span><input aria-label="Pieces" className="in" style={{ width: 90 }} type="number" min={1} disabled={!!item.tags?.length} value={item.qty} onChange={e => setItems(items.map((x, j) => j === i ? { ...x, qty: Number(e.target.value) } : x))} /><button className="btn" onClick={() => setItems(items.filter((_, j) => j !== i))}>Remove</button></div>)}
+      {items.map((item, i) => <div className="row" key={i}><span className="grow">{products.find(p => p.id === item.product_id)?.item} · {products.find(p => p.id === item.product_id)?.code}</span><input aria-label="Pieces" className="in" style={{ width: 90 }} type="number" min={1} disabled={!!item.tags?.length} value={item.qty} onChange={e => setItems(items.map((x, j) => j === i ? { ...x, qty: Number(e.target.value) } : x))} /><DeleteButton className="btn" onDelete={async () => { if (await confirmDelete("Remove this transfer line?")) setItems(old => old.filter(x => x !== item)); }}>Remove</DeleteButton></div>)}
       <button className="btn p" disabled={busy || !dest || !items.length} onClick={() => run(async () => { await dispatchTransfer(dest, items, me!.id); setItems([]); toast("Stock in transit"); })}>Dispatch transfer</button>
     </section>
     <section className="stack"><h3>Transfers</h3>{transfers.map(t => <div className="stack transfer-row" key={t.id}><div className="row"><b>{t.no}</b><span>{stores.find(s => s.id === t.from_store)?.name} → {stores.find(s => s.id === t.to_store)?.name}</span><span className="pill">{t.status.replace(/_/g, " ")}</span></div>

@@ -1,4 +1,6 @@
 import qrcode from "qrcode-generator";
+import { parseLabel } from "./parse";
+import { toPaise } from "./format";
 import { printedCostCode } from "./label-cost-code";
 import type { LabelCfg } from "../pages/Labels";
 import type { Product } from "./db";
@@ -50,10 +52,13 @@ function textSvg(value: string, x: number, y: number, size: number, maxWidth: nu
   return `<text x="${x}" y="${y}" font-size="${size}" font-weight="${weight}" textLength="${+width.toFixed(2)}" lengthAdjust="spacingAndGlyphs">${escapeXml(text)}</text>`;
 }
 
-export function labelArtworkGeometry(cfg: LabelCfg, p: Product, qtyOnLabel: number) {
+export function labelArtworkGeometry(cfg: LabelCfg, p: Product, qtyOnLabel: number, qrText?: string) {
   const width = dot(cfg.w), height = dot(cfg.h), pad = dot(cfg.pad);
   const pp = productForLabel(p, qtyOnLabel);
-  const qr = labelQr(ownPayload(pp, cfg.format || "shop"), cfg.qr);
+  // An exact old-label copy keeps its printed price as well as its QR, including odd rates.
+  const copied = qrText ? parseLabel(qrText) : undefined;
+  if (copied?.how === "shop label") pp.rate = toPaise(copied.rate || "0");
+  const qr = labelQr(qrText ?? ownPayload(pp, cfg.format || "shop"), cfg.qr);
   const font = cfg.font * 25.4 / 72 * LABEL_DOTS_PER_MM;
   const brand = cfg.layout !== "stack" && cfg.show.shop && cfg.shop.trim() ? Math.ceil(font * 1.1) : 0;
   if (qr.sizeDots > height - pad * 2 || qr.sizeDots + brand + pad * 4 + 8 > width) {
@@ -63,8 +68,8 @@ export function labelArtworkGeometry(cfg: LabelCfg, p: Product, qtyOnLabel: numb
 }
 
 /** One self-contained artwork is used by the screen, browser printing and TSPL raster. */
-export function renderLabelSvg(cfg: LabelCfg, p: Product, qtyOnLabel = 1, line?: number, labelIndex = 0): string {
-  const { width, height, pad, pp, qr, font, brand } = labelArtworkGeometry(cfg, p, qtyOnLabel);
+export function renderLabelSvg(cfg: LabelCfg, p: Product, qtyOnLabel = 1, line?: number, labelIndex = 0, qrText?: string): string {
+  const { width, height, pad, pp, qr, font, brand } = labelArtworkGeometry(cfg, p, qtyOnLabel, qrText);
   const s = cfg.show, stack = cfg.layout === "stack";
   const qx = stack ? pad : width - pad - brand - qr.sizeDots;
   const qy = pad;
@@ -108,14 +113,14 @@ export function renderLabelSvg(cfg: LabelCfg, p: Product, qtyOnLabel = 1, line?:
     const gap = lineText && detail.text ? dot(1.2) : 0;
     const maxText = Math.max(0, textWidth - boxW - gap);
     const textW = detail.text ? Math.min(maxText, [...clean(detail.text)].length * size * 0.56) : 0;
-    content += `<g${detail.mono ? ' font-family="monospace"' : ""}>${textSvg(detail.text, tx, baseline, size, maxText, detail.weight ?? (stack ? 400 : 500))}`;
+    content += `<g${detail.mono ? ' font-family="monospace"' : ""}>${textSvg(detail.text, tx, baseline, size, maxText, Math.max(700, detail.weight ?? 700))}`;
     if (lineText) {
       const boxX = tx + textW + gap, boxY = y - size * 0.02, boxH = size * 1.05;
       content += `<rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="${dot(0.4)}" fill="none" stroke="#000" stroke-width="${dot(0.15)}"/>${textSvg(lineText, boxX + dot(0.35), baseline, size * 0.9, boxW - dot(0.7), 700)}`;
     }
     content += "</g>"; y += size * 1.12;
   }
-  if (bottom) content += textSvg(bottom, tx, height - pad - bottomSize * 0.12, bottomSize, bottomWidth, 500);
+  if (bottom) content += textSvg(bottom, tx, height - pad - bottomSize * 0.12, bottomSize, bottomWidth, 700);
   content += `<g transform="translate(${qx} ${qy})" shape-rendering="crispEdges"><rect width="${qr.sizeDots}" height="${qr.sizeDots}" fill="#fff"/><path d="${qr.path}" fill="#000"/></g>`;
   if (brand) {
     const brandSize = Math.min(font * 0.95, (height - pad * 2) / Math.max(1, cfg.shop.length) / 0.68);

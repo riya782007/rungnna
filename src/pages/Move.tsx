@@ -1,3 +1,5 @@
+import { DeleteButton } from "../components/DeleteButton";
+import { confirmDelete } from "../lib/confirm-delete";
 import { useEffect, useState } from "react";
 import { db, recordMovement, stockOf, getSetting, setSetting, type MoveKind, type PersonType, type Product, type StockCell } from "../lib/db";
 import { findByScan, label } from "../lib/products";
@@ -111,7 +113,7 @@ export default function Move({ args }: { args: string[] }) {
                   <div className="xs mut">{l.stock.map(s => `${locs.find(x => x.id === s.loc_id)?.code || "?"}: ${s.qty}`).join(" · ") || "no stock recorded"}</div></div>
                 <input className="in mono" style={{ width: 70 }} inputMode="numeric" value={l.qty}
                   onChange={e => setLines(ls => ls.map((x, k) => k === i ? { ...x, qty: parseInt(e.target.value.replace(/[^\d-]/g, "")) || 0 } : x))} />
-                <button className="btn sm bad" onClick={() => setLines(ls => ls.filter((_, k) => k !== i))}>✕</button>
+                <DeleteButton className="btn sm bad" aria-label="Remove movement line" onDelete={async () => { if (await confirmDelete("Remove this movement line?")) setLines(ls => ls.filter(x => x.p.id !== l.p.id)); }}>✕</DeleteButton>
               </div>))}
             {kind === "adjust" && <div className="xs mut">For a correction, a positive number adds pieces to the rack; type a minus (e.g. -3) to take pieces off.</div>}
             <div className="grid g2">

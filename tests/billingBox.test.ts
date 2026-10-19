@@ -45,8 +45,8 @@ describe("billing box recovery and merging", () => {
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ id: "a", type: "PCS", style: "S", color: "G", qty: 24 });
   });
-  it("does not lose fixed line discounts or merge unidentified manual items", () => {
+  it("does not lose fixed line discounts or merge manual items without a model", () => {
     expect(mergeBoxLine([line({ disc: "5" }), line({ id: "b", disc: "5" })], "b")).toHaveLength(2);
-    expect(mergeBoxLine([line({ product_id: undefined }), line({ id: "b", product_id: undefined })], "b")).toHaveLength(2);
+    expect(mergeBoxLine([line({ product_id: undefined, style: "" }), line({ id: "b", product_id: undefined, style: "" })], "b")).toHaveLength(2);
   });
 });

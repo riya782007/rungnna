@@ -826,3 +826,21 @@ html{scrollbar-gutter:stable}
 .purchase-photo .purchase-lines th{white-space:normal;min-width:56px}
 .purchase-photo .purchase-lines th:nth-child(8){min-width:100px}
 .purchase-photo .purchase-lines{max-width:100%}
+
+.delete-confirm{max-width:min(480px,calc(100vw - 32px));border:1px solid var(--line);border-radius:16px;padding:24px;color:var(--ink);background:var(--surface);box-shadow:0 16px 70px #0004}
+.delete-confirm::backdrop{background:#0007}
+.delete-confirm p{white-space:pre-line;overflow-wrap:anywhere}
+.delete-confirm .row{justify-content:flex-end;margin-top:20px}
+.delete-confirm button:focus{outline:3px solid var(--emerald);outline-offset:3px}
+.selection-bar{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--fill)}
+
+@media(max-width:860px){.pos-lines .pos-t tr.ln td:first-child{display:flex;flex-direction:row;align-items:center;gap:4px}.pos-lines .pos-t tr.ln td:first-child::before{display:none}}
+
+/* The current sticker stays in view; printer settings have their own full-width workspace. */
+.label-dock{position:sticky;top:58px;z-index:19;display:flex;align-items:center;gap:14px;padding:10px 12px;margin-bottom:14px;background:var(--surface);box-shadow:var(--sh)}
+.label-dock .labelprev{padding:8px;border-radius:8px;flex:none}
+.label-dock .lbl{zoom:1.35}
+.label-workspace{display:block}
+.label-settings>.pad{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:16px}
+.label-settings>.pad>.grid,.label-settings>.pad>.chips{grid-column:1/-1}
+@media(max-width:700px){.label-dock{top:58px;gap:8px;flex-wrap:wrap}.label-dock .lbl{zoom:1}.label-dock .grow{flex:1;min-width:100px}.label-settings>.pad{display:flex}}

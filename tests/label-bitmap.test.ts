@@ -29,7 +29,7 @@ describe("label artwork", () => {
     const c = { ...cfg, cur: "9", font: 6, rateScale: 1.8, pad: 1.4, qr: 8, show: { ...cfg.show, cost_code: true, line: true } };
     const svg = renderLabelSvg(c, { ...p, rate: 14500 }, 6, 12);
     expect(svg).toContain(">9146X6PCS</text>");
-    expect(svg).toContain(`font-size="${6 * 25.4 / 72 * 8 * 1.8}" font-weight="500"`);
+    expect(svg).toContain(`font-size="${6 * 25.4 / 72 * 8 * 1.8}" font-weight="700"`);
     expect(svg).toContain(">WXZX6PCS</text>"); expect(svg).toContain(">12</text>"); expect(svg).toContain('stroke-width="1"');
     expect(svg.indexOf(">WXZX6PCS</text>")).toBeLessThan(svg.indexOf(">9146X6PCS</text>"));
     expect(renderLabelSvg({ ...c, show: { ...c.show, line: false } }, p, 1, 12)).not.toContain(">12</text>");

@@ -58,6 +58,17 @@ Karan's attached 21-second voice note says he is repeatedly typing total quantit
 
 Repeatable browser acceptance: scripts/purchase-quantities-browser-check.mjs. It exercises 26 lines, mixed bill totals, bulk X6 and X12, a per-line exception, saved default after fresh authentication, one committed purchase, exact stock and print counts, QR decoding and missing-code approval blocking. These are isolated fixtures, not edits to Karan's current bill.
 
+## Meeting follow-up: safe deletion, customer bags and bold labels
+
+- Destructive buttons require a pointer double-click. Their shared confirmation focuses No. Enter and Escape cancel by default; the user can deliberately click Yes or move focus to Yes. Escape cannot leak through to a parent modal, function keys cannot save while the confirmation is open, and the scanner ignores those keystrokes. Keyboard activation of a delete button opens the same confirmation. Failures display an error and do not reuse another action's confirmation.
+- Select all / Delete selected is available on bill lines, purchase-photo review, stock-in lines, the label queue, filtered products and eligible saved bills. Product deletion is a soft hide: stock, movements and historical bills remain. Product batches are atomic and require product-edit permission. Saved tax invoices retain the existing cancellation/history rules; estimate purging retains its code and typed-word checks and starts on No.
+- Repeated custom entries with a named model now merge into the original row even across intervening items. Known product scans retain their existing merging. Model, colour, box, packet size, price, discount, unit, tax and stock-history compatibility are checked. Fixed/rounded discounts are not merged when doing so would change money. Existing held drafts are normalized when reopened; saved documents are not rewritten.
+- Save & bag labels saves once and opens the customer-bag sticker print. F9 offers bag labels after the invoice completes, enabled by a remembered counter checkbox. Saved bills have a Bag labels action for reprints. The customer name comes directly from that bill; each sticker also has its bill number and BAG n OF total. The bag count can be changed before printing.
+- Bag identifiers use RJ-BAG1 plus the saved bill ID and bag number. They are distinct across customers and stable on reprint. They never create stock products or deduct inventory. Scanning a bag on the billing screen identifies its saved customer/bill without adding a sale line; normal store and private-estimate access restrictions apply.
+- Product and bag label text is bold (SVG/browser/QZ and resident TSC double strike); barcode data, quiet zones, rates, packet quantities, cost disguise and roll geometry retain their meanings.
+
+Verification uses tests/meeting-changes.test.tsx and scripts/meeting-changes-browser-check.mjs. The browser trial checks interleaved model merging, single-click protection, Enter on No for single and batch deletion, filtered product history retention, purchase Select all, a two-bag print with decoded distinct QR codes, the correct next customer after F9, bag scans adding no products, and bold text. No shop records or physical printer jobs are used.
+
 ## Production follow-up
 
 The initial production smoke found the GST function importing browser billing code at runtime, causing an ESM module-not-found startup error. Allocation math is now isolated in a pure module with a Node-compatible import; a native-Node runtime regression guards this deployment path. The production smoke checks the common-code entry screen, API health, unauthenticated GST response, service-worker control and an actual network-offline reload in a fresh Chrome profile without touching shop records.
@@ -68,8 +79,8 @@ Final checks are recorded below. Large cloud pulls now use ordered timestamp/id 
 
 Verified on the final source:
 
-- **552 tests passed across 69 files**, with no skips or failures: `node node_modules/vitest/vitest.mjs run --maxWorkers=2 --minWorkers=1 --hookTimeout=120000`. A longer hook timeout accommodates Windows Postgres/WASM initialization; tests still execute normally.
-- Frontend TypeScript and API TypeScript checks passed. Production Vite/PWA build passed and precached 72 assets. Existing bundle-size/dynamic-import warnings remain.
+- The final suite enumerated **564 tests across 71 files**. A full run recorded 540 passes, then worker/RPC timeouts prevented completion of the purchase-reader file and caused a six-test sync cascade after the first timeout. Fresh isolated reruns passed all 24 purchase-reader tests and all six sync tests (`--testTimeout=120000 --hookTimeout=120000`). Every enumerated case has a passing result; the combined run itself was not clean. The earlier 560-test full run was clean before the final QR-copy additions.
+- Frontend TypeScript and API TypeScript checks passed. Production Vite/PWA build passed and precached 73 assets. Existing bundle-size/dynamic-import warnings remain.
 - Production browser scan trial passed: exact packet/remainder totals, rapid reads during delayed lookup, yellow rows, correct boxes, stale-bill rejection, focus and mobile display.
 - Production browser access trial passed: common/personal access, direct-route restrictions, role regeneration/deletion, default online sync and owner pause. Reload required fresh identity while the actual scanned billing draft survived. Label darkness 10 / speed 2 appeared; darkness 12 persisted after reload and reauthentication. Zero JavaScript errors and zero external requests.
 - Standards-mode Chrome print snapshots and extracted PDFs retained all **140 items**, complete settlement and final remarks: A5 five pages, A4 four pages, 80mm one long page and 58mm one long page. One print call per trial; clearing the live bill did not erase its snapshot. First/last pages and thermal sections were rendered and visually inspected for clipping.
@@ -84,3 +95,15 @@ Offline roles are enforced by the application on a trusted shop computer. A devi
 Hardware print darkness, physical scanner behaviour, old-software acceptance and installed-PWA cold reload on Karan's actual PC remain counter acceptance checks. The browser trial uses isolated local test data and explicitly reports the limits of virtual-host/offline emulation.
 
 A factual update for Karan after deployment and the counter trial: "Karan ji, the requested scan, estimate, bill-format, label and access fixes are in place. Billing saves on the computer without internet and syncs when connection returns. We have checked the software flows; the final receipt, label and offline restart have also been checked on your counter." Use the final sentence only after those physical checks actually pass.
+
+
+## Old billing rejection and label workspace follow-up
+
+- The owner reports the scanner sends a result but the old program says invalid. We still do not have its name, source, database or a passing counter trial for newly generated identities.
+- Scanning a working old label now offers **Print exact old QR copy**. It snapshots the seven original fields and complete payload, including empty values, original reference, packet size and unrounded price. Saved product fields cannot silently replace that identity. This prints copies without adding stock. Changing the item form uses the normal new-label action separately.
+- Browser, QZ bitmap and direct TSC use that exact payload. Automated tests reject edited or corrupted copy metadata. A browser print capture is decoded back to the original photo payload for verification.
+- New products still need the old software's registered item/reference identities; local POS cannot create records in an unknown third-party program. Physical acceptance in that program remains a required counter trial before announcing compatibility.
+- The label preview is pinned on screen. Printer settings open in their own full-width workspace, keeping the form from being squeezed or pushed by settings.
+- All sticker text is bold. Browser-mode heat/speed inputs are disabled with actionable Windows-driver instructions, so they no longer imply that changing an app number changes browser print darkness. QZ/direct send the configured density and speed with each job.
+
+- Final browser trial passed all meeting changes, decoded two distinct bag QR codes, decoded the exact old-product payload from an actual print snapshot, checked pinned preview placement and full-width settings, and recorded zero JavaScript errors. Print artwork was visually inspected using Chrome rendering. Physical printer darkness and acceptance of new identities by the unknown old software still require counter verification.

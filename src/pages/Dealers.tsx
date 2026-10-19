@@ -1,3 +1,5 @@
+import { DeleteButton } from "../components/DeleteButton";
+import { confirmDelete } from "../lib/confirm-delete";
 import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, type Dealer, type TradeOrder } from "../lib/db";
@@ -52,7 +54,7 @@ export default function Dealers() {
       <span className="grow"><b className="sm">{d.shop_name || d.name}</b> <span className={"pill " + (d.status === "approved" ? "ok" : d.status === "pending" ? "gold" : "bad")}>{d.status}</span>
         <div className="xs mut">{[d.name, d.phone, d.city, d.gstin].filter(Boolean).join(" · ")} · registered {when(d.created_at)}</div></span>
       {d.status !== "approved" && <button className="btn sm p" onClick={() => act(() => setDealerStatus(d, "approved"), "Approved — they can log in now")}>Approve</button>}
-      {d.status !== "blocked" && <button className="btn sm bad" onClick={() => confirm(`Block ${d.shop_name || d.name}? They won't be able to log in or order.`) && act(() => setDealerStatus(d, "blocked"), "Blocked")}>Block</button>}
+      {d.status !== "blocked" && <DeleteButton className="btn sm bad" onDelete={async () => { if (await confirmDelete(`Block ${d.shop_name || d.name}? They won't be able to log in or order.`)) await act(() => setDealerStatus(d, "blocked"), "Blocked"); }}>Block</DeleteButton>}
       <a className="btn sm" href={waLink(d.phone, `Namaste ${d.name}, your account on our wholesale portal is ${d.status === "approved" ? "approved — log in at " + dealerUrl() : "being checked"}.`)} target="_blank" rel="noopener">WhatsApp</a>
     </div>)}{!dealers.length && <div className="empty"><b>No dealers yet</b>They appear here as soon as they register.</div>}</div>}
 
@@ -65,7 +67,7 @@ export default function Dealers() {
         {open.status === "new" && <div className="row">
           {can(me, "billing.sell") && <button className="btn p" onClick={() => act(async () => { const b = await orderToBill(open, "gst", me?.id || ""); setOpen(null); go("bill/" + b.id); }, "Bill ready — check, pack and save")}>Make GST invoice</button>}
           {can(me, "estimates.open") && <button className="btn" onClick={() => act(async () => { const b = await orderToBill(open, "estimate", me?.id || ""); setOpen(null); go("bill/" + b.id); }, "Estimate ready")}>Make estimate</button>}
-          <button className="btn bad" onClick={() => confirm("Cancel this order?") && act(async () => { await cancelOrder(open); setOpen(null); }, "Order cancelled")}>Cancel order</button>
+          <DeleteButton className="btn bad" onDelete={async () => { if (await confirmDelete("Cancel this order?")) await act(async () => { await cancelOrder(open); setOpen(null); }, "Order cancelled"); }}>Cancel order</DeleteButton>
         </div>}
         {open.bill_id && <button className="btn" onClick={() => go((open.status === "billed" ? "bills/" : "bill/") + open.bill_id)}>Open the bill</button>}
         <a className="btn g" href={waLink(open.dealer_phone, `Namaste ${open.dealer_name}, we received your order ${open.no} (${open.total_qty} pcs, ${rupees(open.total)}). We'll confirm dispatch shortly.`)} target="_blank" rel="noopener">Confirm on WhatsApp</a>

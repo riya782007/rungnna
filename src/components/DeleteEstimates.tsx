@@ -1,3 +1,5 @@
+import { DeleteButton } from "./DeleteButton";
+import { confirmDelete } from "../lib/confirm-delete";
 import { useEffect, useState } from "react";
 import { db, type Bill } from "../lib/db";
 import { purgeEstimates, allEstimateDocs, removeCloudVoice, type PurgeResult } from "../lib/estimatePurge";
@@ -51,7 +53,9 @@ export function DeleteEstimates({ bills, all = false, onClose }: { bills?: Bill[
         <Switch on={back} onChange={setBack} label="Put the pieces back on the racks" hint="Only if the goods never left the shop (quotations). Leave off if they were delivered." />
         <label className="f">Type {word} to confirm<input className="in mono" value={typed} onChange={e => setTyped(e.target.value.toUpperCase())} /></label>
         {hasCode && <label className="f">Estimate code<input className="in mono" type="password" autoComplete="off" value={code} onChange={e => setCode(e.target.value)} /></label>}
-        <button className="btn bad big" disabled={typed.trim() !== word || (hasCode && !code) || busy} onClick={async () => {
+        <button className="btn" autoFocus disabled={busy} onClick={onClose}>No, keep estimates</button>
+        <DeleteButton className="btn bad big" disabled={typed.trim() !== word || (hasCode && !code) || busy} onDelete={async () => {
+          if (!await confirmDelete("Permanently delete " + list.length + " estimate document(s)?")) return;
           if (hasCode && !(await codeIs(code))) return toast("That is not the estimate code", true);
           setBusy(true);
           try {
@@ -63,7 +67,7 @@ export function DeleteEstimates({ bills, all = false, onClose }: { bills?: Bill[
             void removeCloudVoice(r.voiceFiles).catch(() => 0);
           } catch (e: any) { toast(e.message || "Could not delete", true); }
           finally { setBusy(false); }
-        }}>{busy ? "Deleting…" : all ? "Delete all estimates permanently" : "Delete permanently"}</button>
+        }}>{busy ? "Deleting…" : all ? "Delete all estimates permanently" : "Delete permanently"}</DeleteButton>
       </div>
     </Modal>
   );

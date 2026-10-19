@@ -1,3 +1,6 @@
+import { SelectAll } from "../components/SelectAll";
+import { DeleteButton } from "../components/DeleteButton";
+import { confirmDelete } from "../lib/confirm-delete";
 import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -30,6 +33,20 @@ function StockInSession() {
   const seeCost = can(me, "rates");
   const locs = useLocations();
   const [p, setP] = useState<Purchase | null>(null);
+  const [selection, setSelection] = useState<Set<string>>(new Set());
+  useEffect(() => { setSelection(new Set()); }, [p?.id]);
+  const removeLines = async (ids: string[]) => {
+    if (busy) return;
+    const snapshot = p, wanted = new Set(ids);
+    if (!snapshot || !await confirmDelete("Remove " + ids.length + " stock-in line(s)?")) return;
+    setP(latest => {
+      if (!latest || latest.id !== snapshot.id) return latest;
+      const items = latest.items.filter(l => !wanted.has(l.id));
+      const codes = new Set(latest.items.filter(l => wanted.has(l.id) && !items.some(k => k.product_id === l.product_id)).flatMap(l => products.find(k => k.id === l.product_id)?.barcodes || []));
+      codes.forEach(tag => tagsRef.current.delete(tag));
+      return { ...latest, items, rfid_tags: (latest.rfid_tags || []).filter(tag => !codes.has(tag)) };
+    }); setSelection(new Set());
+  };
   const [cam, setCam] = useState(false);
   const [q, setQ] = useState("");
   const [flash, setFlash] = useState("");
@@ -132,9 +149,10 @@ function StockInSession() {
 
           <NameItemCodes codes={unnamedCodes(t.items, id => products.find(x => x.id === id)?.item_code)}
             onNamed={(code, name) => setP(x => x && { ...x, items: x.items.map(l => (l.item === "ITEM " + code || (!l.item && products.find(x => x.id === l.product_id)?.item_code === code) ? { ...l, item: name } : l)) })} />
+          <div className="selection-bar"><SelectAll ids={t.items.map(l => l.id)} selected={selection} onChange={setSelection} label="Select all stock-in lines" /><DeleteButton className="btn sm bad" disabled={busy || !t.items.some(l => selection.has(l.id))} onDelete={() => removeLines(t.items.filter(l => selection.has(l.id)).map(l => l.id))}>Delete selected</DeleteButton></div>
           <div className="list">
             {t.items.map(l => (
-              <div key={l.id} className="li" style={{ background: flash === l.product_id ? "var(--gold-l)" : undefined, transition: "background .4s" }}>
+              <div key={l.id} className="li" style={{ background: flash === l.product_id ? "var(--gold-l)" : undefined, transition: "background .4s" }}><input type="checkbox" aria-label={"Select stock-in line " + l.item + " " + l.style} checked={selection.has(l.id)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(l.id) : next.delete(l.id); return next; })} />
                 <span className="grow" style={{ minWidth: 0 }}>
                   <b className="sm">{hasProductName(l.item) ? l.item : "Name needed"}</b> <span className="mono sm">{l.style}</span> <span className="mut sm">{l.color}</span>
                   {l.isNew && <span className="pill gold" style={{ marginLeft: 6 }}>new</span>}
@@ -148,11 +166,7 @@ function StockInSession() {
                   : <input className="cell r" style={{ width: 60 }} inputMode="numeric" value={l.qty} onChange={e => setLine(l.id, { qty: parseInt(e.target.value) || 0 })} />}
                 <b className="mono" style={{ width: 56, textAlign: "right" }}>{lineQty(l)}</b>
                 {seeCost && <MoneyInput className="cell r" style={{ width: 70 }} placeholder="cost" paise={l.cost} onPaise={v => setLine(l.id, { cost: v })} />}
-                <button className="x" aria-label="Remove" onClick={() => {
-                  const codes = new Set(products.find(x => x.id === l.product_id)?.barcodes || []);
-                  (p.rfid_tags || []).forEach(tg => codes.has(tg) && tagsRef.current.delete(tg));
-                  setP({ ...p, items: p.items.filter(x => x.id !== l.id), rfid_tags: (p.rfid_tags || []).filter(tg => !codes.has(tg)) });
-                }}><Icon n="x" size={16} /></button>
+                <DeleteButton className="x" aria-label="Remove" onDelete={() => removeLines([l.id])}><Icon n="x" size={16} /></DeleteButton>
               </div>))}
             {!t.items.length && <div className="empty"><b>Scan the first packet</b>Each scan adds one packet. Scan the same label again for the next packet.</div>}
           </div>
@@ -166,7 +180,7 @@ function StockInSession() {
             <div className="net"><span>PIECES</span><b>{t.total_qty.toLocaleString("en-IN")}</b></div>
             {seeCost && t.total_cost > 0 && <div className="row between"><span className="mut sm">Cost</span><b className="mono">{rupees(t.total_cost)}</b></div>}
             <button className="btn p big" disabled={busy} onClick={save}>Save stock in</button>
-            <button className="btn" onClick={() => { if (confirm("Clear this list?")) setP(newPurchase(me?.id || "", p.loc_id)); }}>Clear</button>
+            <DeleteButton className="btn" onDelete={async () => { if (await confirmDelete("Clear this list?")) setP(newPurchase(me?.id || "", p.loc_id)); }}>Clear</DeleteButton>
           </div>
           <div className="card pad stack">
             <b className="sm">From a supplier? <span className="mut">(optional)</span></b>

@@ -1,12 +1,16 @@
+import { DeleteButton } from "../components/DeleteButton";
+import { SelectAll } from "../components/SelectAll";
+import { confirmDelete } from "../lib/confirm-delete";
+import { can } from "../lib/roles";
 import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, type Product } from "../lib/db";
-import { label, DEFAULT_TYPES, saveProduct } from "../lib/products";
+import { label, DEFAULT_TYPES, saveProduct, hideProducts } from "../lib/products";
 import { Head, Thumb, useLocations, locName, DeadToggle, ImageAssist , MoneyInput } from "../components/common";
 import { WedgeInput } from "../components/Scanner";
 import { findByScan } from "../lib/products";
-import { go, toast } from "../lib/app";
+import { go, toast, useApp } from "../lib/app";
 import { rupees, toPaise, when } from "../lib/format";
 import { describePhoto } from "../lib/ai";
 import { VoiceNotes } from "../components/Voice";
@@ -23,11 +27,14 @@ export default function Products({ args }: { args: string[] }) {
 }
 
 function ProductList() {
+  const { me } = useApp(); const editable = can(me, "products.edit");
+  const [selection, setSelection] = useState<Set<string>>(new Set());
   const [q, setQ] = useState("");
   const [item, setItem] = useState("");
   const [dead, setDead] = useState(false);
   const [limit, setLimit] = useState(60);
   const [rfid, setRfid] = useState(false);
+  useEffect(() => { setSelection(new Set()); }, [q, item, dead]);
   const all = useLiveQuery(() => db.products.orderBy("updated_at").reverse().toArray(), [], []);
   const cells = useLiveQuery(() => storeStock(), [], []);
   const qty = useMemo(() => { const m = new Map<string, number>(); cells.forEach(c => m.set(c.product_id, (m.get(c.product_id) || 0) + c.qty)); return m; }, [cells]);
@@ -49,13 +56,14 @@ function ProductList() {
         <div className="chips"><button className="chip" aria-pressed={!item && !dead} onClick={() => { setItem(""); setDead(false); }}>All</button><button className="chip" aria-pressed={dead} onClick={() => setDead(!dead)}>Dead stock (TK)</button>
           {items.map(i => <button key={i} className="chip" aria-pressed={item === i} onClick={() => setItem(i)}>{i}</button>)}</div>
       </div>
+      {editable && <div className="selection-bar"><SelectAll ids={list.map(p => p.id)} selected={selection} onChange={setSelection} label={"Select all " + list.length + " matching products"} /><DeleteButton className="btn sm bad" disabled={!list.some(p => selection.has(p.id))} onDelete={async () => { const ids = list.filter(p => selection.has(p.id)).map(p => p.id); if (!await confirmDelete("Hide " + ids.length + " selected products? Their stock and bill history stay recorded.")) return; try { await hideProducts(ids); setSelection(new Set()); toast("Products hidden"); } catch (e: any) { toast(e.message, true); } }}>Delete selected</DeleteButton></div>}
       <div className="stack" style={{ gap: 6 }}>
         {list.slice(0, limit).map(p => (
-          <a key={p.id} className="item" href={"#/product/" + p.id}>
+          <div key={p.id} className="item">{editable && <input type="checkbox" aria-label={"Select product " + label(p)} checked={selection.has(p.id)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(p.id) : next.delete(p.id); return next; })} />}<a className="row grow" style={{ textDecoration: "none" }} href={"#/product/" + p.id}>
             <Thumb photo_id={p.photo_id} url={p.photo_url} text={p.item || p.style} />
             <div className="grow"><div className="b sm">{label(p)}</div><div className="xs mut mono">{p.code}{p.tk ? " · dead stock" : ""}</div></div>
             <div style={{ textAlign: "right" }}><div className="mono b">{qty.get(p.id) || 0}</div><div className="xs mut">{p.rate ? rupees(p.rate) : "no rate"}</div></div>
-          </a>))}
+          </a></div>))}
         {list.length > limit && <button className="btn" onClick={() => setLimit(limit + 100)}>Show more ({list.length - limit})</button>}
         {!list.length && <div className="card pad mut">Nothing matches.</div>}
       </div>
@@ -64,6 +72,7 @@ function ProductList() {
 }
 
 function ProductDetail({ id }: { id: string }) {
+  const { me } = useApp();
   const priv = usePrivate();
   const locs = useLocations();
   const p0 = useLiveQuery(() => db.products.get(id), [id]);
@@ -139,7 +148,7 @@ function ProductDetail({ id }: { id: string }) {
           {tagsOf(p).length > 0 && <div className="xs mut">RFID tags: {tagsOf(p).length} linked{tagsOf(p).filter(t => soldBill(p, t)).length ? ` · ${tagsOf(p).filter(t => soldBill(p, t)).length} sold` : ""}</div>}
           <div className="row">
             <button className="btn p" onClick={async () => { await saveProduct({ ...p }); toast("Saved"); }}>Save changes</button>
-            <button className="btn bad" onClick={async () => { if (confirm("Hide this product? Its history stays.")) { await put("products", { ...p, deleted: 1 }); go("products"); } }}>Hide product</button>
+            {can(me, "products.edit") && <DeleteButton className="btn bad" onDelete={async () => { if (await confirmDelete("Hide this product? Its history stays.")) { await hideProducts([p.id]); go("products"); } }}>Hide product</DeleteButton>}
           </div>
           <VoiceNotes entity="product" entityId={p.id} />
         </div>

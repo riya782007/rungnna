@@ -11,6 +11,7 @@ import { getRule, priceFromCost, evenRate, type PricingRule } from "./pricing";
 export type PhotoRow = { item: string; style: string; color: string; unit: string; hsn: string; qty: string; cost: string; rate: string;
   /** set when autoArticle() invented the article because the bill printed none */
   autoStyle?: boolean;
+  review_id?: string;
   /** Old application identity; supplied by its master or a matching saved article. */
   item_code?: string; ref?: string;
   packSource?: "bill" | "saved" | "default" | "manual";
@@ -154,7 +155,7 @@ export async function preparePhotoRows(rows: PhotoRow[], supplierId: string, fal
     for (const [code, info] of Object.entries(known)) if (info.name.trim().toUpperCase() === item && (!info.unit || normUnit(info.unit) === unit) && /^\d+$/.test(code)) codes.add(code);
     const item_code = row.item_code?.trim() || old?.item_code || (codes.size === 1 ? [...codes][0] : undefined);
     const explicitPack = !!row.pack?.trim() && row.packSource !== "default" && row.packSource !== "saved";
-    return { ...row, unit: unit || row.unit, qty: readCount(row.qty), pack: explicitPack ? readPacketSize(row.pack) : String(old?.pack || fallbackPack || "1"), packSource: explicitPack ? row.packSource || "bill" : old?.pack ? "saved" : "default", ...(item_code ? { item_code } : {}), ...(row.ref ? {} : old?.ref ? { ref: old.ref } : {}) };
+    return { ...row, review_id: row.review_id || uid(), unit: unit || row.unit, qty: readCount(row.qty), pack: explicitPack ? readPacketSize(row.pack) : String(old?.pack || fallbackPack || "1"), packSource: explicitPack ? row.packSource || "bill" : old?.pack ? "saved" : "default", ...(item_code ? { item_code } : {}), ...(row.ref ? {} : old?.ref ? { ref: old.ref } : {}) };
   });
 }
 

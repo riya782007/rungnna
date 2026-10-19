@@ -1,7 +1,11 @@
+import { DeleteButton } from "../components/DeleteButton";
+import { confirmDelete } from "../lib/confirm-delete";
+import { SelectAll } from "../components/SelectAll";
 import { useEffect, useMemo, useState } from "react";
 import { fillBillNames } from "../lib/billing-products";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, type Bill, type BillType, type Payment } from "../lib/db";
+import { BagLabels } from "../components/BagLabels";
 import { GstBill } from "../components/GstBill";
 import { inStore } from "../lib/scope";
 import { due, getShop, voidBill, convertToGst, shareBill, billText, waLink, deleteEstimates, totals, gstLabel, isSale, docName, docShort, DEFAULT_SHOP, type Shop } from "../lib/billing";
@@ -47,17 +51,18 @@ function BillList() {
   const cns = list.filter(b => b.status === "final" && b.bill_type === "return");
   const manage = open && can(me, "estimates.delete");
   const canBill = can(me, "bill");
-  const selected = bills.filter(b => sel.has(b.id));
+  const selected = list.filter(b => sel.has(b.id));
   const selEsts = selected.filter(b => b.bill_type === "estimate");
   const allChallans = selected.length > 0 && selected.every(b => b.bill_type === "challan");
   const why = selected.length ? canMerge(selected) : null;
   const tickable = (b: Bill) => (canBill && mergeable(b)) || (manage && b.bill_type === "estimate");
+  useEffect(() => { setSel(new Set()); }, [range, type, status, q]);
   const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   return (
     <div>
       <Head title="Bills" sub={open ? "Estimates are showing. They hide again when you lock or leave the app." : "Every bill stays on record. Cancelled bills are kept and marked."}>
         {open && <button className="btn" onClick={() => lockNow()}><Icon n="lock" size={16} />Lock</button>}
-        {manage && <button className="btn bad" onClick={() => setDelAll(true)}>Delete all estimates</button>}
+        {manage && <DeleteButton className="btn bad" onDelete={() => setDelAll(true)}>Delete all estimates</DeleteButton>}
         <button className="btn p" onClick={() => go("bill")}><Icon n="plus" size={18} />New bill</button>
       </Head>
       <div className={"grid " + (open ? "g4" : "g3")} style={{ marginBottom: 12 }}>
@@ -74,14 +79,14 @@ function BillList() {
           <select className="in" style={{ width: "auto" }} value={status} onChange={e => setStatus(e.target.value as any)}><option value="">All status</option><option value="final">Final</option><option value="hold">On hold</option><option value="merged">Merged / invoiced</option><option value="void">Cancelled</option>{open && <option value="converted">Converted</option>}</select>
           <input className="in grow" placeholder="Bill no, customer, phone" value={q} onChange={e => setQ(e.target.value)} />
         </div>
-        {canBill && <div className="row">
+        {canBill && <div className="row"><SelectAll ids={list.filter(tickable).map(b => b.id)} selected={sel} onChange={setSel} label="Select all eligible bills shown" />
           <span className="sm mut grow">{selected.length
             ? `${selected.length} selected${why && !(manage && selEsts.length === selected.length) ? " — " + why : ""}`
             : `Tick ${open ? "estimates, " : ""}held orders or challans of one customer to merge them into one invoice${manage ? ", or estimates to delete them" : ""}.`}</span>
           {selected.length > 0 && !why && <button className="btn sm p" onClick={() => setMerge(selected)}>{allChallans ? `Convert ${selected.length > 1 ? selected.length + " challans" : "challan"} to invoice` : "Merge into one invoice"}</button>}
-          {manage && selEsts.length > 0 && selEsts.length === selected.length && <button className="btn sm bad" onClick={() => setDel(selEsts)}>Delete selected</button>}
+          {manage && selEsts.length > 0 && selEsts.length === selected.length && <DeleteButton className="btn sm bad" onDelete={() => setDel(selEsts)}>Delete selected</DeleteButton>}
           {selected.length > 0 && <button className="btn sm" onClick={() => setSel(new Set())}>Clear</button>}
-          {manage && ests.length > 0 && !selected.length && <button className="btn sm bad" onClick={() => setDel(ests)}>Delete all {ests.length} estimates shown</button>}
+          {manage && ests.length > 0 && !selected.length && <DeleteButton className="btn sm bad" onDelete={() => setDel(ests)}>Delete all {ests.length} estimates shown</DeleteButton>}
         </div>}
       </div>
       <div className="card tw"><table>
@@ -151,6 +156,7 @@ function BillView({ id }: { id: string }) {
   const sources = useLiveQuery(async () => (b?.merged_from?.length ? ((await db.bills.bulkGet(b.merged_from)).filter(Boolean) as Bill[]) : []), [b?.merged_from?.join()], []);
   const [shop, setShop] = useState<Shop>(DEFAULT_SHOP);
   const [printing, setPrinting] = useState<PrintFormat | null>(null);
+  const [bags, setBags] = useState(false);
   const [payAmt, setPayAmt] = useState("");
   const [split, setSplit] = useState(false);
   const [ret, setRet] = useState(false);
@@ -173,6 +179,7 @@ function BillView({ id }: { id: string }) {
         <button className="btn" onClick={() => setPrinting("a5")}>Print A5</button>
         <button className="btn" onClick={async () => setPrinting(await getSetting<PrintFormat>("thermal_width", "80mm"))}>Thermal</button>
         <button className="btn" onClick={() => setPrinting("packing")}>Packing slip</button>
+        {b.status === "final" && <button className="btn" onClick={() => setBags(true)}>Bag labels</button>}
         <button className="btn g" onClick={() => shareBill(b, shop)}>WhatsApp</button>
       </Head>
       <div className="split">
@@ -194,10 +201,11 @@ function BillView({ id }: { id: string }) {
               {b.bill_type === "challan" && mergeable(b) && <button className="btn p" onClick={() => setConv(true)}>Convert challan to invoice</button>}
               {returnableBill(b) && can(me, "billing.returns") && <button className="btn" onClick={() => setRet(true)}>Sales return (credit note)</button>}
               {splittable(b) && b.items.length > 1 && can(me, "billing.merge") && <button className="btn" onClick={() => setSplit(true)}>Split — move lines to a new bill</button>}
-              {b.status === "final" && (boss ? <button className="btn bad" onClick={async () => {
+              {b.status === "final" && (boss ? <DeleteButton className="btn bad" onDelete={async () => {
+                if (!await confirmDelete("Cancel this saved bill and reverse its stock movements?")) return;
                 const r = prompt(b.merged_from?.length ? "Reason for cancelling (the merged bills / challans come back as they were):" : "Reason for cancelling this bill (kept on record):"); if (!r) return;
                 await voidBill(b, r, me?.name || ""); toast(b.bill_type === "return" ? "Credit note cancelled — pieces taken off the racks again" : "Bill cancelled — pieces returned to their racks");
-              }}>Cancel {b.bill_type === "return" ? "credit note" : "bill"} (void)</button> : <div className="xs mut">Only the owner or a manager can cancel a bill.</div>)}
+              }}>Cancel {b.bill_type === "return" ? "credit note" : "bill"} (void)</DeleteButton> : <div className="xs mut">Only the owner or a manager can cancel a bill.</div>)}
               <button className="btn" onClick={() => { navigator.clipboard?.writeText(billText(b, shop)); toast("Bill text copied"); }}>Copy bill text</button>
               {b.converted_from && <a className="btn sm" href={"#/bills/" + b.converted_from}>Open original estimate</a>}
               {b.converted_to && <a className="btn sm" href={"#/bills/" + b.converted_to}>Open GST invoice</a>}
@@ -211,6 +219,7 @@ function BillView({ id }: { id: string }) {
           <div className="card pad"><VoiceNotes entity="bill" entityId={b.id} /></div>
         </div>
       </div>
+      {bags && <BagLabels bill={b} onClose={() => setBags(false)} />}
       {printing && <PrintBill b={b} shop={shop} format={printing} onDone={() => setPrinting(null)} />}
       {split && <SplitDialog b={b} shop={shop} onClose={() => setSplit(false)} />}
       {ret && <ReturnDialog b={b} cns={related} shop={shop} onClose={() => setRet(false)} />}

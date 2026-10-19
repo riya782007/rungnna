@@ -1,3 +1,5 @@
+import { DeleteButton } from "../components/DeleteButton";
+import { confirmDelete } from "../lib/confirm-delete";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, getSetting, setSetting, type StockCell } from "../lib/db";
@@ -61,7 +63,7 @@ export default function RfidCount() {
             <LocationSelect value={loc} onChange={v => { setLoc(v); restart(); }} label="Rack being counted (or scan the rack's QR)" buckets={false} />
             {!loc && <div className="note warn sm">Pick the rack first — the count compares the tags read with what that rack should hold.</div>}
             <WedgeInput onCode={onCode} placeholder="Reader output lands here (or anywhere on this page)" autoFocus={!link} />
-            <div className="row"><button className="btn sm" onClick={() => (reads.length < 5 || confirm("Clear the tags read so far?")) && restart()} disabled={!reads.length}>Start again</button><span className="xs mut">{reads.length} distinct tag{reads.length === 1 ? "" : "s"} read</span></div>
+            <div className="row"><DeleteButton className="btn sm" onDelete={async () => { if (await confirmDelete("Clear the tags read so far?")) restart(); }} disabled={!reads.length}>Start again</DeleteButton><span className="xs mut">{reads.length} distinct tag{reads.length === 1 ? "" : "s"} read</span></div>
           </div>
 
           <div className="card tw"><table>

@@ -8,11 +8,15 @@ export function selectedBox(b: BillingDraft): number {
     ? b.selected_box! : Math.max(1, ...b.items.map(l => l.box_no));
 }
 
+export function mergeBillLines(items: BillLine[]) {
+  return items.reduce<BillLine[]>((out, line) => mergeBoxLine([...out, line], line.id), []);
+}
+
 export function mergeBoxLine(items: BillLine[], id: string): BillLine[] {
   const source = items.find(l => l.id === id);
-  if (!source?.product_id) return items;
+  if (!source || (!source.product_id && (!source.item?.trim() || !source.style?.trim()))) return items;
   const norm = (value?: string) => (value || "").trim().toUpperCase();
-  const target = items.find(l => l.id !== id && l.product_id === source.product_id && l.box_no === source.box_no
+  const target = items.find(l => l.id !== id && l.product_id === source.product_id && (source.product_id || norm(l.item) === norm(source.item)) && l.box_no === source.box_no
     && l.pack === source.pack && l.rate === source.rate && l.disc === source.disc
     && norm(l.type) === norm(source.type) && norm(l.hsn) === norm(source.hsn)
     && (l.gst_rate ?? null) === (source.gst_rate ?? null)

@@ -1,3 +1,5 @@
+import { DeleteButton } from "../components/DeleteButton";
+import { confirmDelete } from "../lib/confirm-delete";
 import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, type Product } from "../lib/db";
@@ -175,7 +177,7 @@ function CatalogueEditor({ value, live, ready, taken, onClose, onSaved }: { valu
         <input className="in" placeholder={`Search ${pool.length} design${pool.length === 1 ? "" : "s"}`} value={q} onChange={e => setQ(e.target.value)} />
         <div className="row xs"><span className="grow mut">{c.product_ids.length} picked{notLive.length ? ` · ${notLive.length} will be put live` : ""}</span>
           <button className="linkbtn" onClick={() => setC({ ...c, product_ids: [...new Set([...c.product_ids, ...list.map(p => p.id)])] })}>Pick all shown</button>
-          <button className="linkbtn" onClick={() => setC({ ...c, product_ids: [] })}>Clear</button></div>
+          <DeleteButton className="linkbtn" onDelete={async () => { if (await confirmDelete("Remove all selected designs from this catalogue draft?")) setC(old => ({ ...old, product_ids: [] })); }}>Clear</DeleteButton></div>
         <div className="stack" style={{ gap: 4, maxHeight: 320, overflow: "auto" }}>
           {list.map(p => (
             <label key={p.id} className="item" style={{ cursor: "pointer" }}>
@@ -188,7 +190,7 @@ function CatalogueEditor({ value, live, ready, taken, onClose, onSaved }: { valu
         </div>
         <div className="row">
           <button className="btn p" onClick={save}>{isNew ? "Create catalogue" : "Save"}</button>
-          {!isNew && <button className="btn bad" onClick={async () => { if (confirm("Delete this catalogue? Its link stops working.")) { await deleteCatalogue(c.slug); toast("Deleted"); onSaved(); } }}>Delete</button>}
+          {!isNew && <DeleteButton className="btn bad" onDelete={async () => { if (await confirmDelete("Delete this catalogue? Its link stops working.")) { await deleteCatalogue(c.slug); toast("Deleted"); onSaved(); } }}>Delete</DeleteButton>}
         </div>
       </div>
     </Modal>

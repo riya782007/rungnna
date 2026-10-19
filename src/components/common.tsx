@@ -1,3 +1,5 @@
+import { DeleteButton } from "./DeleteButton";
+import { confirmDelete } from "../lib/confirm-delete";
 import React, { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, type Location, type Product } from "../lib/db";
@@ -61,7 +63,7 @@ export function PhotoButton({ value, onChange, label = "Photo", webcam = false }
       </button>
       {webcam && <button type="button" className="btn sm" onClick={() => setCamera(true)} disabled={busy}><Icon n="camera" size={17} />Take photo</button>}
       {camera && <Suspense fallback={<div role="status">Opening camera…</div>}><CustomerCamera onPhoto={onChange} onClose={() => setCamera(false)} /></Suspense>}
-      {value && <button type="button" className="btn sm bad" onClick={() => onChange(undefined)}>Remove</button>}
+      {value && <DeleteButton className="btn sm bad" onDelete={async () => { if (await confirmDelete("Remove this photo?")) onChange(undefined); }}>Remove</DeleteButton>}
     </div>
   );
 }

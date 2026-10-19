@@ -1,7 +1,9 @@
 import type { LabelCfg } from "../pages/Labels";
 import type { PurchaseLabelJob } from "./purchase-labels";
 import { LABEL_DOTS_PER_MM, labelArtworkGeometry, renderLabelSvg } from "./label-artwork";
+import { bagLabelCfg, bagPayload } from "./bag-labels";
 import { labelHeat } from "./label-darkness";
+import { validateLegacyCopy } from "./legacy-label-copy";
 
 const dots = (mm: number) => Math.round(mm * LABEL_DOTS_PER_MM);
 const encoder = new TextEncoder();
@@ -40,7 +42,7 @@ export function validateLabelBitmapJob(cfg: LabelCfg, jobs: PurchaseLabelJob[]) 
   for (const row of rows) row.forEach((j, col) => {
     const cell = labelBitmapCell(cfg, col);
     if (cell.w <= cfg.pad * 2) throw new Error("A sticker falls past the printer's right edge. Check columns, gaps and nudge.");
-    labelArtworkGeometry({ ...cfg, w: cell.w }, j.p, j.qtyOnLabel);
+    labelArtworkGeometry({ ...(j.bag ? bagLabelCfg(cfg) : cfg), w: cell.w }, j.p, j.qtyOnLabel, j.bag ? bagPayload(j.bag) : validateLegacyCopy(j));
   });
 }
 
@@ -102,7 +104,7 @@ export async function buildLabelBitmapJob(cfg: LabelCfg, jobs: PurchaseLabelJob[
     let sizes = pictures.get(job);
     if (!sizes) { sizes = new Map(); pictures.set(job, sizes); }
     if (!sizes.has(w)) {
-      const svg = renderLabelSvg({ ...cfg, w }, job.p, job.qtyOnLabel, job.line, job.labelIndex);
+      const svg = renderLabelSvg({ ...(job.bag ? bagLabelCfg(cfg) : cfg), w }, job.p, job.qtyOnLabel, job.line, job.labelIndex, job.bag ? bagPayload(job.bag) : validateLegacyCopy(job));
       let picture = sameArtwork.get(svg);
       if (!picture) { picture = await imageFromSvg(svg); sameArtwork.set(svg, picture); }
       sizes.set(w, picture);

@@ -386,7 +386,7 @@ export function useScannerGun(
 
     const onKey = (e: KeyboardEvent) => {
       // Never interfere with real typing (incl. the WedgeInput box).
-      if (editable(e.target)) return;
+      if (editable(e.target) || document.querySelector("dialog[open]")) { reset(); clearTimeout(timer); return; }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       const now = performance.now();

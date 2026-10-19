@@ -1,3 +1,5 @@
+import { DeleteButton } from "../components/DeleteButton";
+import { confirmDelete } from "../lib/confirm-delete";
 import { useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, deviceId, type Staff } from "../lib/db";
@@ -111,7 +113,7 @@ export default function Settings() {
               {!pats.length && <div className="mut sm">None yet. When a label isn't understood, the scan screen asks once which piece is which.</div>}
               {pats.map(p => (
                 <div key={p.id} className="row sm"><span className="grow"><b>{p.name}</b> · {p.count} pieces → {p.map.map(m => m || "–").join(", ")}</span>
-                  <button className="btn sm bad" onClick={async () => { const n = pats.filter(x => x.id !== p.id); setPats(n); await setSetting("patterns", n); }}>Forget</button></div>))}
+                  <DeleteButton className="btn sm bad" onDelete={async () => { if (!await confirmDelete("Forget this learned label layout?")) return; const n = pats.filter(x => x.id !== p.id); setPats(n); await setSetting("patterns", n); }}>Forget</DeleteButton></div>))}
             </div></div>}
           {boss && <div className="card"><header><h3>Backup file</h3></header>
             <div className="pad stack">
@@ -483,7 +485,7 @@ function TaxonomyCard() {
       <div className="chips">
         {t[field].map(x => (
           <span key={x} className="chip" style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-            {x}<button className="linkbtn" title="Remove" onClick={async () => setT(await removeFrom(field, x))}>✕</button>
+            {x}<DeleteButton className="linkbtn" aria-label={"Remove " + x} onDelete={async () => { if (await confirmDelete("Remove " + x + " from " + label + "?")) setT(await removeFrom(field, x)); }}>✕</DeleteButton>
           </span>
         ))}
         {!t[field].length && <span className="xs mut">None yet.</span>}
@@ -510,7 +512,7 @@ function TaxonomyCard() {
               <div key={c.name} className="row between sm">
                 <span className="grow">{c.name}</span>
                 <span className="mono xs mut">{c.code}</span>
-                <button className="btn sm bad" onClick={async () => setT(await removeColour(c.name))}>Remove</button>
+                <DeleteButton className="btn sm bad" onDelete={async () => { if (await confirmDelete("Remove colour " + c.name + "?")) setT(await removeColour(c.name)); }}>Remove</DeleteButton>
               </div>
             ))}
             {!t.colours.length && <span className="xs mut">None yet.</span>}
@@ -574,7 +576,7 @@ function PrivateCard() {
             await setCode(code, hint.trim(), Math.max(1, Math.min(120, min))); setCodeV(""); setAgain(""); setHas(true); lockNow(); toast("Code saved on every counter");
           }}>{has ? "Change code" : "Set code"}</button>
           {open && <button className="btn" onClick={() => lockNow()}>Lock now</button>}
-          {open && can(me, "estimates.delete") && <button className="btn bad" onClick={() => setDelAll(true)}>Delete all estimates</button>}
+          {open && can(me, "estimates.delete") && <DeleteButton className="btn bad" onDelete={() => setDelAll(true)}>Delete all estimates</DeleteButton>}
         </div>
       </div>
       {delAll && <DeleteEstimates all onClose={() => setDelAll(false)} />}

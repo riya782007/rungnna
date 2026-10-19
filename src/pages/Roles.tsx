@@ -1,3 +1,5 @@
+import { DeleteButton } from "../components/DeleteButton";
+import { confirmDelete } from "../lib/confirm-delete";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Eye, EyeOff, Copy, RefreshCw } from "lucide-react";
@@ -68,7 +70,7 @@ export default function Roles() {
   const remove = async (r: CustomRole) => {
     const u = users(r.id);
     if (u.length) return toast(`${u.map(s => s.name).join(", ")} still ${u.length > 1 ? "have" : "has"} this role — give them another role first`, true);
-    if (!confirm(`Delete the role “${r.name}”?\n\nIts passcode stops working and anyone signed in with it is signed out.`)) return;
+    if (!await confirmDelete(`Delete the role “${r.name}”?\n\nIts passcode stops working and anyone signed in with it is signed out.`)) return;
     try { await saveRoles(roles.filter(x => x.id !== r.id)); toast("Role deleted"); } catch (e: any) { toast(e.message, true); }
   };
   const startFrom = (b: Staff["role"]) => {
@@ -113,7 +115,7 @@ export default function Roles() {
         <RoleEditor role={r} submitLabel="Save changes" onSave={x => save(x, false)} />
         <div className="pad row" style={{ paddingTop: 0, gap: 16 }}>
           <button className="linkbtn" onClick={() => regenerate(r)}><RefreshCw size={13} /> Regenerate passcode</button>
-          <button className="linkbtn bad-text" onClick={() => remove(r)}>Delete this role</button>
+          <DeleteButton className="linkbtn bad-text" onDelete={() => remove(r)}>Delete this role</DeleteButton>
           {users(r.id).length > 0 && <span className="xs mut">Used by {users(r.id).map(s => s.name).join(", ")}</span>}
         </div>
       </div>

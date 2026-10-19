@@ -26,7 +26,7 @@ export const labelRate = (paise: number) => { const r = Math.round(paise) / 100;
 export const rateMark = (look: { cur?: string }) => look.cur ?? "₹";
 export function labelLines(look: Pick<LabelLook, "shop" | "layout" | "show" | "cur" | "compactCostCode" | "fakeLetters" | "labelIndex">, p: Product, pack: number, rupee = rateMark(look)): LabelLine[] {
   const s = look.show, out: LabelLine[] = [];
-  const push = (on: boolean, text: string | undefined | false, o: Omit<LabelLine, "text"> = {}) => { if (on && text) out.push({ text, ...o }); };
+  const push = (on: boolean, text: string | undefined | false, o: Omit<LabelLine, "text"> = {}) => { if (on && text) out.push({ text, ...o, bold: true }); };
   if ((look.layout || "shop") === "shop") {
     push(s.item, p.item); push(s.style, p.style); push(s.color, p.color); push(s.tk, p.tk && "TK " + p.tk);
     push(s.rate && p.rate > 0, `${rupee}${labelRate(p.rate)}${s.qty ? `X${pack}${p.type || "PCS"}` : ""}`, { big: true, bold: true });

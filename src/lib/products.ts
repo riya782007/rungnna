@@ -222,6 +222,13 @@ export async function itemCodeFor(item: string) {
   return hit?.item_code || "";
 }
 
+export async function hideProducts(ids: string[]) {
+  requirePerm("products.edit", "hiding products");
+  return db.transaction("rw", [db.products, db.outbox], async () => {
+    for (const id of new Set(ids)) { const current = await db.products.get(id); if (current && !current.deleted) await put("products", { ...current, deleted: 1 }); }
+  });
+}
+
 export async function saveProduct(p: Product) {
   requirePerm("products.edit", "adding or editing products");
   p.item = p.item.trim().toUpperCase(); p.style = p.style.trim().toUpperCase(); p.color = p.color.trim().toUpperCase();
