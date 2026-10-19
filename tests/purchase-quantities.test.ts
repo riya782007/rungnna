@@ -62,3 +62,31 @@ describe("purchase quantities without repeated typing",()=>{
     expect(()=>ownPayload(draftLabelProducts(rows,"o",DEFAULT_RULE)[0],"shop")).toThrow("numeric ITEM CODE");
   });
 });
+
+import { repeatPhotoCount } from "../src/lib/purchase-quantities";
+
+describe("Enter repeats purchase counts independently", () => {
+  const lines = () => [1, 2, 3, 4].map(n => ({ item: `Copper set ${n}`, qty: "10", pack: "1", stickers: "", cost: "100", rate: "200", unit: "SET", hsn: "7117" }));
+  it.each(["qty", "pack", "stickers"] as const)("carries 2, then a manually changed 3 down %s only", field => {
+    const original = lines();
+    let rows = repeatPhotoCount(original, 0, field, "2");
+    rows = repeatPhotoCount(rows, 1, field, rows[1][field]!);
+    expect(rows.slice(0, 3).map(r => r[field])).toEqual(["2", "2", "2"]);
+    rows = repeatPhotoCount(rows, 2, field, "3");
+    expect(rows.map(r => r[field])).toEqual(["2", "2", "3", "3"]);
+    expect(rows.map(r => r.cost)).toEqual(original.map(r => r.cost));
+    for (const other of ["qty", "pack", "stickers"] as const) if (other !== field) expect(rows.map(r => r[other])).toEqual(original.map(r => r[other]));
+    expect(original[0][field]).not.toBe("2");
+  });
+  it("keeps zero and blank sticker meanings", () => {
+    expect(repeatPhotoCount(lines(), 0, "stickers", "0")[1].stickers).toBe("0");
+    expect(repeatPhotoCount(lines(), 0, "stickers", "")[1].stickers).toBe("");
+  });
+  it("validates counts and handles the last line without adding a product", () => {
+    expect(() => repeatPhotoCount(lines(), 0, "qty", "0")).toThrow();
+    expect(() => repeatPhotoCount(lines(), 0, "pack", "")).toThrow();
+    expect(() => repeatPhotoCount(lines(), 0, "stickers", "5001")).toThrow();
+    expect(() => repeatPhotoCount(lines(), 0, "stickers", "2.5")).toThrow();
+    expect(repeatPhotoCount(lines(), 3, "qty", "3")).toHaveLength(4);
+  });
+});

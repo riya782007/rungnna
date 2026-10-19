@@ -13,7 +13,7 @@ import {
   preparePhotoRows, savePhotoPurchase, validatePhotoRows, pricePhotoRows, applyVendorTerms, repricePhotoRows, suspiciousCosts, restoreBillCosts,
   autoArticle, autoArticleCount, draftLabelProducts, labelCountFor, type PhotoRow,
 } from "../lib/purchase-photo";
-import { applyPhotoQuantities, readCount } from "../lib/purchase-quantities";
+import { applyPhotoQuantities, readCount, repeatPhotoCount, type RepeatedCountField } from "../lib/purchase-quantities";
 import { purchaseLabelJobs } from "../lib/purchase-labels";
 import { DEFAULT_CFG, LabelView, validateLabelPrint, loadLabelCfg, useLabelPrint, tscCommands, expandJobs, type LabelCfg, type Job } from "../pages/Labels";
 import { directPrintSupported } from "../lib/tsc";
@@ -27,7 +27,7 @@ import { newParty } from "../lib/billing";
 const blank = (pack = "1"): PhotoRow => ({ review_id: uid(), item: "", style: "", color: "", unit: "PCS", hsn: "", qty: "", pack, packSource: "default", stickers: "", cost: "", rate: "" });
 const captions: Record<string, string> = { item: "Item", style: "Style/article", color: "Colour", unit: "Unit", hsn: "HSN", qty: "Total qty", pack: "Pieces per packet (X)", stickers: "Stickers", cost: "Cost ₹", rate: "Rate ₹" };
 /* pack = the "X1" / "X3" after the rate on his stickers: pieces in one packet (his old software's QTY box) */
-const FIELDS = ["item", "style", "color", "unit", "hsn", "qty", "pack", "stickers", "cost", "rate"] as const;
+const FIELDS = ["item", "style", "color", "unit", "qty", "pack", "stickers", "cost", "rate"] as const;
 type Field = (typeof FIELDS)[number];
 const defaultStickers = (r: PhotoRow) => {
   const qty = Number(r.qty), pack = Number(r.pack || "1");
@@ -48,9 +48,9 @@ export function askBillCamera() { (window as any).__rjBillCamera = true; window.
 export default function PurchasePhoto({ by, camera = false }: { by: string; camera?: boolean }) {
   const [d, setD] = useState<Draft>({ store: currentStore(), rows: [], supplier: "", billNo: "", rack: "", warnings: "", total: "" });
   const [selection, setSelection] = useState<Set<string>>(new Set());
-  const packetFocus = useRef<HTMLInputElement | null>(null);
+  const countFocus = useRef<HTMLInputElement | null>(null);
   useLayoutEffect(() => {
-    const next = packetFocus.current; packetFocus.current = null;
+    const next = countFocus.current; countFocus.current = null;
     if (next?.isConnected) { next.focus(); next.select(); }
   }, [d.rows]);
   const draftRef = useRef(d); draftRef.current = d;
@@ -382,19 +382,18 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
           <td className="line-no" data-l="Line" title="Line number: the same small boxed number printed on this line's stickers"><input type="checkbox" aria-label={"Select purchase line " + (i + 1)} checked={selection.has(r.review_id!)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(r.review_id!) : next.delete(r.review_id!); return next; })} />{i + 1}</td>
           {FIELDS.map(k => <td key={k} data-l={captions[k]}>
             <input className={"in" + ((k === "style" && r.autoStyle) || d.check?.fixes.some(f => f.line === i + 1 && f.field === k) ? " auto-filled" : "") + (k === "cost" && lowCost.includes(i + 1) ? " cost-low" : "")} aria-label={`${k} line ${i + 1}`}
-              title={k === "pack" ? "Enter saves and copies this packet size to the next line. Type a new number to change it." : k === "stickers" ? "Leave blank for one per packet; 0 prints none; enter a number for exactly that many stickers" : k === "style" && r.autoStyle ? "The bill printed no article number — this was built from the item and its rate. Edit it if you have the supplier's own code." : undefined}
+              title={["qty", "pack", "stickers"].includes(k) ? `Enter copies this ${captions[k].toLowerCase()} to the next line. Type a new number to change it.${k === "stickers" ? " Blank means one per packet; 0 prints none." : ""}` : k === "style" && r.autoStyle ? "The bill printed no article number — this was built from the item and its rate. Edit it if you have the supplier's own code." : undefined}
               inputMode={k === "cost" || k === "rate" ? "decimal" : ["qty", "pack", "stickers"].includes(k) ? "numeric" : undefined}
               placeholder={k === "stickers" ? defaultStickers(r) : undefined}
               value={r[k] ?? ""} onChange={e => row(i, k, e.target.value)}
-              onKeyDown={k === "pack" ? e => {
+              onKeyDown={["qty", "pack", "stickers"].includes(k) ? e => {
                 if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
                 e.preventDefault(); e.stopPropagation();
                 if (e.repeat || busy || lock.current) return;
                 try {
-                  if (!e.currentTarget.value.trim()) throw new Error("Enter pieces per packet first");
-                  const pack = applyPhotoQuantities([r], "", e.currentTarget.value)[0].pack;
-                  packetFocus.current = e.currentTarget.closest("tbody")?.querySelector<HTMLInputElement>(`input[aria-label="pack line ${i + 2}"]`) ?? null;
-                  set({ rows: d.rows.map((line, index) => index === i || index === i + 1 ? { ...line, pack, packSource: "manual" as const } : line) });
+                  const rows = repeatPhotoCount(d.rows, i, k as RepeatedCountField, e.currentTarget.value);
+                  countFocus.current = e.currentTarget.closest("tbody")?.querySelector<HTMLInputElement>(`input[aria-label="${k} line ${i + 2}"]`) ?? null;
+                  set({ rows });
                   setError("");
                 } catch (error: any) { setError(error.message); }
               } : undefined}
