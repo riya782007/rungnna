@@ -5,8 +5,8 @@ const PurchasePhoto = lazy(() => import("../components/PurchasePhoto"));
 import { createPortal } from "react-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, getSetting, setSetting, recordMovement, type Product } from "../lib/db";
-import { ownPayload } from "../lib/parse";
-import { blankProduct, saveProduct, findByScan, distinct, DEFAULT_ITEMS, DEFAULT_TYPES, label, itemCodeFor } from "../lib/products";
+import { ownPayload, parseLabel } from "../lib/parse";
+import { blankProduct, saveProduct, findByScan, fromParsed, fillFromItemCode, distinct, DEFAULT_ITEMS, DEFAULT_TYPES, label, itemCodeFor } from "../lib/products";
 import { Head, DeadToggle , MoneyInput } from "../components/common";
 import { RackPicker } from "../components/RackPicker";
 import { SupplierNo } from "../components/SupplierNo";
@@ -24,12 +24,14 @@ import { renderLabelSvg } from "../lib/label-artwork";
 import { buildLabelBitmapJob, validateLabelBitmapJob } from "../lib/label-bitmap";
 import { listQzPrinters, printQzTSPL } from "../lib/qz";
 import { labelHeat, DEFAULT_LABEL_DENSITY, DEFAULT_LABEL_SPEED } from "../lib/label-darkness";
+import { fakeLetterPool, printedCostCode } from "../lib/label-cost-code";
 
 /* Label settings — every number is in millimetres so what you see is what the printer gets. */
 export type LabelCfg = {
   output?: "browser" | "tspl" | "qz";
   qzPrinter?: string;
   density?: number; speed?: number;
+  compactCostCode?: boolean; fakeLetters?: string;
   preset: string; mode: "roll" | "sheet";
   w: number; h: number; cols: number; gapX: number; gapY: number;
   sheetW: number; sheetH: number; top: number; left: number; rows: number;
@@ -84,6 +86,7 @@ export const PRESETS: { key: string; name: string; cfg: Partial<LabelCfg> }[] = 
 
 export const DEFAULT_CFG: LabelCfg = {
   output: "browser",
+  compactCostCode: true, fakeLetters: "Z",
   density: DEFAULT_LABEL_DENSITY, speed: DEFAULT_LABEL_SPEED,
   preset: "rjrow", mode: "roll", driverPaper: true, w: 33, h: 15, cols: 3, gapX: 1.3, gapY: 0, sheetW: 101.6, sheetH: 152.4, top: 0, left: 0, edgeR: 104, rows: 9,
   qr: 8, font: 6, rateScale: 1.8, pad: 1.4, offX: 2.5, offY: 0, shop: "RUNGNNA", format: "shop", layout: "shop",
@@ -91,7 +94,7 @@ export const DEFAULT_CFG: LabelCfg = {
   cur: "9",
 };
 
-export type Job = { p: Product; qtyOnLabel: number; copies: number; line?: number };   // line: see lib/purchase-labels
+export type Job = { p: Product; qtyOnLabel: number; copies: number; line?: number; labelIndex?: number };   // line: see lib/purchase-labels
 export type PrintStartResult = { started: true } | { started: false; message: string; cancelled?: boolean };
 /** One entry per sticker, in queue order (capped at 5000). */
 export const expandJobs = (jobs: Job[]) => jobs.flatMap(j => Array.from({ length: Math.max(0, Math.min(5000, j.copies)) }, () => j)).slice(0, 5000);
@@ -199,9 +202,10 @@ export default function Labels({ args }: { args: string[] }) {
     const n = Number(copies), packet = Number(qty);
     if (!Number.isSafeInteger(n) || n < 1 || n > 5000 || !Number.isSafeInteger(packet) || packet < 1 || packet > 1000000) return toast("Check packet quantity and print quantity (1–5000)", true);
     if (jobs.reduce((sum, j) => sum + j.copies, 0) + n > 5000) return toast("Print this queue before adding more than 5000 labels", true);
-    if (print) { try { validateLabelPrint(cfg, [...jobs, { p: { ...form, item: form.item || "Pending" }, qtyOnLabel: packet, copies: n }]); } catch (e: any) { setPrintError(e.message); return toast(e.message, true); } }
     queueLock.current = true; setQueueBusy(true);
     try {
+    const legacyCode = form.item_code || await itemCodeFor(form.item);
+    if (print) validateLabelPrint(cfg, [...jobs, { p: { ...form, item_code: legacyCode || undefined, item: form.item || "Pending" }, qtyOnLabel: packet, copies: n }]);
     const saved = await db.transaction("rw", [db.products, db.config, db.settings, db.stock, db.locations, db.movements, db.outbox], async () => {
     // make sure the product exists so a scan of the new QR always finds it
     const existing = form.style ? await findByScan(form.code, { raw: form.code, how: "x", tokens: [], style: form.style, color: form.color, item: form.item }) : undefined;
@@ -227,7 +231,7 @@ export default function Labels({ args }: { args: string[] }) {
     if (print) showStart(printer.start(expandJobs([...jobs, job])));
     toast(`${n} labels queued · ${label(saved)}`);
     setForm(blankProduct(me?.id || "")); setQty("1"); setCost("");
-    } catch (e: any) { toast(e.message || "Could not prepare labels", true); }
+    } catch (e: any) { setPrintError(e.message || "Could not prepare labels"); toast(e.message || "Could not prepare labels", true); }
     finally { queueLock.current = false; setQueueBusy(false); }
   };
 
@@ -263,7 +267,9 @@ export default function Labels({ args }: { args: string[] }) {
             <header><h3>Barcode print</h3><span className="xs mut">scan an existing label to copy its details</span></header>
             <div className="pad stack">
               <WedgeInput autoFocus={false} placeholder="Scan an old label to pre-fill (optional)" onCode={async raw => {
-                const p = await findByScan(raw); if (p) { setForm({ ...p }); setQty(String(p.pack || 1)); toast("Loaded " + label(p)); } else toast("Not in the system yet — fill it below", true);
+                const parsed = parseLabel(raw);
+                const p = await findByScan(raw) || (parsed.how === "shop label" || parsed.how === "rungnna" ? await fillFromItemCode(fromParsed(parsed, me?.id || "")) : undefined);
+                if (p) { setForm({ ...p }); setQty(String(p.pack || 1)); if (parsed.how === "shop label") upd({ format: "shop" }); toast("Loaded " + label(p) + (p.item ? "" : " — enter the product name")); } else toast("Not in the system yet — fill it below", true);
               }} />
               <div className="grid g2">
                 <label className="f">ITEM
@@ -274,10 +280,11 @@ export default function Labels({ args }: { args: string[] }) {
                 <label className="f">STYLE<input className="in mono" value={form.style} onChange={e => set("style", e.target.value.toUpperCase())} placeholder="K5209/59SH" /></label>
                 <label className="f">COLOR<input className="in mono" value={form.color} onChange={e => set("color", e.target.value.toUpperCase())} placeholder="K/GBN" /></label>
                 <label className="f">TK<input className="in mono" value={form.tk} onChange={e => set("tk", e.target.value.toUpperCase())} /></label>
-                <details className="label-advanced"><summary>More details</summary><div className="grid g2">
+                <details className="label-advanced" open={cfg.format === "shop"}><summary>More details</summary><div className="grid g2">
                 <label className="f">MODEL / ARTICLE No.<input className="in mono" value={form.model || ""} onChange={e => set("model", e.target.value.toUpperCase() || undefined)} placeholder="vendor's article no" /></label>
                 <SupplierNo suppliers={vendors} id={form.vendor_id} label="VENDOR roll no." onPick={v => { set("vendor_id", v?.id); set("vendor_name", v?.name); }} />
-                <label className="f">ITEM CODE (old software)<input className="in mono" inputMode="numeric" value={form.item_code || ""} placeholder="auto" onChange={e => set("item_code", e.target.value.replace(/\D/g, "") || undefined)} /></label>
+                <label className="f">ITEM CODE (old software)<input className="in mono" inputMode="numeric" value={form.item_code || ""} placeholder="Copy the old system’s numeric code" onChange={e => set("item_code", e.target.value.replace(/\D/g, "") || undefined)} /></label>
+                <label className="f">REF / roll reference (old software)<input className="in mono" value={form.ref || ""} onChange={e => set("ref", e.target.value || undefined)} placeholder="Copy the working label’s reference" /></label>
                 {can(me, "rates") && <label className="f">COST ₹
                   <input className="in mono" inputMode="decimal" value={cost} placeholder="enter cost" onChange={e => applyCost(e.target.value)} /></label>}
                 </div></details>
@@ -315,9 +322,9 @@ export default function Labels({ args }: { args: string[] }) {
   );
 }
 
-export function LabelView({ cfg, p, qtyOnLabel = 1, line }: { cfg: LabelCfg; p: Product; qtyOnLabel?: number; line?: number }) {
+export function LabelView({ cfg, p, qtyOnLabel = 1, line, labelIndex = 0 }: { cfg: LabelCfg; p: Product; qtyOnLabel?: number; line?: number; labelIndex?: number }) {
   let artwork: string;
-  try { artwork = renderLabelSvg(cfg, p, qtyOnLabel, line); }
+  try { artwork = renderLabelSvg(cfg, p, qtyOnLabel, line, labelIndex); }
   catch (e: any) { return <div className="sm mut" role="status">{e.message || "Review the sticker settings"}</div>; }
   return <div className="lbl" style={{ width: cfg.w + "mm", height: cfg.h + "mm", padding: 0, display: "block", overflow: "hidden" }} dangerouslySetInnerHTML={{ __html: artwork }} />;
 }
@@ -357,6 +364,10 @@ function LabelSettings({ cfg, upd, sample, qty, onTest }: { cfg: LabelCfg; upd: 
           <label className="f">Print speed (1–6)<input className="in mono" type="number" min={1} max={6} step={1} value={cfg.speed ?? DEFAULT_LABEL_SPEED} onChange={e => upd({ speed: Number(e.target.value) })} /></label>
         </div>
         <div className="xs mut">QZ Tray and direct TSC use these settings. Browser printing uses the Windows driver's darkness and speed. Print one check row after a change; too much heat can blur the QR.</div>
+        <label className="row sm"><input type="checkbox" checked={!!cfg.compactCostCode} onChange={e => upd({ compactCostCode: e.target.checked })} /> Compact repeated letters in cost code</label>
+        <label className="f">Fake letter pool<input className="in mono" value={cfg.fakeLetters ?? "Z"} onChange={e => upd({ fakeLetters: e.target.value.toUpperCase().replace(/[^A-Z]/g, "") })} placeholder="e.g. ZYAB" /></label>
+        <div className="xs mut">Enter any letters A–Z, with no length limit. One fake letter is shuffled across stickers; repeated letters in the pool count once. Leave empty for no fake letter. Repeated code letters become dashes; price, quantity, reference and QR data stay the same.</div>
+        <div className="sm mono" aria-label="Cost code examples">{[0, 1, 2].map(i => printedCostCode("RPPX1PCS", cfg, i)).join(" · ")}</div>
         <label className="f">Sticker
           <select className="in" value={cfg.preset} onChange={e => { const p = PRESETS.find(x => x.key === e.target.value);
             // a preset is a whole sticker: settings only one preset uses (printer's own paper, right edge, rate size) go back to plain
@@ -390,9 +401,10 @@ function LabelSettings({ cfg, upd, sample, qty, onTest }: { cfg: LabelCfg; upd: 
         <div className="grid g2">
           <label className="f">QR content
             <select className="in" value={cfg.format || "shop"} onChange={e => upd({ format: e.target.value as any })}>
-              <option value="shop">Same as old software (both systems can scan)</option>
-              <option value="rungnna">Rungnna only</option>
+              <option value="shop">Old software format — matching item code required</option>
+              <option value="rungnna">Rungnna only — includes product name</option>
             </select></label>
+          <div className="xs mut">Old-software labels need the item code from that software, not a new code invented here. Copy a working old label to retain its reference. Rungnna-only labels work in this app even with zero stock.</div>
           <label className="f">Arrangement
             <select className="in" value={cfg.layout || "shop"} onChange={e => upd({ layout: e.target.value as any })}>
               <option value="shop">Like current sticker (text · QR · name)</option>
@@ -413,9 +425,11 @@ function LabelSettings({ cfg, upd, sample, qty, onTest }: { cfg: LabelCfg; upd: 
 /* TSPL for a run of stickers (the direct-to-TSC path). Identical neighbours go as one PRINT n. */
 export function tscCommands(cfg: LabelCfg, list: Job[]) {
   if (cfg.mode !== "roll" || cfg.cols !== 1) throw new Error(`USB / serial TSC printing supports one sticker across. This setup is ${cfg.cols} across: choose "QZ Tray → Windows TSC printer" for direct roll printing or "Browser / Windows printer driver" in Printer settings.`);
-  return runsOf(list).map(({ item: j, n }) => {
+  const runs = cfg.compactCostCode && fakeLetterPool(cfg.fakeLetters).length > 1
+    ? list.map((j, index) => ({ item: { ...j, labelIndex: j.labelIndex ?? index }, n: 1 })) : runsOf(list);
+  return runs.map(({ item: j, n }) => {
     const product = productForLabel(j.p, j.qtyOnLabel);
-    return labelTSPL(cfg, product, j.qtyOnLabel, n, ownPayload(product, cfg.format || "shop"));
+    return labelTSPL({ ...cfg, labelIndex: j.labelIndex }, product, j.qtyOnLabel, n, ownPayload(product, cfg.format || "shop"));
   }).join("");
 }
 
@@ -425,7 +439,7 @@ type Run = {
 };
 
 /* A printer or geometry change requires one fresh, accepted check row. */
-export const printerSig = (c: LabelCfg) => [c.output || "browser", c.qzPrinter || "", c.preset, c.mode, c.w, c.h, c.cols, c.gapX, c.gapY, c.offX, c.offY, c.driverPaper ? 1 : 0, c.edgeR ?? "", c.sheetW, c.sheetH, c.rows, c.left, c.top, c.qr, c.font, c.pad, c.rateScale ?? "", c.layout, c.format, c.density ?? DEFAULT_LABEL_DENSITY, c.speed ?? DEFAULT_LABEL_SPEED].join("|");
+export const printerSig = (c: LabelCfg) => [c.output || "browser", c.qzPrinter || "", c.preset, c.mode, c.w, c.h, c.cols, c.gapX, c.gapY, c.offX, c.offY, c.driverPaper ? 1 : 0, c.edgeR ?? "", c.sheetW, c.sheetH, c.rows, c.left, c.top, c.qr, c.font, c.pad, c.rateScale ?? "", c.layout, c.format, c.density ?? DEFAULT_LABEL_DENSITY, c.speed ?? DEFAULT_LABEL_SPEED, c.compactCostCode ? 1 : 0, c.fakeLetters ?? "Z"].join("|");
 
 export function runBatches(total: number, unit: number, perBatch: number, testFirst: boolean, verified: boolean): LabelBatch[] {
   if (verified || total <= unit) return labelBatches(total, unit, perBatch, testFirst);
@@ -480,7 +494,7 @@ export function useLabelPrint(cfg: LabelCfg, onConfig?: (config: LabelCfg) => vo
     if (ref.current) return rejectStart("Finish or stop the print already running first");
     // start receives an expanded queue: every entry represents ONE sticker,
     // even when it originated in a purchase job with copies greater than one.
-    const queue = list.map(j => ({ ...j, p: { ...j.p }, copies: 1 }));
+    const queue = list.map((j, index) => ({ ...j, p: { ...j.p }, copies: 1, labelIndex: j.labelIndex ?? index }));
     const selected = configOverride || cfg;
     const config: LabelCfg = { ...selected, output: selected.output === "qz" ? "qz" : direct ? "tspl" : selected.output || "browser", show: { ...selected.show } };
     const verified = okSig === printerSig(config);
@@ -644,7 +658,7 @@ export function PrintSheet({ cfg, jobs }: { cfg: LabelCfg; jobs: Job[] }) {
           {r.map((j, k) => {
             const x = cfg.offX + k * (cfg.w + cfg.gapX), w = Math.min(cfg.w, (cfg.edgeR ?? 1e9) - x);
             return <div key={k} style={{ position: "absolute", left: x + "mm", top: cfg.offY + "mm" }}>
-              <LabelView cfg={w < cfg.w ? { ...cfg, w } : cfg} p={j.p} qtyOnLabel={j.qtyOnLabel} line={j.line} /></div>;
+              <LabelView cfg={w < cfg.w ? { ...cfg, w } : cfg} p={j.p} qtyOnLabel={j.qtyOnLabel} line={j.line} labelIndex={j.labelIndex ?? i * cfg.cols + k} /></div>;
           })}
         </div>))}
     </>);
@@ -658,7 +672,7 @@ export function PrintSheet({ cfg, jobs }: { cfg: LabelCfg; jobs: Job[] }) {
         {pg.map((j, k) => {
           const b = cellBox(cfg, k % cfg.cols, Math.floor(k / cfg.cols));
           return <div key={k} style={{ position: "absolute", left: b.x + "mm", top: b.y + "mm" }}>
-            <LabelView cfg={b.w < cfg.w ? { ...cfg, w: b.w } : cfg} p={j.p} qtyOnLabel={j.qtyOnLabel} line={j.line} /></div>;
+            <LabelView cfg={b.w < cfg.w ? { ...cfg, w: b.w } : cfg} p={j.p} qtyOnLabel={j.qtyOnLabel} line={j.line} labelIndex={j.labelIndex ?? i * per + k} /></div>;
         })}
       </div>))}
   </>);

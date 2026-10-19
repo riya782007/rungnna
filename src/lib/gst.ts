@@ -1,5 +1,6 @@
 import type { Bill, ComplianceRecord, Transport } from "./db";
-import { allocate, type Shop } from "./billing";
+import { allocate } from "./allocate.js";
+import type { Shop } from "./billing";
 export type GstKind = "irn" | "ewb";
 export const ewbRequired = (b: Bill) => b.status === "final" && ["gst", "challan"].includes(b.bill_type) && b.net > 5_000_000;
 export const irnEligible = (b: Bill) => b.status === "final" && b.bill_type === "gst" && !!b.party_gstin;

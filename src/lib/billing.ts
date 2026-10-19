@@ -1,3 +1,5 @@
+import { allocate } from "./allocate";
+import { trackCustomLines, unassignedRack } from "./stock-adjustment";
 import { db, put, uid, now, deviceId, getSetting, setSetting, type Bill, type BillLine, type BillType, type Movement, type Party, type Product, type Config } from "./db";
 import { rupees, billAmount } from "./format";
 import { isOpen, isEstimate } from "./privacy";
@@ -102,15 +104,7 @@ export function fixLine(l: BillLine): BillLine {
   return { ...x, amount: lineAmount(x) };
 }
 /** Split integer paise by weights so the parts always add back to the total. */
-export function allocate(total: number, weights: number[]) {
-  if (!weights.length) return [];
-  const w = weights.some(n => n > 0) ? weights.map(n => Math.max(0, n)) : weights.map(() => 1);   // all free lines: share equally
-  const sum = w.reduce((a, n) => a + n, 0);
-  const out = w.map(n => Math.floor(total * n / sum));
-  let left = total - out.reduce((a, n) => a + n, 0);
-  for (let i = 0; left > 0; i = (i + 1) % out.length, left--) out[i]++;
-  return out;
-}
+export { allocate } from "./allocate";
 /** " 3%" for a single-rate bill; "" (just "GST") when lines carry different rates. */
 export const gstLabel = (b: Bill) => (b.items.some(l => l.tax != null) ? "" : ` ${b.gst_rate}%`);
 export function totals(b: Bill, shopState = "", shopGstin = ""): Bill {
@@ -259,6 +253,7 @@ export async function finalize(b: Bill, shopState: string, customerName = "", af
   if (b.compliance?.irn || b.compliance?.ewb) throw new Error("Registered documents cannot be edited; use a credit note");
   const t = totals(b, shopState, (await getShop()).gstin);
   validatePosLines(t.items);
+  t.items = await trackCustomLines(t.items, t.by_staff);
   const before0 = await db.bills.get(b.id);
   if (before0?.at) await assertUnlocked(before0.at);
   const num = t.no ? { no: t.no, series: t.series } : await nextNo(t.bill_type, t.src_type);
@@ -269,7 +264,7 @@ export async function finalize(b: Bill, shopState: string, customerName = "", af
   const oversold: { product_id: string; item: string; qty: number }[] = [];
   const bucket = new Set((await db.locations.filter(l => l.kind === "bucket").toArray()).map(l => l.id));
   const racks = new Set((await storeLocations()).map(l => l.id));
-  await db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock, db.products], async () => {
+  await db.transaction("rw", [db.bills, db.movements, db.outbox, db.stock, db.products, db.locations], async () => {
     const before = await db.bills.get(bill.id);
     await put("bills", bill);
     if (bill.bill_type !== "return") {
@@ -281,11 +276,12 @@ export async function finalize(b: Bill, shopState: string, customerName = "", af
     for (const l of bill.items) {
       if (!l.product_id || l.qty <= 0 || l.stock_done) continue;
       let left = l.qty;
-      const cells = (await db.stock.where("product_id").equals(l.product_id).toArray())
-        .filter(c => c.qty > 0 && racks.has(c.loc_id) && !bucket.has(c.loc_id)).sort((a, z) => z.qty - a.qty);
+      const recorded = (await db.stock.where("product_id").equals(l.product_id).toArray())
+        .filter(c => racks.has(c.loc_id) && !bucket.has(c.loc_id)).sort((a, z) => z.qty - a.qty);
+      const cells = recorded.filter(c => c.qty > 0);
       const parts: { loc: string | null; q: number }[] = [];
       for (const c of cells) { if (!left) break; const q = Math.min(left, c.qty); parts.push({ loc: c.loc_id, q }); left -= q; }
-      if (left) { parts.push({ loc: null, q: left }); oversold.push({ product_id: l.product_id, item: [l.item, l.style, l.color].filter(Boolean).join(" "), qty: left }); }   // sold more than was recorded: still logged, and flagged on the bill
+      if (left) { parts.push({ loc: recorded[0]?.loc_id || await unassignedRack(), q: left }); oversold.push({ product_id: l.product_id, item: [l.item, l.style, l.color].filter(Boolean).join(" "), qty: left }); }   // sold more than was recorded: still logged, and flagged on the bill
       for (const x of parts) {
         const m: Movement = { id: uid(), product_id: l.product_id, kind: "sale", qty: x.q, from_loc: x.loc, to_loc: null,
           person_type: "customer", person_name: customerName || bill.party_name, by_staff: bill.by_staff, note: bill.no,

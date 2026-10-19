@@ -1,4 +1,5 @@
 import qrcode from "qrcode-generator";
+import { printedCostCode } from "./label-cost-code";
 import type { LabelCfg } from "../pages/Labels";
 import type { Product } from "./db";
 import { ownPayload } from "./parse";
@@ -62,7 +63,7 @@ export function labelArtworkGeometry(cfg: LabelCfg, p: Product, qtyOnLabel: numb
 }
 
 /** One self-contained artwork is used by the screen, browser printing and TSPL raster. */
-export function renderLabelSvg(cfg: LabelCfg, p: Product, qtyOnLabel = 1, line?: number): string {
+export function renderLabelSvg(cfg: LabelCfg, p: Product, qtyOnLabel = 1, line?: number, labelIndex = 0): string {
   const { width, height, pad, pp, qr, font, brand } = labelArtworkGeometry(cfg, p, qtyOnLabel);
   const s = cfg.show, stack = cfg.layout === "stack";
   const qx = stack ? pad : width - pad - brand - qr.sizeDots;
@@ -88,7 +89,7 @@ export function renderLabelSvg(cfg: LabelCfg, p: Product, qtyOnLabel = 1, line?:
   if (stack && quantity) details.push({ text: `${pp.pack} ${p.type || "PCS"}` });
   if (stack && rate) details.push({ text: rate, scale: 1.25, weight: 800 });
   const billLine = (s.line ?? true) && line && Number.isSafeInteger(line) && line > 0 ? line : undefined;
-  if ((s.cost_code && pp.cost_code) || billLine) details.push({ text: s.cost_code && pp.cost_code ? pp.cost_code : "", line: billLine, scale: stack ? 0.95 : 1, weight: stack ? 700 : 500, mono: stack });
+  if ((s.cost_code && pp.cost_code) || billLine) details.push({ text: s.cost_code ? printedCostCode(pp.cost_code, cfg, labelIndex) : "", line: billLine, scale: stack ? 0.95 : 1, weight: stack ? 700 : 500, mono: stack });
   if (s.code && p.code) details.push({ text: p.code, scale: 0.85, mono: stack });
   const bottom = stack ? "" : rate ? `${rate}${quantity ? `X${quantity}` : ""}` : quantity;
   const bottomSize = font * (cfg.rateScale ?? 1.75);

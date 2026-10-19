@@ -87,7 +87,9 @@ async function imageFromSvg(svg: string) {
 
 export async function buildLabelBitmapJob(cfg: LabelCfg, jobs: PurchaseLabelJob[]): Promise<Uint8Array> {
   validateLabelBitmapJob(cfg, jobs);
-  const rows = labelBitmapRows(cfg, jobs), width = dots(labelRowWidth(cfg)), height = dots(cfg.h);
+  let labelIndex = 0;
+  const rows = labelBitmapRows(cfg, jobs).map(row => row.map(job => { const index = labelIndex++; return { ...job, copies: 1, labelIndex: job.labelIndex ?? index }; }));
+  const width = dots(labelRowWidth(cfg)), height = dots(cfg.h);
   const canvas = document.createElement("canvas"); canvas.width = width; canvas.height = height;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) throw new Error("This browser cannot prepare label images. Use browser printing.");
@@ -100,7 +102,7 @@ export async function buildLabelBitmapJob(cfg: LabelCfg, jobs: PurchaseLabelJob[
     let sizes = pictures.get(job);
     if (!sizes) { sizes = new Map(); pictures.set(job, sizes); }
     if (!sizes.has(w)) {
-      const svg = renderLabelSvg({ ...cfg, w }, job.p, job.qtyOnLabel, job.line);
+      const svg = renderLabelSvg({ ...cfg, w }, job.p, job.qtyOnLabel, job.line, job.labelIndex);
       let picture = sameArtwork.get(svg);
       if (!picture) { picture = await imageFromSvg(svg); sameArtwork.set(svg, picture); }
       sizes.set(w, picture);

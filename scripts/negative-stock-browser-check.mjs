@@ -1,0 +1,51 @@
+import { createRequire } from 'node:module';
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { resolve, extname, sep } from 'node:path';
+import { prepareZXingModule, readBarcodes } from 'zxing-wasm/reader';
+const require=createRequire(import.meta.url);
+const bundle=createRequire('C:/Users/Riya yadav/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/x.js');
+const {chromium}=require(process.env.LABEL_PLAYWRIGHT_MODULE || 'C:/Users/Riya yadav/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const sharp=bundle('sharp');
+prepareZXingModule({overrides:{wasmBinary:await readFile('node_modules/zxing-wasm/dist/reader/zxing_reader.wasm')}});
+const browser=await chromium.launch({headless:true,channel:'chrome'});
+const context=await browser.newContext({viewport:{width:1440,height:1000},serviceWorkers:'block'});
+const root=resolve('dist'),base='https://rungnna-negative.test',errors=[];
+const mime={'.html':'text/html','.js':'application/javascript','.css':'text/css','.svg':'image/svg+xml','.wasm':'application/wasm','.woff2':'font/woff2','.json':'application/json','.webmanifest':'application/manifest+json'};
+await context.route('**/*',async route=>{const url=new URL(route.request().url());if(url.origin!==base)return route.abort();const path=resolve(root,'.'+(url.pathname==='/'?'/index.html':decodeURIComponent(url.pathname)));if(!path.startsWith(root+sep))return route.abort();try{await route.fulfill({body:await readFile(path),contentType:mime[extname(path)]||'application/octet-stream'});}catch{await route.fulfill({status:404,body:'Not found'});}});
+const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));
+await page.addInitScript(()=>Object.defineProperty(navigator,'onLine',{get:()=>false}));
+const read=()=>page.evaluate(async()=>{const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('rungnna');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});const result={};for(const name of ['bills','stock','products'])result[name]=await new Promise((resolve,reject)=>{const r=db.transaction(name).objectStore(name).getAll();r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});db.close();return result;});
+const waitFor=async test=>{for(let i=0;i<80;i++){const value=await read();if(test(value))return value;await page.waitForTimeout(100);}throw new Error('Database condition timed out');};
+const original='203~360~1~212~~K5209/11P~W/XZBSPHL';
+try{
+ await page.goto(base+'/#/bill');
+ await page.getByLabel('Common shop entry code',{exact:true}).fill('rungnna 2026');await page.getByRole('button',{name:'Continue',exact:true}).click();
+ await page.getByLabel("Owner's name").fill('Negative stock trial');await page.getByLabel('New 4-digit personal PIN').fill('2468');await page.getByRole('button',{name:'Save PIN & open',exact:true}).click();
+ const scan=page.getByPlaceholder('Scan label, or type style / item (F7)');await scan.waitFor();
+ for(let i=0;i<3;i++){await scan.fill(original);await scan.press('Enter');await page.getByText('Quantity now '+(i+1)+' PAIR',{exact:false}).waitFor();}
+ await page.keyboard.press('F6');
+ let state=await waitFor(x=>x.bills.filter(b=>b.status==='final').length===1&&x.stock.reduce((n,c)=>n+c.qty,0)===-3);
+ const earring=state.products.find(p=>p.item_code==='203');if(!earring)throw new Error('Legacy earring master missing');
+ const entry=page.locator('#pos-item-entry');await entry.getByLabel('Product name',{exact:true}).fill('CUSTOM TRIAL');await entry.getByLabel('HSN',{exact:true}).fill('7117');await entry.getByLabel('Quantity',{exact:true}).fill('2');await entry.getByLabel('Rate ₹ / PCS',{exact:true}).fill('10');await entry.getByRole('button',{name:'Add to bill',exact:true}).click();await page.keyboard.press('F6');
+ state=await waitFor(x=>x.bills.filter(b=>b.status==='final').length===2);
+ const custom=state.products.find(p=>p.item==='CUSTOM TRIAL');if(!custom||state.stock.filter(c=>c.product_id===custom.id).reduce((n,c)=>n+c.qty,0)!==-2)throw new Error('Custom bill did not retain negative stock');
+ await page.goto(base+'/#/product/'+custom.id);await page.getByText('Set exact stock',{exact:true}).waitFor();
+ for(const target of [25,0,-7]){await page.getByLabel('Set total stock to',{exact:true}).fill(String(target));await page.getByLabel('Reason for stock correction',{exact:true}).fill('Browser physical count');await page.getByRole('button',{name:'Set stock quantity',exact:true}).click();await waitFor(x=>x.stock.filter(c=>c.product_id===custom.id).reduce((n,c)=>n+c.qty,0)===target);}
+ await mkdir('dist/print-trials',{recursive:true});await page.screenshot({path:'dist/print-trials/exact-negative-stock.png',fullPage:true});
+ await page.goto(base+'/#/labels');const copy=page.getByPlaceholder('Scan an old label to pre-fill (optional)');await copy.fill(original);await copy.press('Enter');await page.waitForFunction(()=>[...document.querySelectorAll('label')].some(l=>l.textContent.startsWith('ITEM CODE (old software)')&&l.querySelector('input')?.value==='203'));
+ if(await page.getByLabel('ITEM CODE (old software)',{exact:true}).inputValue()!=='203'||await page.getByLabel('REF / roll reference (old software)',{exact:true}).inputValue()!=='212')throw new Error('Original legacy identity/reference lost');
+ const svg=await page.locator('.labelprev .lbl svg').first().evaluate(el=>el.outerHTML);
+ const {data,info}=await sharp(Buffer.from(svg),{density:406}).ensureAlpha().raw().toBuffer({resolveWithObject:true});
+ const decoded=await readBarcodes({data:new Uint8ClampedArray(data),width:info.width,height:info.height},{tryHarder:true,formats:['QRCode']});
+ if(!decoded.some(c=>c.isValid&&c.text===original))throw new Error('Generated QR did not reproduce the photographed legacy bytes');
+ await page.getByText('Printer settings',{exact:true}).click();
+ await page.getByLabel('Fake letter pool',{exact:true}).fill('ZYX');
+ const examples = await page.getByLabel('Cost code examples',{exact:true}).innerText();
+ if(new Set(examples.split(' · ')).size!==3||!examples.split(' · ').every(x=>/^RP-[ZYX]X1PCS$/.test(x)))throw new Error('Fake-letter pool preview failed');
+ await page.waitForFunction(()=>new Promise(resolve=>{const r=indexedDB.open('rungnna');r.onsuccess=()=>{const d=r.result;const q=d.transaction('settings').objectStore('settings').get('label_cfg');q.onsuccess=()=>{resolve(q.result?.value?.fakeLetters==='ZYX');d.close();};};}));
+ await page.screenshot({path:'dist/print-trials/fake-letter-settings.png',fullPage:true});
+ await page.getByLabel('ITEM',{exact:true}).fill('UNKNOWN CATEGORY');await page.getByLabel('ITEM CODE (old software)',{exact:true}).fill('');await page.getByRole('button',{name:'Print barcode',exact:true}).click();await page.getByRole('alert').filter({hasText:'numeric ITEM CODE'}).waitFor();
+ if(errors.length)throw new Error(errors.join('\n'));
+ const result={offlineScannedBillNegative3:true,offlineCustomBillNegative2:true,exactAdjustments:[25,0,-7],legacyCode203:true,legacyReference212:true,generatedQrDecodesToExactOriginal:true,missingLegacyCodeBlocksSilentFallback:true,fakeLetterPoolSaved:true,shuffledExamples:examples,errors};
+ await writeFile('dist/print-trials/negative-stock-result.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+}catch(error){console.log((await page.locator('body').innerText()).slice(-6500));throw error;}finally{await browser.close();}

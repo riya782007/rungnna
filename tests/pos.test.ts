@@ -34,10 +34,10 @@ describe("owner's photographed QR", () => {
 });
 describe("manual POS", () => {
   const input = { item: "BALI", style: "K5209", color: "GOLD", unit: "PAIR", hsn: "7117", qty: "3", rate: "100.50", box: 2 };
-  it("saves a named custom line without fabricated inventory", async () => {
+  it("saves a named custom line and tracks its negative stock before intake", async () => {
     const line = manualLine(input); expect(line).toMatchObject({ item: "BALI", type: "PAIR", qty: 3, rate: 10050, amount: 30150 });
     const bill = await finalize({ ...newBill("o", DEFAULT_SHOP), items: [line] }, "");
-    expect(bill.items[0].hsn).toBe("7117"); expect(await db.movements.count()).toBe(0); expect(await db.products.count()).toBe(0);
+    expect(bill.items[0].hsn).toBe("7117"); expect(await db.movements.count()).toBe(1); expect(await db.products.count()).toBe(1); expect((await db.stock.toArray()).reduce((n,c) => n+c.qty,0)).toBe(-3);
   });
   it("validates names, whole quantities and exact money", () => {
     for (const change of [{ item: " " }, { qty: "-1" }, { qty: "1.5" }, { rate: "-3" }, { rate: "abc" }, { rate: "1.999" }]) expect(() => manualLine({ ...input, ...change })).toThrow();
@@ -128,7 +128,7 @@ describe("overselling", () => {
     expect(done.oversold).toEqual([expect.objectContaining({ product_id: p.id, qty: 3 })]);
     expect((await db.bills.get(done.id))!.oversold?.[0].qty).toBe(3);
     const ok = await finalize({ ...newBill("o", DEFAULT_SHOP), items: [manualLine({ item: "X", style: "", color: "", unit: "PCS", hsn: "", qty: "1", rate: "5", box: 1 })] }, "");
-    expect(ok.oversold).toBeUndefined();
+    expect(ok.oversold?.[0].qty).toBe(1); // custom items now also keep negative stock
   });
 });
 describe("POS calculator", () => {

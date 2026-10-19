@@ -1,3 +1,4 @@
+import { printedCostCode } from "../src/lib/label-cost-code";
 import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DEFAULT_CFG, PRESETS, LabelView, type LabelCfg } from "../src/pages/Labels";
@@ -64,7 +65,7 @@ describe("TSPL never prints a wrong price or quantity", () => {
     try { t = labelTSPL(cfg, pp, 144, 1, ownPayload(pp)); } catch (e: any) { expect(e.message).toMatch(/fit|Too much|QR|room/); return; }
     const joined = [...new Set(words(t))].join("");
     expect(joined).toContain("91246X144PCS");
-    expect(joined).toContain("OAX12PCS".replace("12", "144"));
+    expect(joined).toContain(printedCostCode(pp.cost_code, cfg));
   });
 });
 

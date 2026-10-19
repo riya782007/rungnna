@@ -15,6 +15,9 @@ Reviewed 19 October 2026 against the supplied WhatsApp screenshot and the curren
 | Same entry code, individual access | The common shop entry code opens identity selection. Each person then uses their own four-digit PIN; configured role passcodes are an alternative. The common code grants no owner session. Missing/deleted custom roles grant no fallback rights. | Common-code, PIN, role deletion/regeneration and session-revocation tests. See access instructions below. |
 | Estimate says approval challan | Estimate sheets, thermal documents and shared versions include APPROVAL CHALLAN. Delivery challans and GST invoices retain their own document types. | Owner print tests and long-document browser trial. |
 | Keep barcode roll / reference / line | Sticker stock size, columns, row gaps, legacy barcode format, references, purchase line code and printed quantity remain as configured. Darkness changes do not regenerate the barcode or alter the artwork. | Byte/artwork preservation test and existing sticker suites. |
+| Compact cost code and fake letters | Labels > Printer settings enables compact repeated letters and a configurable A–Z fake-letter pool. RPPX1PCS prints RP-ZX1PCS with pool Z. Each later occurrence of a cost-code letter becomes a dash; one fake letter is selected from a shuffled cycle per physical sticker. Packing suffix and stored product/prices/QR remain intact. | SVG, sheet, direct TSC and QZ bitmap tests cover variation, saved settings and resumed batches. |
+| Billing without intake / exact stock | Scanned and custom articles can be billed or estimated at zero or negative stock. Custom articles become reusable products; shortages post to a normal unassigned rack so movements rebuild to the real negative total. Products > open item > Set exact stock accepts any safe whole number, including zero and negative, with a reason/history entry. | Legacy and Rungnna QR, custom GST/estimate, void, rebuild, rollback, store/quarantine and stale-count tests. Offline browser trial: −3 scanned, −2 custom, then exact 25, 0 and −7. |
+| Legacy QR compatibility | Copied old labels preserve numeric item code, reference, style, colour, quantity and rate. Explicit old-software printing rejects missing identity instead of silently emitting RJ1. | The old photo decoded to 203~360~1~212~~K5209/11P~W/XZBSPHL. A newly rendered sticker decodes to these exact bytes. The new-label photo was too blurred to decode. Acceptance by the actual old application remains a counter check; unknown categories need that application's real master code. |
 | Pieces multiply correctly on repeat scanning | Repeats add exact packet or loose quantity. Different pack sizes/rates/discounts/units/tax/details and processed stock lines stay separate. Scan acceptance captures its box; fast BB and delayed lookups cannot move/erase another scan. | Packet/remainder, mixed-line, stock-deduction and rapid-scan regressions. |
 
 ## Daily operation
@@ -27,6 +30,10 @@ Cloud sync is enabled normally and resumes when internet returns. Settings > Clo
 
 To print a darker label through QZ Tray or direct TSC, open Labels > Printer settings, adjust darkness/speed and accept one check row before a batch. For Browser / Windows printer driver output, set darkness and speed in the actual printer driver's preferences. Check QR readability as well as darkness. Use the saved stock size/roll geometry.
 
+For the new code appearance, open Labels > Printer settings. Compact repeated letters is enabled by default, with fake pool Z. Enter any desired A–Z pool (for example ZYAB); one letter varies across stickers. Empty pool adds no fake letter, and the checkbox restores the original printed code. Letters in the quantity/unit suffix do not change. Changing settings requires a fresh print check; a started batch keeps its captured settings and sticker positions.
+
+For stock correction, open Products, select the item, enter the exact desired total and a reason under Set exact stock. Billing staff can continue selling with a negative count; correcting stock requires the stock-move permission. These corrections queue for normal synchronization.
+
 ## One-counter acceptance before wider rollout
 
 1. Back up the current counter, load the reviewed release online and check the deployed commit.
@@ -37,25 +44,29 @@ To print a darker label through QZ Tray or direct TSC, open Labels > Printer set
 6. Print one label from the actual roll, rescan it with the shop's scanner and inspect first/last column alignment, reference/line and quantity. Increase darkness gradually if needed.
 7. Leave government submission unchecked during routine trials. Test an authorized sandbox path separately if that provider is configured.
 
+## Production follow-up
+
+The initial production smoke found the GST function importing browser billing code at runtime, causing an ESM module-not-found startup error. Allocation math is now isolated in a pure module with a Node-compatible import; a native-Node runtime regression guards this deployment path. The production smoke checks the common-code entry screen, API health, unauthenticated GST response, service-worker control and an actual network-offline reload in a fresh Chrome profile without touching shop records.
+
 ## Verification record and limits
 
 Final checks are recorded below. Large cloud pulls now use ordered timestamp/id pagination: more than 1,000 updates cannot become stranded in the overlap window. Interrupted movement pulls rebuild the local stock cache. GST submission stops if the server cannot read owner security settings. This release passed local verification before publication. Confirm the production release commit and deployed assets when rolling out to counters. No production database migration is needed. Existing purchase-reader / label-print workspace edits were preserved.
 
 Verified on the final source:
 
-- **528 tests passed across 64 files**, with no skips or failures: `node node_modules/vitest/vitest.mjs run --maxWorkers=2 --minWorkers=1 --hookTimeout=120000`. A longer hook timeout accommodates Windows Postgres/WASM initialization; tests still execute normally.
+- **545 tests passed across 68 files**, with no skips or failures: `node node_modules/vitest/vitest.mjs run --maxWorkers=2 --minWorkers=1 --hookTimeout=120000`. A longer hook timeout accommodates Windows Postgres/WASM initialization; tests still execute normally.
 - Frontend TypeScript and API TypeScript checks passed. Production Vite/PWA build passed and precached 72 assets. Existing bundle-size/dynamic-import warnings remain.
 - Production browser scan trial passed: exact packet/remainder totals, rapid reads during delayed lookup, yellow rows, correct boxes, stale-bill rejection, focus and mobile display.
 - Production browser access trial passed: common/personal access, direct-route restrictions, role regeneration/deletion, default online sync and owner pause. Reload required fresh identity while the actual scanned billing draft survived. Label darkness 10 / speed 2 appeared; darkness 12 persisted after reload and reauthentication. Zero JavaScript errors and zero external requests.
 - Standards-mode Chrome print snapshots and extracted PDFs retained all **140 items**, complete settlement and final remarks: A5 five pages, A4 four pages, 80mm one long page and 58mm one long page. One print call per trial; clearing the live bill did not erase its snapshot. First/last pages and thermal sections were rendered and visually inspected for clipping.
 - Regression queries retrieved all 2,501 same-timestamp cloud rows and covered page boundaries, quoted config IDs, retry/overlap and stock rebuilding after interrupted pulls.
 
-Repeatable browser checks: `scripts/billing-scan-browser-check.mjs`, `scripts/access-offline-browser-check.mjs` and `scripts/estimate-print-browser-check.mjs`. They use isolated test data. The first two accept `LABEL_PLAYWRIGHT_MODULE`; the print check accepts `PRINT_PLAYWRIGHT_MODULE` when Playwright is supplied by a bundled runtime.
+Repeatable browser checks: `scripts/billing-scan-browser-check.mjs`, `scripts/access-offline-browser-check.mjs` `scripts/estimate-print-browser-check.mjs` and `scripts/negative-stock-browser-check.mjs`. They use isolated test data. The first two accept `LABEL_PLAYWRIGHT_MODULE`; the print check accepts `PRINT_PLAYWRIGHT_MODULE` when Playwright is supplied by a bundled runtime.
 
 The connected Supabase account does not list the Rungnna project referenced by this repository, so no live production database assertion or change was made. GitHub source status is not proof of a deployed release. No real customer data, paid AI extraction, government submission or physical print job was used for these trials.
 
 Offline roles are enforced by the application on a trusted shop computer. A device with local administrative/browser storage access can tamper with local data. A disconnected device cannot receive role revocations until it reconnects. Local passcodes do not replace the existing trusted server owner authorization.
 
-Hardware print darkness, physical scanner behaviour and installed-PWA cold reload on Karan's actual PC remain counter acceptance checks. The browser trial uses isolated local test data and explicitly reports the limits of virtual-host/offline emulation.
+Hardware print darkness, physical scanner behaviour, old-software acceptance and installed-PWA cold reload on Karan's actual PC remain counter acceptance checks. The browser trial uses isolated local test data and explicitly reports the limits of virtual-host/offline emulation.
 
 A factual update for Karan after deployment and the counter trial: "Karan ji, the requested scan, estimate, bill-format, label and access fixes are in place. Billing saves on the computer without internet and syncs when connection returns. We have checked the software flows; the final receipt, label and offline restart have also been checked on your counter." Use the final sentence only after those physical checks actually pass.

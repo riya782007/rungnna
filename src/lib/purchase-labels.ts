@@ -3,7 +3,7 @@ import { evenRate } from "./pricing";
 
 /* `line` = the line of the supplier's bill these labels are for, printed small on each sticker so whoever is
    labelling knows which goods (which line of the bill) a sticker goes on. */
-export type PurchaseLabelJob = { p: Product; qtyOnLabel: number; copies: number; line?: number };
+export type PurchaseLabelJob = { p: Product; qtyOnLabel: number; copies: number; line?: number; labelIndex?: number };
 export function productForLabel(p: Product, qtyOnLabel: number): Product {
   // every printed label (screen, TSC and the QR inside) carries the even rate
   return { ...p, rate: evenRate(p.rate), pack: qtyOnLabel, cost_code: p.cost_code?.replace(/X\d+[A-Z]+$/i, `X${qtyOnLabel}${p.type || "PCS"}`) };

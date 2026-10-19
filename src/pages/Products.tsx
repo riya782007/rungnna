@@ -15,6 +15,7 @@ import { getTaxonomy, allItems, type Taxonomy } from "../lib/taxonomy";
 import { OnlineListing } from "../components/OnlineListing";
 import { LinkRfid } from "../components/LinkRfid";
 import { tagsOf, soldBill } from "../lib/rfid";
+import { StockAdjustment } from "../components/StockAdjustment";
 
 export default function Products({ args }: { args: string[] }) {
   if (args[0]) return <ProductDetail id={args[0]} />;
@@ -126,6 +127,7 @@ function ProductDetail({ id }: { id: string }) {
             <label className="f">MRP ₹<MoneyInput className="in mono" paise={p.mrp} onPaise={v => set("mrp", v)} /></label>
             <label className="f">Pieces per packet<input className="in mono" inputMode="numeric" value={p.pack || ""} onChange={e => set("pack", parseInt(e.target.value.replace(/\D/g, "")) || undefined)} /></label>
             <label className="f">Item code (old software)<input className="in mono" inputMode="numeric" value={p.item_code || ""} onChange={e => set("item_code", e.target.value.replace(/\D/g, "") || undefined)} /></label>
+            <label className="f">REF / roll reference (old software)<input className="in mono" value={p.ref || ""} onChange={e => set("ref", e.target.value || undefined)} /></label>
             <label className="f">Vendor design code<input className="in mono" value={p.vendor_design_code || ""} onChange={e => set("vendor_design_code", e.target.value.toUpperCase() || undefined)} /></label>
             <label className="f">Collection<input className="in" value={p.collection || ""} onChange={e => set("collection", e.target.value || undefined)} /></label>
             <label className="f">Material<input className="in" value={p.material || ""} onChange={e => set("material", e.target.value || undefined)} /></label>
@@ -143,6 +145,7 @@ function ProductDetail({ id }: { id: string }) {
         </div>
         <div className="stack">
           <OnlineListing p={p} setP={fn => setP(x => (x ? fn(x) : x))} />
+          <StockAdjustment productId={p.id} />
           <div className="card"><header><h3>Where it is</h3></header>
             <div className="pad stack" style={{ gap: 6 }}>
               {stock.filter(c => c.qty).map(c => <div key={c.key} className="row between sm"><span>{locName(locs.find(l => l.id === c.loc_id))}</span><b className="mono">{c.qty}</b></div>)}

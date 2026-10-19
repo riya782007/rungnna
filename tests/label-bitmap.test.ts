@@ -120,6 +120,7 @@ describe("TSPL row bitmap", () => {
     expect(() => labelBitmapRows(cfg, [{ ...job, qtyOnLabel: 0 }])).toThrow("quantities");
   });
   it.each([
+    { name: "shuffled letters", look: { ...cfg, compactCostCode: true, fakeLetters: "ZYX", show: { ...cfg.show, cost_code: true } }, expected: [[0, 0, 264, 120], [284, 0, 264, 120], [568, 0, 264, 120], [0, 0, 264, 120]] },
     { name: "plain roll", look: cfg, expected: [[0, 0, 264, 120], [284, 0, 264, 120], [568, 0, 264, 120], [0, 0, 264, 120]] },
     { name: "calibrated driver stock", look: { ...cfg, gapX: 1.3, offX: 2.5, edgeR: 104, driverPaper: true, cur: "9", font: 6, rateScale: 1.8, pad: 1.4, qr: 8 }, expected: [[20, 0, 264, 120], [294, 0, 264, 120], [569, 0, 263, 120], [20, 0, 264, 120]] },
   ])("rasterizes the same SVG, keeps bill line, prints two rows and clears spare cells: $name", async ({ look, expected }) => {
@@ -140,6 +141,12 @@ describe("TSPL row bitmap", () => {
       expect(clips).toHaveLength(4);
       expect(await svgs[0].text()).toBe(renderLabelSvg(look, p, 6, 7));
       expect(await svgs[0].text()).toContain(">7</text>");
+      if (look.compactCostCode) {
+        expect(svgs).toHaveLength(3);
+        for (let i = 0; i < 3; i++) expect(await svgs[i].text()).toBe(renderLabelSvg(look, p, 6, 7, i));
+        expect(draws[0][0]).not.toBe(draws[1][0]);
+        expect(draws[0][0]).toBe(draws[3][0]);
+      }
     } finally { vi.unstubAllGlobals(); URL.createObjectURL = original.create; URL.revokeObjectURL = original.revoke; }
   });
 });

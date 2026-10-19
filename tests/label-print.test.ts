@@ -3,7 +3,7 @@ import { DEFAULT_CFG, validateLabelPrint, runBatches, printerSig, PrintSheet, up
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { blankProduct } from "../src/lib/products";
-const jobs = [{ p: { ...blankProduct("owner"), item: "BALI" }, qtyOnLabel: 1, copies: 4 }];
+const jobs = [{ p: { ...blankProduct("owner"), item: "BALI", item_code: "5186", style: "K5209/", color: "KXZKLN", ref: "212", type: "PAIR", rate: 10000 }, qtyOnLabel: 1, copies: 4 }];
 it("accepts the shop's default label format", () => { expect(() => validateLabelPrint(DEFAULT_CFG, jobs)).not.toThrow(); });
 it("rejects broken roll dimensions rather than looping or spooling blank paper", () => {
   for (const change of [{ cols: 0 }, { cols: 1.5 }, { w: NaN }, { h: 0 }, { gapY: -1 }]) expect(() => validateLabelPrint({ ...DEFAULT_CFG, ...change }, jobs)).toThrow();

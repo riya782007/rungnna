@@ -137,9 +137,14 @@ export function parseLabel(rawIn: string, patterns: Pattern[] = []): Parsed {
 }
 
 /* What our new labels encode. Short on purpose so the QR stays small and scans fast. */
-export function ownPayload(p: { code: string; item: string; type: string; style: string; color: string; tk: string; rate: number; item_code?: string; pack?: number; ref?: string }, format: "shop" | "rungnna" = "shop") {
+export function ownPayload(p: { code: string; item: string; type: string; style: string; color: string; tk: string; rate: number; item_code?: string; pack?: number; ref?: string }, format?: "shop" | "rungnna") {
+  if (format === "shop") {
+    if (!/^\d+$/.test(p.item_code?.trim() || "")) throw new Error("Old-software QR needs its numeric ITEM CODE. Scan a working old label or select Rungnna-only QR content.");
+    if (!p.style?.trim()) throw new Error("Old-software QR needs a STYLE. Copy it from the original item.");
+    if ([p.item_code, p.style, p.color, p.ref, p.tk].some(v => /[~\u0000-\u001f\u007f]/.test(v || ""))) throw new Error("Old-software label fields cannot contain ~ or control characters");
+  }
   // Same layout as the old software whenever we know the item code, so both systems can read new labels.
-  if (format === "shop" && p.item_code && p.style) {
+  if (format !== "rungnna" && p.item_code && p.style) {
     const c = (v: string) => (v || "").replace(/~/g, "-").trim();
     return [c(p.item_code), p.rate ? String(Math.round(p.rate) / 100) : "0", String(p.pack || 1), c(p.ref || ""), c(p.tk), c(p.style), c(p.color)].join("~");
   }

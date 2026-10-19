@@ -41,7 +41,7 @@ describe("the shop's stickers, printed as the old software prints them", () => {
   const PAGE = { preset: "rjpage", mode: "sheet", sheetW: 101.6, sheetH: 152.4, w: 33, h: 15, cols: 3, rows: 9, gapX: 1.3, gapY: 1.93, left: 3.5, edgeR: 100, qr: 8, font: 5, offX: 0, offY: 0 } as const;
   it("defaults to one row of 3 stickers per print, on the printer's own row-sized stock", () => {
     expect(DEFAULT_CFG).toMatchObject({ preset: "rjrow", mode: "roll", driverPaper: true, w: 33, h: 15, cols: 3, edgeR: 104 });
-    expect(() => validateLabelPrint(DEFAULT_CFG, [{ p: { item: "KADA" } as any, qtyOnLabel: 1, copies: 1 }])).not.toThrow();
+    expect(() => validateLabelPrint(DEFAULT_CFG, [{ p: { item: "KADA", item_code: "204", style: "K1", color: "", tk: "", rate: 0 } as any, qtyOnLabel: 1, copies: 1 }])).not.toThrow();
   });
   it("a row never wastes stickers: batches are whole rows and the test is one row", () => {
     const b = labelBatches(344, DEFAULT_CFG.cols);
@@ -49,7 +49,7 @@ describe("the shop's stickers, printed as the old software prints them", () => {
     expect(b.every(x => x.from % 3 === 0)).toBe(true);
   });
   it("sends no page size, so Chrome can't turn the short, wide row sideways", () => {
-    const html = renderToStaticMarkup(<PrintSheet cfg={DEFAULT_CFG} jobs={[{ p: { item: "EARING", style: "K5210/11P", rate: 32000, type: "PCS" } as any, qtyOnLabel: 1, copies: 1 }]} />);
+    const html = renderToStaticMarkup(<PrintSheet cfg={DEFAULT_CFG} jobs={[{ p: { item: "EARING", item_code: "203", style: "K5210/11P", rate: 32000, type: "PCS" } as any, qtyOnLabel: 1, copies: 1 }]} />);
     expect(html).toContain("@page{margin:0}");
     expect(html).not.toMatch(/@page\{size/);
     expect(html).toContain("9320X1PCS");
@@ -91,13 +91,13 @@ describe("a computer can never waste more than one row before someone checks it"
 import { purchaseLabelJobs } from "../src/lib/purchase-labels";
 describe("each sticker says which line of the bill its goods are on", () => {
   it("purchase labels carry the bill line, printed small on the third line beside the cost code", () => {
-    const mk = (id: string, item: string) => ({ id, code: id, item, style: "S", color: "", type: "PCS", pack: 1, rate: 32000, cost_code: "KX", barcodes: [] } as any);
+    const mk = (id: string, item: string) => ({ id, code: id, item_code: id === "a" ? "203" : "204", item, style: "S", color: "", type: "PCS", pack: 1, rate: 32000, cost_code: "KX", barcodes: [] } as any);
     const purchase = { status: "final", items: [{ product_id: "a", qty: 2, pack: 1 }, { product_id: "b", qty: 3, pack: 1 }] } as any;
     const jobs = purchaseLabelJobs(purchase, [mk("a", "EARING"), mk("b", "KADA")]);
     expect(jobs.map(j => j.line)).toEqual([1, 2]);
     const html = renderToStaticMarkup(<PrintSheet cfg={DEFAULT_CFG} jobs={[jobs[1]]} />);
     expect(html).toMatch(/>KADA<\/text>/);                       // the item line stays whole
-    expect(html).toMatch(/KX<\/text><rect[^>]+\/><text[^>]*>2<\/text>/); // the line number sits after the cost code, on the third line
+    expect(html).toMatch(/KXZ<\/text><rect[^>]+\/><text[^>]*>2<\/text>/); // the line number sits after the cost code, on the third line
     expect(renderToStaticMarkup(<PrintSheet cfg={{ ...DEFAULT_CFG, show: { ...DEFAULT_CFG.show, line: false } }} jobs={[jobs[1]]} />)).not.toMatch(/>2<\/text>/);
   });
 });
