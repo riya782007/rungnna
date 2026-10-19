@@ -28,3 +28,21 @@ export function applyPhotoQuantities(rows: PhotoRow[], quantity: string, packetS
   const pack = packetSize.trim() ? requiredCount(packetSize, "Pieces per packet", 10000) : undefined;
   return rows.map(row => ({ ...row, ...(qty ? { qty } : {}), ...(pack ? { pack, packSource: "manual" as const } : {}) }));
 }
+
+export type RepeatedCountField = "qty" | "pack" | "stickers";
+/** Enter commits this count and carries it only to the next line in the same column. */
+export function repeatPhotoCount(rows: PhotoRow[], index: number, field: RepeatedCountField, input: string): PhotoRow[] {
+  if (!rows[index]) return rows;
+  let value: string;
+  if (field === "stickers") {
+    const raw = input.trim();
+    const n = Number(raw);
+    if (raw && (!/^\d+$/.test(raw) || !Number.isSafeInteger(n) || n < 0 || n > 5000)) throw new Error("Stickers must be a whole number from 0 to 5000, or blank for one per packet");
+    value = raw ? String(n) : "";
+  } else {
+    value = requiredCount(input, field === "qty" ? "Total quantity" : "Pieces per packet", field === "qty" ? 1000000 : 10000);
+  }
+  return rows.map((row, i) => i === index || i === index + 1
+    ? { ...row, [field]: value, ...(field === "pack" ? { packSource: "manual" as const } : {}) }
+    : row);
+}
