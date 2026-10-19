@@ -4,3 +4,5 @@ public/zxing_reader.wasm
 .env.local
 .env*.local
 .vercel
+# Generated long-estimate browser/PDF verification
+tmp/pdfs/estimate-print-check/

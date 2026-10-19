@@ -71,7 +71,8 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
   useEffect(() => { getSetting<Draft | null>("purchase_photo_draft", null).then(old => { if (old?.store === currentStore()) setD(old); setReady(true); }); }, []);
   useEffect(() => { if (ready) setSetting("purchase_photo_draft", d); }, [d, ready]);
   // the same printer settings the Labels page uses, so a sticker printed here is that sticker
-  useEffect(() => { loadLabelCfg().then(setCfg); }, []);
+  const deviceCfg = useLiveQuery(() => loadLabelCfg(), []);
+  useEffect(() => { if (deviceCfg) setCfg(deviceCfg); }, [deviceCfg]);
 
   /* the two "apply" buttons confirm in green that they did something (owner, 18 Oct) */
   const [done, setDone] = useState<{ pricing?: string; pricingSig?: string; terms?: string }>({});
@@ -168,12 +169,17 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
 
   const sendToPrinter = async (queue: Job[], prompt: boolean) => {
     if (!queue.length) return "none";
-    validateLabelPrint(cfg, queue);
-    const direct = cfg.output === "tspl" && directPrintSupported() && cfg.mode === "roll" && cfg.cols === 1;
+    // Printer settings can change while this embedded reader remains mounted.
+    // Always snapshot the latest device setup at the actual print click.
+    const current = await loadLabelCfg();
+    setCfg(current);
+    validateLabelPrint(current, queue);
+    const direct = current.output === "tspl" && directPrintSupported() && current.mode === "roll" && current.cols === 1;
     const list = expandJobs(queue);
-    if (direct) tscCommands(cfg, list.slice(0, 1));     // refuse before anything is sent
-    printer.start(list, direct, prompt);                 // in stoppable batches, either way
-    return direct ? "tsc" : "browser";
+    if (direct) tscCommands(current, list.slice(0, 1));
+    const result = printer.start(list, direct, prompt, current);
+    if (!result.started) throw new Error(result.message);
+    return current.output === "qz" ? "qz" : direct ? "tsc" : "browser";
   };
 
   /* THE one approval: drafts the products, records the purchase, and sends the labels — one press. */
@@ -185,22 +191,25 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       const p = await savePhotoPurchase(d.rows, { by, rack: d.rack, supplierId: d.supplier, billNo: d.billNo, photoId: d.photoId, invoiceTotal: d.total, note: [d.warnings, d.total ? "Supplier invoice total (as printed): " + d.total : ""].filter(Boolean).join("\n") });
       savedPurchase = p;
       setSaved(p);
+      // Financial saving succeeded. Any subsequent print failure is recovered
+      // by printing this saved purchase, never by approving it a second time.
+      set({ rows: [], supplier: d.supplier, billNo: "", total: "", warnings: "", photoId: undefined });
+      setReviewed(false);
       const queue = await jobsFor(p);
       setJobs(queue);
       const how = await sendToPrinter(queue, true);
-      toast(how === "none" ? `Purchase ${p.no} saved · no stickers requested` : how === "tsc" ? `Purchase ${p.no} saved · ${queue.reduce((n, j) => n + j.copies, 0)} labels sent to the TSC printer` : `Purchase ${p.no} saved · opening the label print sheet`);
-      set({ rows: [], supplier: d.supplier, billNo: "", total: "", warnings: "", photoId: undefined });
-      setReviewed(false);
+      toast(how === "none" ? `Purchase ${p.no} saved · no stickers requested` : how === "browser" ? `Purchase ${p.no} saved · opening the label print window` : `Purchase ${p.no} saved · starting label printing`);
     } catch (e: any) {
       // the purchase may already be saved; say so rather than inviting a second save
-      setError(savedPurchase ? `${e.message} · The purchase was saved — reprint from Labels if needed.` : e.message);
+      setError(savedPurchase ? `${e.message}\nPurchase ${savedPurchase.no} is saved. Use “Print saved labels” after fixing the printer setting; do not approve the bill again.` : e.message);
     } finally { lock.current = false; setBusy(false); }
   };
 
   const reprint = async () => {
     if (!jobs.length) return;
-    try { const how = await sendToPrinter(jobs, true); if (how === "tsc") toast("Labels sent to the TSC printer again"); }
-    catch (e: any) { toast((e.message || "Print failed") + " · Check the printer before retrying to avoid duplicate labels.", true); }
+    setError("");
+    try { await sendToPrinter(jobs, true); }
+    catch (e: any) { setError(e.message || "Printing did not start. Check the printer settings."); }
   };
 
 
@@ -262,7 +271,8 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
 
     {saved && !d.rows.length && <div className="note" role="status">
       <b>Purchase {saved.no} saved.</b> {expandJobs(jobs).length} label{expandJobs(jobs).length === 1 ? "" : "s"} prepared.
-      {!!jobs.length && <> <button className="linkbtn" onClick={reprint}>Print again</button></>}
+      {!!jobs.length && <> <button className="btn" disabled={printer.busy} onClick={reprint}>Print saved labels</button></>}
+      {" "}<a className="linkbtn" href={"#/labels/purchase/" + saved.id}>Open saved labels &amp; printer settings</a>
     </div>}
 
     {!!d.rows.length && <>

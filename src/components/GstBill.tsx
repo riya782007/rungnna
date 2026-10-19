@@ -11,6 +11,8 @@ export function GstBill({ b, shop }: { b: Bill; shop: Shop }) {
   const { me } = useApp();
   const [tr, setTr] = useState<Transport>(b.transport || { vehicle_no: "", transporter_id: "", transporter_name: "", distance: 1, mode: "1", from_city: "", from_pin: "", to_address: "", to_city: "", to_pin: "", to_state_code: b.party_gstin.slice(0, 2) });
   const [configured, setConfigured] = useState(false), [sandbox, setSandbox] = useState(true), [busy, setBusy] = useState(false);
+  const [onlineApproved, setOnlineApproved] = useState(false);
+  useEffect(() => { setOnlineApproved(false); }, [b.id]);
   useEffect(() => { if (can(me, "gst.register")) gstRequest().then(j => { setConfigured(j.configured); setSandbox(j.sandbox); }).catch(() => {}); }, [me?.role]);
   useEffect(() => { if (!b.transport && b.party_id) db.parties.get(b.party_id).then(p => { if (p) setTr(t => ({ ...t, to_address: p.address, to_city: p.city, to_pin: p.pin })); }); }, [b.party_id]);
   if (b.status !== "final" || !["gst", "challan"].includes(b.bill_type)) return null;
@@ -31,6 +33,9 @@ export function GstBill({ b, shop }: { b: Bill; shop: Shop }) {
   const field = (key: keyof Transport, label: string) => <label className="f">{label}<input className="in" value={String(tr[key] || "")} onChange={e => setTr({ ...tr, [key]: key === "distance" ? Number(e.target.value) : key === "vehicle_no" ? e.target.value.toUpperCase().replace(/\s/g, "") : e.target.value })} /></label>;
   return <section className="stack gst-panel">
     <h3>Government documents {ewbRequired(b) && <span className="pill warn">E-way bill required</span>}</h3>
+    <div className="note sm">Saving and printing a GST bill works offline. Download JSON prepares a local file. Online government submission is a separate action.</div>
+    {can(me, "gst.register") && <label className="row sm"><input type="checkbox" checked={onlineApproved} disabled={busy} onChange={e => setOnlineApproved(e.target.checked)} /> Allow online government submission for this bill</label>}
+    {!onlineApproved && <div className="xs mut">To submit, the owner must enable cloud sync in Settings and tick this box. Saving a bill never submits it automatically.</div>}
     <div className="grid g2">{field("from_city", "Dispatch city")}{field("from_pin", "Dispatch PIN")}{field("to_address", "Delivery address")}{field("to_city", "Delivery city")}{field("to_pin", "Delivery PIN")}{field("to_state_code", "GST state code")}{field("vehicle_no", "Vehicle number")}{field("distance", "Distance (km)")}{field("transporter_name", "Transporter")}{field("transporter_id", "Transporter ID")}
       <label className="f">Transport mode<select className="in" value={tr.mode} onChange={e => setTr({ ...tr, mode: e.target.value as Transport["mode"] })}><option value="1">Road</option><option value="2">Rail</option><option value="3">Air</option><option value="4">Ship</option></select></label>
       {field("doc_no", "Transport document")}{field("doc_date", "Transport document date (YYYY-MM-DD)")}</div>
@@ -41,8 +46,8 @@ export function GstBill({ b, shop }: { b: Bill; shop: Shop }) {
         {record && <div className="note sm">{record.sandbox ? "SANDBOX · " : ""}{record.id}{record.cancelled_at ? " · Cancelled" : ""}</div>}
         {errors.length > 0 && <div className="note warn sm">{errors.join(" · ")}</div>}
         <div className="row"><button className="btn" disabled={busy || !!errors.length} onClick={() => run(async () => { await save(); downloadGst(draft, shop, kind); })}><Icon n="download" size={16} />Download JSON</button>
-          {configured && can(me, "gst.register") && !record && <button className="btn p" disabled={busy || !!errors.length} onClick={() => run(async () => { await save(); await submitGst(draft, kind, "generate"); toast("Acknowledgement saved"); })}>{sandbox ? "Submit to sandbox" : "Generate"}</button>}
-          {configured && can(me, "gst.register") && canCancel(record) && <button className="btn bad" disabled={busy} onClick={() => { const reason = prompt("Cancellation reason"); if (reason) run(() => submitGst(b, kind, "cancel", reason)); }}>Cancel within 24 hours</button>}</div>
+          {configured && can(me, "gst.register") && !record && <button className="btn p" disabled={busy || !!errors.length || !onlineApproved} onClick={() => run(async () => { await save(); await submitGst(draft, kind, "generate", undefined, onlineApproved); setOnlineApproved(false); toast("Acknowledgement saved"); })}>{sandbox ? "Submit to sandbox" : "Generate"}</button>}
+          {configured && can(me, "gst.register") && canCancel(record) && <button className="btn bad" disabled={busy || !onlineApproved} onClick={() => { const reason = prompt("Cancellation reason"); if (reason) run(async () => { await submitGst(b, kind, "cancel", reason, onlineApproved); setOnlineApproved(false); }); }}>Cancel within 24 hours</button>}</div>
       </div>;
     })}
   </section>;

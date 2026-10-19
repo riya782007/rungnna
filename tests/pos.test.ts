@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { db } from "../src/lib/db";
 import { resolveBillingScan } from "../src/lib/billing-products";
 import { DEFAULT_SHOP, newBill, lineFrom, finalize, totals, duplicateNumbers } from "../src/lib/billing";
-import { manualLine, moneyInput, validatePosLines } from "../src/lib/pos";
+import { appendPosLine, manualLine, moneyInput, validatePosLines } from "../src/lib/pos";
 import { calculate } from "../src/lib/calculator";
 import { mergeBoxLine } from "../src/lib/billingBox";
 import { MAIN_STORE, setScope } from "../src/lib/scope";
@@ -58,6 +58,53 @@ describe("manual POS", () => {
     expect(await db.bills.count()).toBe(0); expect(await db.outbox.count()).toBe(0);
     expect((await db.settings.toArray()).filter(s => s.key.startsWith("seq_"))).toHaveLength(0);
     const saved = await finalize(b, ""); expect(saved.no).toMatch(/0001$/);
+  });
+});
+
+describe("scanner quantities and line integrity", () => {
+  it("multiplies each packet scan exactly and preserves the separate remainder sticker and legacy reference", async () => {
+    const fullRaw = "5186~100~12~212~~K5209/~KXZKLN";
+    const looseRaw = "5186~100~1~212~~K5209/~KXZKLN";
+    let items: ReturnType<typeof lineFrom>[] = [];
+    for (const raw of [fullRaw, fullRaw, looseRaw, fullRaw]) {
+      const p = (await resolveBillingScan(raw, "o"))!;
+      const next = appendPosLine(items, lineFrom(p));
+      expect(next.added).toBe(raw === fullRaw ? 12 : 1);
+      expect(next.line.qty).toBe(raw === looseRaw ? 1 : (items.find(l => l.pack === 12)?.qty || 0) + 12);
+      items = next.items;
+    }
+    expect(items).toHaveLength(2);
+    expect(items.map(l => [l.pack, l.pkts, l.qty, l.amount])).toEqual([[12, 3, 36, 360000], [1, 0, 1, 10000]]);
+    const stored = (await db.products.toArray())[0];
+    expect(stored.ref).toBe("212");
+    expect(stored.barcodes).toEqual(expect.arrayContaining([fullRaw, looseRaw]));
+  });
+  it("adds a packet to an existing loose quantity without losing pieces or overwriting its name", async () => {
+    const p = (await resolveBillingScan("5186~100~12~212~~K5209/~KXZKLN", "o"))!;
+    const loose = { ...lineFrom(p), item: "Customer-specific BALI", pkts: 0, qty: 5, amount: 50000 };
+    const next = appendPosLine([loose], lineFrom(p));
+    expect(next.items).toHaveLength(1);
+    expect(next.line).toMatchObject({ id: loose.id, item: loose.item, pkts: 0, qty: 17, amount: 170000 });
+    expect(next.added).toBe(12);
+  });
+  it("keeps different boxes, discounts, packet sizes, rates and source histories separate", async () => {
+    const p = (await resolveBillingScan(photographedQr, "o"))!;
+    const line = lineFrom(p);
+    for (const patch of [{ box_no: 2 }, { pack: 12, pkts: 1, qty: 12 }, { rate: 12000 }, { disc: "10%" }, { stock_done: 1 as const }, { src_line: "source" }]) {
+      const existing = { ...line, ...patch };
+      const next = appendPosLine([existing], lineFrom(p));
+      expect(next.items).toHaveLength(2);
+      expect(next.items[0]).toBe(existing);
+      expect(next.line.stock_done).toBeUndefined();
+    }
+  });
+  it("deducts newly scanned pieces even beside an already dispatched line", async () => {
+    const p = (await resolveBillingScan(photographedQr, "o"))!;
+    const dispatched = { ...lineFrom(p), qty: 10, amount: 100000, stock_done: 1 as const };
+    const addition = appendPosLine([dispatched], lineFrom(p, 1, 3));
+    const saved = await finalize({ ...newBill("o", DEFAULT_SHOP), items: addition.items }, "");
+    expect(saved.total_qty).toBe(13);
+    expect((await db.movements.toArray()).map(m => m.qty)).toEqual([3]);
   });
 });
 describe("invoice numbers", () => {

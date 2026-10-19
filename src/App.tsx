@@ -69,7 +69,7 @@ function useSync() {
   const [online, setOnline] = useState(navigator.onLine);
   useEffect(() => onSync(setS) as any, []);
   useEffect(() => { const a = () => setOnline(true), b = () => setOnline(false); addEventListener("online", a); addEventListener("offline", b); return () => { removeEventListener("online", a); removeEventListener("offline", b); }; }, []);
-  const txt = !online ? "Offline — saving on this device" : s?.status === "syncing" ? "Syncing…" : s?.status === "error" ? "Sync problem" : s?.user ? "All saved" : "Not connected";
+  const txt = s?.cloudEnabled === false ? "Cloud sync paused — saved on this device" : !online ? "Offline — saving on this device" : s?.status === "syncing" ? "Syncing…" : s?.status === "error" ? "Sync problem" : s?.pending ? "Changes waiting to sync" : s?.user ? "All saved" : "Not connected";
   const cls = !online || !s?.user ? "warn" : s?.status === "error" ? "bad" : "";
   return { txt, cls, pending: s?.pending || 0 };
 }
@@ -120,7 +120,7 @@ function Shell() {
   if (!ready) return null;
   if (!me) return <WhoAreYou />;
 
-  const ok = (r: string) => !ROUTE_PERM[r] || can(me, ROUTE_PERM[r]);
+  const ok = (r: string) => r === "settings" || !ROUTE_PERM[r] || can(me, ROUTE_PERM[r]);
   const visible = SECTIONS.filter(s => s.tabs ? s.tabs.some(([k]) => ok(k)) : ok(s.key));
   const cur = SECTIONS.find(s => s.key === sec)!;
   const hrefOf = (s: Sec) => "#/" + (s.tabs ? (ok(lastTab[s.key]) && lastTab[s.key]) || s.tabs.find(([k]) => ok(k))?.[0] || s.tabs[0][0] : s.key);
@@ -179,7 +179,7 @@ function Shell() {
           <Status />
           <button className="me" onClick={() => setMe(null)} title="Switch person">
             <span className="av">{me.name.slice(0, 1).toUpperCase()}</span>
-            <span className="grow"><b className="sm">{me.name}</b><small>{roleName(me)} · tap to switch</small></span><Icon n="lock" size={16} />
+            <span className="grow"><b className="sm">{me.name}</b><small>{roleName(me)} · tap to lock / switch</small></span><Icon n="lock" size={16} />
           </button>
         </div>
       </aside>
@@ -244,7 +244,7 @@ function UpdateBar() {
 }
 
 function NoAccess() {
-  return <div className="card empty"><b>Not available for your role</b>Ask the owner to change your role in Settings → Staff.</div>;
+  return <div className="card empty"><b>Not available for your role</b>Ask the owner to open Settings → People → Roles &amp; permissions and grant this screen.</div>;
 }
 
 export default function App() {

@@ -25,6 +25,11 @@ export async function printDocument(source: Document, frame: () => Promise<void>
   const remove = () => host.remove();
   try {
     const doc = host.contentDocument!, win = host.contentWindow!;
+    // An empty iframe defaults to quirks mode. Match the app's standards mode
+    // before measuring receipts so table widths and page height stay consistent.
+    doc.open();
+    doc.write("<!doctype html><html><head></head><body></body></html>");
+    doc.close();
     doc.title = "";
     const base = doc.createElement("base"); base.href = source.baseURI; doc.head.appendChild(base);
     const styles = Array.from(source.querySelectorAll("style,link[rel=stylesheet]"))

@@ -8,8 +8,9 @@ import type { Pattern } from "../lib/parse";
 import { when } from "../lib/format";
 import { getShop, saveShop, counterCode, DEFAULT_SHOP, type Shop } from "../lib/billing";
 import { health, type Health } from "../lib/ai";
-import { can, ROLE_NOTE, roleName, isRoleLogin, roleForPasscode, type CustomRole } from "../lib/roles";
+import { can, ROLE_NOTE, roleName, isRoleLogin } from "../lib/roles";
 import { RoleSelect } from "./Roles";
+import { entryWait, recordEntryAttempt, personForPin, staffForRolePasscode } from "../lib/entryAuth";
 import { codeMatches, getOpenCode, setOpenCode, DEFAULT_OPEN_CODE } from "../lib/openCode";
 import { getPrivate, setCode, lockNow, usePrivate } from "../lib/privacy";
 import { DeleteEstimates } from "../components/DeleteEstimates";
@@ -21,6 +22,7 @@ import { closeFinancialYear, lockedUpto, setVoucherLock } from "../lib/finance";
 import { SecuritySettings } from "../components/OwnerSecurity";
 import { gstRequest } from "../lib/compliance";
 import { RECEIPT_CUTS, receiptCut, receiptCutSetup, type ReceiptCut } from "../lib/printing";
+import { CloudSyncControl } from "../components/CloudSyncControl";
 
 export default function Settings() {
   const { me, setMe } = useApp();
@@ -44,8 +46,8 @@ export default function Settings() {
               <button className="btn sm" onClick={() => setMe(null)}>Switch person</button></div>
             {me && isRoleLogin(me) && <div className="xs mut">Signed in with this role's passcode. The owner changes it on Roles &amp; Permissions.</div>}
             {me && !isRoleLogin(me) && <button className="btn sm" onClick={async () => {
-              const p = prompt(me.pin ? "New 4-digit PIN (leave empty to remove)" : "Set a 4-digit PIN so nobody else can use your name") ?? null;
-              if (p === null) return; if (p && !/^\d{4}$/.test(p)) return toast("PIN must be 4 digits", true);
+              const p = prompt(me.pin ? "New 4-digit personal PIN" : "Set a 4-digit PIN so nobody else can use your name") ?? null;
+              if (p === null) return; if (!/^\d{4}$/.test(p)) return toast("PIN must be 4 digits", true);
               const u = { ...me, pin: p }; await put("staff", u); setMe(u); toast(p ? "PIN saved" : "PIN removed");
             }}>{me.pin ? "Change my PIN" : "Set my PIN"}</button>}
             {me?.role === "owner" && !me.pin && <div className="note warn sm">Set a PIN — it's needed to approve big discounts and to keep your owner access safe.</div>}
@@ -53,17 +55,18 @@ export default function Settings() {
 
           {boss && <div className="card"><header><h3>Shop passcode</h3></header>
             <div className="pad stack">
-              <div className="sm mut">The phrase that opens this app on any counter. It keeps a passer-by out of the till; what a person may actually do is still decided by their role.</div>
+              <div className="sm mut">The common entry code opens the sign-in screen on every counter. Each person then uses their own PIN or role passcode; the entry code does not grant owner access.</div>
               <OpenCodeSetting />
             </div></div>}
 
           <div className="card"><header><h3>Cloud backup</h3><span className="grow" />
-            <span className={"pill " + (!sync?.user ? "warn" : sync?.status === "idle" ? "ok" : sync?.status === "error" ? "bad" : "warn")}>{!sync?.user ? "not connected" : sync?.status === "idle" ? "all saved" : sync?.status}</span></header>
+            <span className={"pill " + (!sync?.cloudEnabled || !sync?.user ? "warn" : sync?.status === "idle" && !sync.pending ? "ok" : sync?.status === "error" ? "bad" : "warn")}>{!sync?.cloudEnabled ? "offline mode" : !sync?.user ? "not connected" : sync?.status === "idle" && !sync.pending ? "all saved" : sync?.status}</span></header>
             <div className="pad stack">
+              <CloudSyncControl />
               <div className="sm mut">{sync?.pending || 0} changes waiting{sync?.last ? ` · last saved ${when(sync.last)}` : ""}</div>
               {sync?.error && <div className="note bad">{sync.error}</div>}
               <StuckChanges />
-              {sync?.user ? <div className="row"><span className="sm grow">Connected as <b>{sync.user}</b></span><button className="btn sm" onClick={() => syncNow()}>Sync now</button>{admin && <button className="btn sm" onClick={signOut}>Disconnect</button>}</div>
+              {sync?.user ? <div className="row"><span className="sm grow">Connected as <b>{sync.user}</b></span><button className="btn sm" disabled={!sync.cloudEnabled} onClick={() => syncNow()}>Sync now</button>{admin && <button className="btn sm" onClick={signOut}>Disconnect</button>}</div>
                 : <ShopLogin />}
             </div></div>
 
@@ -75,6 +78,11 @@ export default function Settings() {
                     <div className="xs mut">{roleName(s)}{s.role_id ? "" : " · " + ROLE_NOTE[s.role]}{s.pin ? " · PIN set" : ""}{!s.active ? " · disabled" : ""}</div></span>
                   <RoleSelect value={s} allowOwner={me?.role === "owner"} disabled={s.id === me?.id || (s.role === "owner" && me?.role !== "owner")}
                     onChange={async v => { await put("staff", { ...s, ...v }); toast("Role changed"); }} />
+                  {(s.role !== "owner" || me?.role === "owner") && <button className="btn sm" onClick={async () => {
+                    const value = prompt(`New 4-digit PIN for ${s.name}`); if (value === null) return;
+                    if (!/^\d{4}$/.test(value)) return toast("PIN must be 4 digits", true);
+                    const changed = { ...s, pin: value }; await put("staff", changed); if (s.id === me?.id) setMe(changed); toast("Personal PIN saved");
+                  }}>Set PIN</button>}
                   <button className="btn sm" onClick={async () => { const n = prompt("Name", s.name); if (n) await put("staff", { ...s, name: n }); }}>Rename</button>
                   {s.id !== me?.id && <button className="btn sm" onClick={async () => { await put("staff", { ...s, active: s.active ? 0 : 1 }); }}>{s.active ? "Disable" : "Enable"}</button>}
                 </div>))}
@@ -83,14 +91,14 @@ export default function Settings() {
               <div className="grid g3">
                 <input className="in" placeholder="Name" value={nm} onChange={e => setNm(e.target.value)} />
                 <RoleSelect value={{ role, role_id: roleId }} allowOwner={me?.role === "owner"} onChange={v => { setRole(v.role); setRoleId(v.role_id || ""); }} />
-                <input className="in mono" placeholder="PIN (optional)" inputMode="numeric" maxLength={4} value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, ""))} />
+                <input className="in mono" placeholder="4-digit personal PIN" inputMode="numeric" maxLength={4} value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, ""))} />
               </div>
-              <button className="btn" onClick={async () => { if (!nm.trim()) return; await put("staff", { ...newStaff(nm.trim(), role, pin), role_id: roleId }); setNm(""); setPin(""); toast("Added"); }}>Add person</button>
+              <button className="btn" onClick={async () => { if (!nm.trim()) return; if (!/^\d{4}$/.test(pin)) return toast("Set a 4-digit personal PIN", true); await put("staff", { ...newStaff(nm.trim(), role, pin), role_id: roleId }); setNm(""); setPin(""); toast("Added"); }}>Add person</button>
             </div></div>}
         </div>
         <div className="stack">
           {boss && <PrivateCard />}
-          <PrintingSettings />
+          {admin && <PrintingSettings />}
           {boss && <><SecuritySettings /><GstSettings /><a className="btn" href="#/bank">Bank reconciliation</a><a className="btn" href="#/stores">Store setup &amp; transfers</a></>}
           {!boss && <a className="btn" href="#/stores">Stock transfers</a>}
           {can(me, "lock") && <OperationsCard by={me?.id || ""} />}
@@ -223,93 +231,87 @@ export function ShopLogin({ onDone }: { onDone?: () => void }) {
   );
 }
 
-/* Shown when nobody is selected on this device. */
+/* Every counter shares the entrance code; identity and permissions remain personal. */
 export function WhoAreYou() {
   const { setMe } = useApp();
   const staff = useLiveQuery(() => db.staff.filter(s => !s.deleted && !!s.active).toArray(), [], []);
   const persons = staff.filter(s => !isRoleLogin(s));
+  const [unlocked, setUnlocked] = useState(false);
   const [code, setCode] = useState("");
-  const [saved, setSaved] = useState<string | null>(null);
-  const [bad, setBad] = useState(false);
-  const [people, setPeople] = useState(false);      // the full person + PIN flow, on request
+  const [bad, setBad] = useState("");
   const [pick, setPick] = useState<Staff | null>(null);
   const [pin, setPin] = useState("");
   const [owner, setOwner] = useState("");
-  useEffect(() => { getOpenCode().then(setSaved); }, []);
-  const needsName = persons.length === 1 && persons[0].name === "Owner";
-
-  /* A wrong guess costs a little more each time after a few, so a role passcode can't be found by
-     trying codes at the counter. Kept on the device, so reloading the page doesn't reset it. */
+  const [newPin, setNewPin] = useState("");
+  const [busy, setBusy] = useState(false);
   const [wait, setWait] = useState(0);
-  useEffect(() => { getSetting<{ n: number; until: number }>("open_fails", { n: 0, until: 0 }).then(f => setWait(Math.max(0, f.until - Date.now()))); }, []);
-  useEffect(() => { if (wait <= 0) return; const t = setTimeout(() => setWait(w => Math.max(0, w - 1000)), 1000); return () => clearTimeout(t); }, [wait]);
+  const needsName = persons.length === 1 && persons[0].name === "Owner" && persons[0].role === "owner" && !persons[0].pin;
+  const stage = unlocked ? "identity" : "shop";
+  useEffect(() => { entryWait(stage).then(setWait); }, [stage]);
+  useEffect(() => { if (wait <= 0) return; const timer = setTimeout(() => setWait(w => Math.max(0, w - 1000)), 1000); return () => clearTimeout(timer); }, [wait]);
 
-  const open = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (wait > 0) return;
-    // the shop passcode: straight in as the owner; a person can still be chosen below
-    if (codeMatches(code, saved)) {
-      await setSetting("open_fails", { n: 0, until: 0 });
-      const who = staff.find(s => s.role === "owner" && !isRoleLogin(s)) || staff.find(s => !isRoleLogin(s));
-      if (who) setMe(who);
-      return;
-    }
-    // a role's passcode (Roles & Permissions): in as that role, seeing only what it allows
-    const rolesRow = await db.config.get("roles");
-    const role = roleForPasscode(code, ((rolesRow?.value as any)?.roles as CustomRole[]) || []);
-    const row = role?.login_id ? await db.staff.get(role.login_id) : undefined;
-    if (role && row && row.active && !row.deleted && isRoleLogin(row) && row.role !== "owner") {
-      await setSetting("open_fails", { n: 0, until: 0 });
-      setMe(row);
-      return;
-    }
-    const f = await getSetting<{ n: number; until: number }>("open_fails", { n: 0, until: 0 });
-    const n = f.n + 1, pause = n >= 5 ? Math.min(300_000, 15_000 * 2 ** (n - 5)) : 0;
-    await setSetting("open_fails", { n, until: Date.now() + pause });
-    setWait(pause); setBad(true); setCode("");
+  const attempt = async (action: () => Promise<boolean>) => {
+    if (busy) return;
+    setBusy(true); setBad("");
+    try {
+      const remaining = await entryWait(stage); if (remaining > 0) { setWait(remaining); return; }
+      if (await action()) { await recordEntryAttempt(true, stage); setCode(""); setPin(""); }
+      else { setWait(await recordEntryAttempt(false, stage)); setBad(unlocked ? "Passcode or PIN not recognised. Ask the owner to check your access." : "Entry code not recognised. Ask the owner."); setCode(""); setPin(""); }
+    } catch (e: any) { setBad(e.message || "Could not open. Try again."); }
+    finally { setBusy(false); }
+  };
+  const open = (e: React.FormEvent) => {
+    e.preventDefault();
+    void attempt(async () => {
+      if (!unlocked) { if (!codeMatches(code, await getOpenCode())) return false; setUnlocked(true); return true; }
+      const person = pick ? await personForPin(pick.id, pin) : await staffForRolePasscode(code);
+      if (!person) return false;
+      setMe(person); return true;
+    });
+  };
+  const setupOwner = async (person: Staff, name = person.name) => {
+    if (busy || !/^\d{4}$/.test(newPin) || !name.trim()) return;
+    setBusy(true);
+    try {
+      const current = await db.staff.get(person.id);
+      if (!current || current.pin || !current.active || current.deleted || current.role !== "owner") throw new Error("Owner setup changed. Lock and sign in again.");
+      const saved = { ...current, name: name.trim(), pin: newPin }; await put("staff", saved); setMe(saved);
+    } catch (e: any) { setBad(e.message); } finally { setBusy(false); }
   };
 
-  return (
-    <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 16 }}>
-      <div className="card" style={{ maxWidth: 440, width: "100%" }}>
-        <header style={{ background: "linear-gradient(140deg,var(--emerald-dk),var(--emerald))", color: "#fff", borderRadius: "14px 14px 0 0" }}>
-          <span className="mark">R</span><div><b style={{ font: "700 26px/1 var(--display)", color: "var(--gold-l)" }}>Rungnna</b><div className="xs" style={{ opacity: .7 }}>Jewellery &amp; Co · Shop OS</div></div></header>
-        <div className="pad stack">
-          {needsName ? (
-            <div className="stack">
-              <div className="b sm">Welcome — who owns this shop?</div>
-              <label className="f">Owner's name<input className="in" autoFocus value={owner} onChange={e => setOwner(e.target.value)} placeholder="e.g. Karan" /></label>
-              <button className="btn p" disabled={!owner.trim()} onClick={async () => { const s = { ...persons[0], name: owner.trim() }; await put("staff", s); setMe(s); }}>Start</button>
-            </div>
-          ) : pick ? (
-            <div className="stack">
-              <div className="sm">Enter PIN for <b>{pick.name}</b></div>
-              <input className="in mono" autoFocus inputMode="numeric" maxLength={4} value={pin} onChange={e => { const v = e.target.value.replace(/\D/g, ""); setPin(v); if (v.length === 4) { if (v === pick.pin) setMe(pick); else { toast("Wrong PIN", true); setPin(""); } } }} />
-              <button className="btn" onClick={() => { setPick(null); setPin(""); }}>Back</button>
-            </div>
-          ) : people ? (
-            <div className="stack" style={{ gap: 6 }}>
-              <div className="b sm">Who is using this device?</div>
-              {persons.map(s => <button key={s.id} className="item" onClick={() => s.pin ? setPick(s) : setMe(s)}><span className="thumb" style={{ width: 36, height: 36 }}>{s.name.slice(0, 1)}</span><span className="grow b">{s.name}</span><span className="xs mut">{s.role}</span></button>)}
-              <button className="linkbtn" onClick={() => setPeople(false)}>Back</button>
-            </div>
-          ) : (
-            <form className="stack" onSubmit={open}>
-              <label className="f">Shop or role passcode
-                <input className="in" autoFocus type="password" autoComplete="current-password"
-                  placeholder="Type your passcode" value={code}
-                  onChange={e => { setCode(e.target.value); setBad(false); }} /></label>
-              {bad && <div className="note warn" role="alert">That is not the shop passcode or a role passcode. Ask the owner.</div>}
-              {wait > 0 && <div className="note bad sm" role="status">Too many wrong passcodes — try again in {Math.ceil(wait / 1000)}s.</div>}
-              <button className="btn p" disabled={!code.trim() || wait > 0}>Open</button>
-              <button type="button" className="linkbtn" onClick={() => setPeople(true)}>Use a different person</button>
-              <div className="xs mut">Backing up to the cloud is set up once in Settings — the shop works fully without it.</div>
-            </form>
-          )}
-        </div>
+  return <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 16 }}>
+    <div className="card" style={{ maxWidth: 440, width: "100%" }}>
+      <header style={{ background: "linear-gradient(140deg,var(--emerald-dk),var(--emerald))", color: "#fff", borderRadius: "14px 14px 0 0" }}>
+        <span className="mark">R</span><div><b style={{ font: "700 26px/1 var(--display)", color: "var(--gold-l)" }}>Rungnna</b><div className="xs" style={{ opacity: .7 }}>Jewellery &amp; Co · Shop OS</div></div></header>
+      <div className="pad stack">
+        {unlocked && (needsName || (pick?.role === "owner" && !pick.pin)) ? <form className="stack" onSubmit={e => { e.preventDefault(); void setupOwner(needsName ? persons[0] : pick!, needsName ? owner : pick!.name); }}>
+          <div className="b sm">Set up the owner's personal PIN</div>
+          <div className="xs mut">One-time setup for an owner who has no PIN yet. Keep this PIN private; staff use their own access.</div>
+          {needsName && <label className="f">Owner's name<input className="in" autoFocus value={owner} onChange={e => setOwner(e.target.value)} placeholder="e.g. Karan" /></label>}
+          <label className="f">New 4-digit personal PIN<input className="in mono" type="password" inputMode="numeric" maxLength={4} autoComplete="new-password" value={newPin} onChange={e => setNewPin(e.target.value.replace(/\D/g, ""))} /></label>
+          <button className="btn p" disabled={busy || !/^\d{4}$/.test(newPin) || (needsName && !owner.trim())}>Save PIN &amp; open</button>
+        </form> : <form className="stack" onSubmit={open}>
+          <label className="f">{!unlocked ? "Common shop entry code" : pick ? `Personal PIN for ${pick.name}` : "Your role passcode"}
+            <input className="in" autoFocus key={stage + (pick?.id || "")} type="password" autoComplete="current-password" inputMode={pick ? "numeric" : "text"} maxLength={pick ? 4 : undefined}
+              placeholder={!unlocked ? "Same entry code for everyone" : pick ? "Your 4-digit PIN" : "Type your own role passcode"} value={pick ? pin : code}
+              onChange={e => { pick ? setPin(e.target.value.replace(/\D/g, "")) : setCode(e.target.value); setBad(""); }} /></label>
+          <button className="btn p" disabled={busy || wait > 0 || (pick ? pin.length !== 4 : !code.trim())}>{busy ? "Checking…" : unlocked ? "Sign in" : "Continue"}</button>
+          {unlocked && <>
+            <div className="sm">Or choose your name and use your personal PIN.</div>
+            {persons.map(s => <button key={s.id} type="button" className="item" onClick={() => {
+              if (!s.pin && s.role !== "owner") { setBad("Your PIN is not set. Ask the owner: Settings → People → Set PIN."); return; }
+              setPick(s); setPin(""); setCode(""); setBad("");
+            }}><span className="thumb" style={{ width: 36, height: 36 }}>{s.name.slice(0, 1)}</span><span className="grow b">{s.name}</span><span className="xs mut">{roleName(s)}</span></button>)}
+            {pick && <button type="button" className="linkbtn" onClick={() => { setPick(null); setPin(""); }}>Use a role passcode</button>}
+          </>}
+        </form>}
+        {bad && <div className="note warn" role="alert">{bad}</div>}
+        {wait > 0 && <div className="note bad sm" role="status">Too many wrong attempts — try again in {Math.ceil(wait / 1000)}s.</div>}
+        {unlocked && <button type="button" className="linkbtn" onClick={() => { setUnlocked(false); setPick(null); setPin(""); setCode(""); setBad(""); }}>Lock shop</button>}
+        <div className="xs mut">Works offline after this counter has loaded the app and received its staff and stock. Role and PIN changes reach other counters when sync is allowed and connected.</div>
       </div>
     </div>
-  );
+  </div>;
 }
 
 /* The phrase that opens the app on a counter (lib/openCode). */
@@ -319,11 +321,11 @@ function OpenCodeSetting() {
   useEffect(() => { getOpenCode().then(setCode); }, []);
   return (
     <div className="stack">
-      <label className="f">Passcode
+      <label className="f">Common entry code
         <input className="in" type={show ? "text" : "password"} value={code} onChange={e => setCode(e.target.value)} placeholder={DEFAULT_OPEN_CODE} /></label>
       <div className="row">
         <button className="btn" onClick={() => setShow(!show)}>{show ? "Hide" : "Show"}</button>
-        <button className="btn p" onClick={async () => { const saved = await setOpenCode(code); setCode(saved); toast("Passcode saved — it opens every counter after the next sync"); }}>Save passcode</button>
+        <button className="btn p" onClick={async () => { const saved = await setOpenCode(code); setCode(saved); toast("Entry code saved — other counters receive it when cloud sync is allowed"); }}>Save passcode</button>
         <span className="grow" />
         <button className="btn sm" onClick={async () => { const saved = await setOpenCode(DEFAULT_OPEN_CODE); setCode(saved); toast("Back to " + DEFAULT_OPEN_CODE); }}>Reset</button>
       </div>

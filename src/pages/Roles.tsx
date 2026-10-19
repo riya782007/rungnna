@@ -61,7 +61,7 @@ export default function Roles() {
     } catch (e: any) { toast(e.message, true); }
   };
   const regenerate = async (r: CustomRole) => {
-    if (!confirm(`Make a new passcode for “${r.name}”?\n\nThe old one stops working at once, and anyone signed in with it is signed out on their next sync.`)) return;
+    if (!confirm(`Make a new passcode for “${r.name}”?\n\nThe old one stops working on this counter at once. Other counters sign out when they next receive the change through an allowed sync.`)) return;
     try { const saved = await saveRoles(regenerated(roles, r.id)); toast(`New passcode for “${r.name}”: ${saved.find(x => x.id === r.id)?.passcode}`); }
     catch (e: any) { toast(e.message, true); }
   };
@@ -78,10 +78,12 @@ export default function Roles() {
 
   return <div className="roles-page">
     <Head eyebrow="Control" title="Roles & Permissions"
-      sub="Discord-style granular control. Grant exactly what a role can do — e.g. a packer who can move stock but never cancel a bill." />
+      sub="Settings → People → Roles & permissions. Grant only the screens and actions each person needs." />
     <div className="note ok sm roles-banner">
-      Each role has its own <b>passcode</b> (below). Share it with that staff member — they type it on the opening screen, in the same box as the shop passcode, and see only their permitted sections. The shop passcode always opens everything as the owner.
+      First enter the <b>common shop entry code</b>. Then each person uses their <b>personal PIN</b> (Settings → People → Set PIN) or a <b>role passcode</b> below. The common code never grants owner access. A role passcode is shared by everyone using that role; create one role per person when each needs a separate code.
     </div>
+
+    <div className="note sm">Create a role, tick its permissions and save. Reveal or copy its passcode below, then lock / switch person to try it. To change a named person’s access, assign the role in Settings → People. Changes work immediately on this counter; offline counters receive them only when cloud sync is allowed and connected.</div>
 
     <div className="card" ref={createRef}>
       <header><h3>Create a role</h3></header>

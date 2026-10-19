@@ -39,11 +39,11 @@ describe("estimate carries 'sale not executed' (R-204)", () => {
     for (const f of ["a4", "a5"]) expect(sheet(bill("estimate", "EST/1"), f)).toContain("inv-wm");
   });
 
-  it("the thermal roll gets the band but not the diagonal watermark — it would eat the paper", () => {
+  it("the thermal roll carries the bilingual band and a compact ESTIMATE watermark", () => {
     for (const f of ["80mm", "58mm"]) {
       const html = sheet(bill("estimate", "EST/1"), f);
       expect(html).toContain("SALE NOT EXECUTED");
-      expect(html).not.toContain("inv-wm");
+      expect(html).toMatch(/class="inv-wm"[^>]*><span>ESTIMATE<\/span>/);
     }
   });
 

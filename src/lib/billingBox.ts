@@ -11,8 +11,12 @@ export function selectedBox(b: BillingDraft): number {
 export function mergeBoxLine(items: BillLine[], id: string): BillLine[] {
   const source = items.find(l => l.id === id);
   if (!source?.product_id) return items;
+  const norm = (value?: string) => (value || "").trim().toUpperCase();
   const target = items.find(l => l.id !== id && l.product_id === source.product_id && l.box_no === source.box_no
     && l.pack === source.pack && l.rate === source.rate && l.disc === source.disc
+    && norm(l.type) === norm(source.type) && norm(l.hsn) === norm(source.hsn)
+    && (l.gst_rate ?? null) === (source.gst_rate ?? null)
+    && norm(l.style) === norm(source.style) && norm(l.color) === norm(source.color)
     && l.stock_done === source.stock_done && l.src_line === source.src_line);
   if (!target) return items;
   const qty = fixLine(target).qty + fixLine(source).qty;

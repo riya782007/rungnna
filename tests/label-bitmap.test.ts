@@ -89,7 +89,7 @@ describe("TSPL row bitmap", () => {
     const bitmap = new Uint8Array(104 * 120).fill(255); bitmap[0] = 0;
     const bytes = encodeLabelBitmapRow(cfg, bitmap), text = new TextDecoder("latin1").decode(bytes);
     expect(text).toContain("SIZE 104 mm,15 mm\r\nGAP 2.6 mm,0 mm\r\n");
-    expect(text).toContain("REFERENCE 0,0\r\nSHIFT 0\r\nOFFSET 0 mm\r\nDIRECTION 1\r\nCLS\r\nBITMAP 0,0,104,120,0,");
+    expect(text).toContain("REFERENCE 0,0\r\nSHIFT 0\r\nOFFSET 0 mm\r\nDIRECTION 1\r\nDENSITY 10\r\nSPEED 2\r\nCLS\r\nBITMAP 0,0,104,120,0,");
     expect(text.endsWith("\r\nPRINT 1,1\r\n")).toBe(true);
     const binaryStart = text.indexOf("BITMAP 0,0,104,120,0,") + "BITMAP 0,0,104,120,0,".length;
     expect(bytes[binaryStart]).toBe(0); expect(bytes[binaryStart + bitmap.length - 1]).toBe(255);

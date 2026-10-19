@@ -1,5 +1,5 @@
-import { expect, it } from "vitest";
-import { DEFAULT_CFG, validateLabelPrint, runBatches, printerSig, PrintSheet } from "../src/pages/Labels";
+import { expect, it, vi } from "vitest";
+import { DEFAULT_CFG, validateLabelPrint, runBatches, printerSig, PrintSheet, upgradeLabelCfg, useLabelPrint, type LabelCfg } from "../src/pages/Labels";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { blankProduct } from "../src/lib/products";
@@ -31,4 +31,44 @@ it("checks sheet fit, product names and the total batch before printing", () => 
   expect(() => validateLabelPrint({ ...DEFAULT_CFG, mode: "sheet", cols: 20, rows: 20 }, jobs)).toThrow("fit");
   expect(() => validateLabelPrint(DEFAULT_CFG, [{ ...jobs[0], copies: 5001 }])).toThrow("5000");
   expect(() => validateLabelPrint(DEFAULT_CFG, [{ ...jobs[0], p: { ...jobs[0].p, item: "" } }])).toThrow("names");
+});
+
+it("migrates legacy USB settings that no longer match the three-across roll", () => {
+  const old = { ...DEFAULT_CFG, output: "tspl" as const, preset: "rj", w: 50, h: 20, cols: 1 };
+  expect(upgradeLabelCfg(old)).toMatchObject({ preset: "rjrow", cols: 3, output: "browser" });
+  expect(upgradeLabelCfg({ ...DEFAULT_CFG, output: "tspl" })).toMatchObject({ cols: 3, output: "browser" });
+  expect(upgradeLabelCfg({ ...DEFAULT_CFG, output: "tspl", preset: "custom", cols: 1 })).toMatchObject({ cols: 1, output: "tspl" });
+});
+
+// Rendering the hook on the server exposes its preflight entry point without
+// creating a browser, spooler, or actual print job. Rejected starts never set run.
+function captureStart(config: LabelCfg) {
+  let start!: ReturnType<typeof useLabelPrint>["start"];
+  function Capture() { start = useLabelPrint(config).start; return null; }
+  renderToStaticMarkup(createElement(Capture));
+  return start;
+}
+
+it("reports missing QZ setup to the caller instead of claiming print started", () => {
+  const result = captureStart({ ...DEFAULT_CFG, output: "qz", gapY: 2.6 })(jobs);
+  expect(result).toEqual({ started: false, message: "Choose the TSC label printer in Printer settings first." });
+});
+
+it("uses the latest printer override for preflight, including a newly chosen QZ output", () => {
+  const result = captureStart(DEFAULT_CFG)(jobs, false, true, { ...DEFAULT_CFG, output: "qz", gapY: 2.6 });
+  expect(result).toEqual({ started: false, message: "Choose the TSC label printer in Printer settings first." });
+});
+
+it("returns an explicit cancellation using the override's browser transport", () => {
+  const confirm = vi.fn(() => false); vi.stubGlobal("confirm", confirm);
+  try {
+    const result = captureStart({ ...DEFAULT_CFG, output: "qz" })(jobs, false, true, DEFAULT_CFG);
+    expect(result).toMatchObject({ started: false, cancelled: true });
+    expect(confirm).toHaveBeenCalledOnce();
+  } finally { vi.unstubAllGlobals(); }
+});
+
+it("reports invalid queue or incompatible direct output as a failed start", () => {
+  expect(captureStart(DEFAULT_CFG)([])).toMatchObject({ started: false, message: expect.stringContaining("quantities") });
+  expect(captureStart(DEFAULT_CFG)(jobs, true)).toMatchObject({ started: false, message: expect.stringContaining("QZ Tray") });
 });

@@ -3,7 +3,7 @@ import { selectedBox, mergeBoxLine, type BillingDraft } from "../lib/billingBox"
 import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Calculator, Plus } from "lucide-react";
-import { repeatedPosLine, validatePosLines } from "../lib/pos";
+import { appendPosLine, repeatedPosLine, validatePosLines } from "../lib/pos";
 import type { CalcTarget } from "../components/PosTools";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, type Bill, type BillLine, type Party, type Payment, type Product } from "../lib/db";
@@ -41,6 +41,7 @@ export default function Billing({ args }: { args: string[] }) {
   const savingRef = useRef(false);
   const [shop, setShop] = useState<Shop>(DEFAULT_SHOP);
   const [b, setB] = useState<Bill | null>(null);
+  const billRef = useRef(b); billRef.current = b;
   const [box, setBox] = useState(1);
   const boxRef = useRef(box); boxRef.current = box;
   const boxCountRef = useRef(0);
@@ -149,26 +150,21 @@ export default function Billing({ args }: { args: string[] }) {
   const unlinked = useRef(new Recent());
   useEffect(() => { tagsRef.current = new TagSet(b?.rfid_tags || []); }, [b?.id]);
 
-  function addProduct(p: Product, pkts = 1, pieces = 0, rate = 0) {
-    if (savingRef.current) return;
-    const repeated = b?.items.some(l => l.product_id === p.id && l.box_no === boxRef.current);
+  function addProduct(p: Product, pkts = 1, pieces = 0, rate = 0, destination = { billId: billRef.current?.id, box: boxRef.current }) {
+    if (savingRef.current || destination.billId !== billRef.current?.id) return false;
+    const repeated = billRef.current?.items.some(l => l.product_id === p.id && l.box_no === destination.box);
     beep(repeated ? "repeat" : true);
     setB(x => {
-      if (!x) return x;
-      let line = lineFrom(p, boxRef.current, pkts, x.price_level || "wholesale");
+      if (!x || x.id !== destination.billId) return x;
+      let line = lineFrom(p, destination.box, pkts, x.price_level || "wholesale");
       if (pieces) line = fixLine({ ...line, pkts: 0, qty: pieces });
       if (rate) line = fixLine({ ...line, rate: toPaise(rate) });
-      // Full packets and remainder stickers must keep their own quantities/rates.
-      const same = x.items.find(l => l.product_id === p.id && l.box_no === boxRef.current && l.pack === line.pack && l.rate === line.rate);
-      if (same && !pieces && !rate) {
-        const named = p.item ? { item: p.item, type: p.type } : {}; // a scan that just learned the name updates the line too
-        const changed = fixLine(same.pack > 1 && same.pkts > 0 ? { ...same, ...named, pkts: same.pkts + pkts } : { ...same, ...named, qty: same.qty + pkts * Math.max(1, same.pack) });
-        pendingScan.current = { id: same.id, added: changed.qty - same.qty, repeated: true };
-        return { ...x, items: x.items.map(l => l.id === same.id ? changed : l) };
-      }
-      pendingScan.current = { id: line.id, added: line.qty, repeated: x.items.some(l => l.product_id === p.id && l.box_no === boxRef.current) };
-      return { ...x, items: [...x.items, line] };
+      // Keep remainder packets, discounts and pieces already dispatched on another document distinct.
+      const addition = appendPosLine(x.items, line);
+      pendingScan.current = { id: addition.line.id, added: addition.added, repeated: addition.repeated };
+      return { ...x, items: addition.items };
     });
+    return true;
   }
 
   /* Hardware scanner gun works anywhere on the bill screen — even if the focus
@@ -192,6 +188,8 @@ export default function Billing({ args }: { args: string[] }) {
   async function onCode(raw: string): Promise<string> {
     const r = raw.trim(); if (!r) return "";
     if (savingRef.current) return "Saving bill";
+    // Capture before lookup: a fast BB scan must not move this item to the next box.
+    const destination = { billId: billRef.current?.id, box: boxRef.current };
     setScanFeedback(null);
     if (r.toLowerCase() === "bb") {
       const next = ++boxCountRef.current; boxRef.current = next; setBox(next); set({ box_count: next }); setQ("");
@@ -203,28 +201,30 @@ export default function Billing({ args }: { args: string[] }) {
       return "";
     }
     if (isRfidTag(r)) {
-      const tag = normTag(r); setQ("");
-      if (!tagsRef.current.add(tag)) { beep("repeat"); toast("Tag already on this bill — no extra quantity added"); return "Tag already on this bill"; }
+      const tag = normTag(r), scanTags = tagsRef.current; setQ("");
+      if (!scanTags.add(tag)) { beep("repeat"); toast("Tag already on this bill — no extra quantity added"); return "Tag already on this bill"; }
       const tp = await findByScan(tag);
       if (!tp) {
-        tagsRef.current.delete(tag);
+        scanTags.delete(tag);
         if (unlinked.current.first(tag)) { beep(false); toast("RFID tag not linked to a product — link it in Products", true); }
         return "Not found";
       }
       const sold = soldBill(tp, tag);
       if (sold) toast(`This tag was already sold on ${sold} — check the piece`, true);
       const fp = await fillFromItemCode(tp);
-      addProduct(fp);
-      setB(x => x && { ...x, rfid_tags: [...(x.rfid_tags || []), tag] });
+      if (!addProduct(fp, 1, 0, 0, destination)) { scanTags.delete(tag); beep(false); toast("Bill changed or saving — scan this label again", true); return "Bill changed or saving — scan again"; }
+      setB(x => x && x.id === destination.billId ? { ...x, rfid_tags: [...(x.rfid_tags || []), tag] } : x);
       return "Added · " + label(fp);
     }
+    // Release the scanner input immediately; earlier lookups must never erase a later burst.
+    setQ("");
     let p = await resolve(r);
     if (!p) {
       const hits = products.filter(x => (x.style + " " + x.code + " " + x.item).toUpperCase().includes(r.toUpperCase()));
       if (hits.length === 1) p = await fillFromItemCode(hits[0]);
     }
     if (!p) { beep(false); toast("Not found — scan the label or record it in Scan & record", true); return "Not found"; }
-    addProduct(p); setQ("");
+    if (!addProduct(p, 1, 0, 0, destination)) { beep(false); toast("Bill changed or saving — scan this label again", true); return "Bill changed or saving — scan again"; }
     return "Added · " + label(p);
   }
   const onCodeRef = useRef(onCode); onCodeRef.current = onCode;
@@ -353,11 +353,9 @@ export default function Billing({ args }: { args: string[] }) {
       beep(repeated ? "repeat" : true);
       setB(x => {
         if (!x) return x;
-        const items = mergeBoxLine([...x.items, line], line.id);
-        const id = items.some(l => l.id === line.id) ? line.id
-          : items.find(l => l.qty !== x.items.find(old => old.id === l.id)?.qty)?.id || line.id;
-        pendingScan.current = { id, added: line.qty, repeated: repeatedPosLine(x.items, line) };
-        return { ...x, items };
+        const addition = appendPosLine(x.items, line);
+        pendingScan.current = { id: addition.line.id, added: addition.added, repeated: addition.repeated };
+        return { ...x, items: addition.items };
       });
     }} onCustom={line => {
       if (savingRef.current) throw new Error("Wait for the bill to finish saving");
@@ -432,7 +430,7 @@ export default function Billing({ args }: { args: string[] }) {
               <thead><tr><th>#</th><th>Box</th><th>Item · Style · Colour</th><th className="r">Pkt</th><th className="r">Qty</th><th className="r">Rate ₹</th><th className="r">Disc</th><th className="r">Amount</th><th /></tr></thead>
               <tbody>
                 {t.items.map((l, i) => (
-                  <tr key={l.id} className="ln" ref={row => { if (row) rowRefs.current.set(l.id, row); else rowRefs.current.delete(l.id); }}>
+                  <tr key={l.id} className={"ln" + (lastScanId === l.id ? " scanned" : "") + (flashId === l.id ? " flash" : "")} aria-current={lastScanId === l.id ? "true" : undefined} ref={row => { if (row) rowRefs.current.set(l.id, row); else rowRefs.current.delete(l.id); }}>
                     <td className="mut" data-l="#">{i + 1}</td>
                     <td data-l="Box"><input className="cell" style={{ width: 38 }} inputMode="numeric" value={l.box_no} onChange={e => setLine(l.id, { box_no: Math.max(1, parseInt(e.target.value) || 1) })}
                       onBlur={() => setB(x => x ? { ...x, items: mergeBoxLine(x.items, l.id) } : x)} /></td>

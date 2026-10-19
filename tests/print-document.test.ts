@@ -7,6 +7,7 @@ function fixture() {
   const body: any[] = [], head: any[] = [];
   const clone: any = { textContent: content.textContent, style: {}, querySelector: () => null };
   const doc: any = {
+    open: vi.fn(), write: vi.fn(), close: vi.fn(),
     head: { appendChild: (el: any) => head.push(el) }, body: { appendChild: (el: any) => body.push(el) },
     fonts: { ready: Promise.resolve() }, querySelectorAll: () => [],
     getElementById: () => clone, importNode: () => clone,
@@ -15,11 +16,14 @@ function fixture() {
   const win = { focus: vi.fn(), print: vi.fn(), addEventListener: (event: string, fn: () => void) => listeners.set(event, fn) };
   const host = { style: {}, contentDocument: doc, contentWindow: win, remove: vi.fn() };
   const source: any = { getElementById: () => content, createElement: () => host, body: { appendChild: vi.fn() }, querySelectorAll: () => [], baseURI: "https://shop.example/" };
-  return { source, host, win, content, clone, body, head, listeners };
+  return { source, host, win, content, clone, body, head, listeners, doc };
 }
 it("copies only printable content into a separate document and keeps it until afterprint", async () => {
   const x = fixture(), done = vi.fn();
   await printDocument(x.source, async () => {}, done);
+  expect(x.doc.open).toHaveBeenCalledOnce();
+  expect(x.doc.write).toHaveBeenCalledWith("<!doctype html><html><head></head><body></body></html>");
+  expect(x.doc.close).toHaveBeenCalledOnce();
   x.content.textContent = "";
   expect(x.body).toEqual([x.clone]); expect(x.clone.textContent).toBe("BALI receipt");
   expect(x.clone.style.cssText).toContain("display:block!important");

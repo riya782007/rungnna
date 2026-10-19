@@ -5,18 +5,22 @@ import { assertUnlocked } from "./finance";
 import { requirePerm } from "./scope";
 import { gstUpload, type GstKind } from "./gst";
 import type { Shop } from "./billing";
+import { assertCloudSyncEnabled } from "./cloudMode";
 export async function gstRequest(body?: unknown) {
+  await assertCloudSyncEnabled();
   const c = await sb(); const token = (await c?.auth.getSession())?.data.session?.access_token;
   if (!token) throw new Error("Connect the owner account in Settings");
   const r = await fetch("/api/gst", { method: body ? "POST" : "GET", headers: { "content-type": "application/json", authorization: "Bearer " + token }, ...(body ? { body: JSON.stringify(body) } : {}) });
   const j = await r.json(); if (!r.ok) throw new Error(j.error || "Government service unavailable"); return j;
 }
-export async function submitGst(b: Bill, kind: GstKind, action: "generate" | "cancel", reason?: string) {
+export async function submitGst(b: Bill, kind: GstKind, action: "generate" | "cancel", reason?: string, onlineApproved = false) {
   requirePerm("gst.register", "e-invoice / e-way bill"); await assertStoreRow(b); await assertUnlocked(b.at);
+  if (!onlineApproved) throw new Error("Tick the separate online submission box for this bill first");
+  await assertCloudSyncEnabled();
   if (!navigator.onLine) throw new Error("Internet is required for government submission");
   await syncNow();
   if (await db.outbox.filter(x => x.table === "bills" && x.row_id === b.id).count()) throw new Error("Invoice sync is pending; try again when saved to cloud");
-  const j = await gstRequest({ bill_id: b.id, kind, action, reason });
+  const j = await gstRequest({ bill_id: b.id, kind, action, reason, online_approved: true });
   await db.transaction("rw", [db.bills, db.outbox], async () => {
     const fresh = await db.bills.get(b.id); if (!fresh) throw new Error("Invoice no longer exists");
     await put("bills", { ...fresh, compliance: j.compliance });

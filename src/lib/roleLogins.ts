@@ -61,7 +61,10 @@ export async function saveRoles(next: CustomRole[]): Promise<CustomRole[]> {
   const roles = withPasscodes(next);
   const codes = roles.map(r => normPass(r.passcode || ""));
   if (new Set(codes).size !== codes.length) throw new Error("Two roles ended up with the same passcode — regenerate one of them");
-  await put("config", { id: "roles", value: { roles }, updated_at: now() } as Config);
-  await syncRoleLogins(roles);
+  // A failed staff write must not leave a saved code pointing at a missing login.
+  await db.transaction("rw", [db.config, db.staff, db.outbox], async () => {
+    await put("config", { id: "roles", value: { roles }, updated_at: now() } as Config);
+    await syncRoleLogins(roles);
+  });
   return roles;
 }

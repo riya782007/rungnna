@@ -1,5 +1,5 @@
 import { db, put, uid, now, deviceId, getSetting, setSetting, type Bill, type BillLine, type BillType, type Movement, type Party, type Product, type Config } from "./db";
-import { rupees } from "./format";
+import { rupees, billAmount } from "./format";
 import { isOpen, isEstimate } from "./privacy";
 import { setTagsSold } from "./rfid";
 import { assertUnlocked } from "./finance";
@@ -372,13 +372,21 @@ export async function partyDue(party_id: string) {
 export const normPhone = (p: string) => { const d = (p || "").replace(/\D/g, ""); return d.length === 10 ? "91" + d : d; };
 export function billText(b: Bill, shop: Shop) {
   const L = [`*${shop.name}*`, `${docName(b)} ${b.no}${b.return_of_no ? " (against " + b.return_of_no + ")" : ""}`, new Date(b.at).toLocaleString("en-IN"), ""];
-  b.items.forEach((l, i) => L.push(`${i + 1}. ${[l.item, l.style, l.color].filter(Boolean).join(" ")} — ${l.pkts ? l.pkts + "×" + l.pack + "=" : ""}${l.qty} × ${rupees(l.rate)} = ${rupees(l.amount)}`));
+  if (b.bill_type === "estimate") L.push("APPROVAL CHALLAN · SALE NOT EXECUTED · बिक्री निष्पादित नहीं", "");
+  b.items.forEach((l, i) => L.push(`${i + 1}. ${[l.item, l.style, l.color].filter(Boolean).join(" ")} — ${l.pkts ? l.pkts + "×" + l.pack + "=" : ""}${l.qty} × ${billAmount(l.rate)} = ${billAmount(l.amount)}`));
   L.push("", `Pieces: ${b.total_qty} · Boxes: ${b.box_count}`);
-  if (b.discount) L.push(`Discount: -${rupees(b.discount)}`);
-  if (b.packing) L.push(`Packing: ${rupees(b.packing)}`);
-  if (b.gst) L.push(`GST${gstLabel(b)}: ${rupees(b.gst)}`);
-  L.push(b.bill_type === "return" ? `*Credit: ${rupees(b.net)}*` : b.bill_type === "challan" ? `*Value: ${rupees(b.net)}* (no payment due on a challan)` : `*Total: ${rupees(b.net)}*`);
-  const d = isSale(b) ? due(b) : 0; if (d > 0) L.push(`Balance due: ${rupees(d)}`);
+  L.push(`Gross: ${billAmount(b.gross)}`);
+  if (b.discount) L.push(`Discount: -${billAmount(b.discount)}`);
+  if (b.packing) L.push(`Packing: ${billAmount(b.packing)}`);
+  if (b.gst) L.push(`GST${gstLabel(b)}: ${billAmount(b.gst)}`);
+  if (b.adjust) L.push(`Round off: ${billAmount(b.adjust)}`);
+  L.push(b.bill_type === "return" ? `*Credit: ${billAmount(b.net)}*` : b.bill_type === "challan" ? `*Value: ${billAmount(b.net)}* (no payment due on a challan)` : `*Total: ${billAmount(b.net)}*`);
+  if (b.advance) L.push(`Advance: -${billAmount(b.advance)}`);
+  if (b.paid) L.push(`Paid: -${billAmount(b.paid)}`);
+  const d = isSale(b) ? due(b) : 0; if (d > 0) L.push(`Balance due: ${billAmount(d)}`);
+  if (isSale(b) && d < 0) L.push(`Excess received: ${billAmount(-d)}`);
+  if (isSale(b) && b.prev_due) L.push(`Previous balance: ${billAmount(b.prev_due)}`, `Total due: ${billAmount(b.prev_due + d)}`);
+  if (b.remarks) L.push(`Remarks: ${b.remarks}`);
   if (shop.upi && d > 0) L.push(`Pay by UPI: upi://pay?pa=${encodeURIComponent(shop.upi)}&pn=${encodeURIComponent(shop.name)}&am=${(d / 100).toFixed(2)}&cu=INR`);
   L.push("", "Thank you! 🙏");
   return L.join("\n");
@@ -390,44 +398,86 @@ export function waLink(phone: string, text: string) {
 
 /* A clean receipt picture drawn on a canvas — shares straight into WhatsApp as an image, no server needed. */
 export async function billImage(b: Bill, shop: Shop): Promise<Blob> {
-  const W = 720, pad = 32, lh = 30;
-  const rows = b.items.length;
-  const H = 360 + rows * lh * 1.6 + 260;
-  const c = document.createElement("canvas"); c.width = W; c.height = H;
+  const W = 720, pad = 32, right = W - pad;
+  const c = document.createElement("canvas"); c.width = W;
   const g = c.getContext("2d")!;
-  g.fillStyle = "#FAF6EF"; g.fillRect(0, 0, W, H);
-  g.fillStyle = "#241B2E"; g.fillRect(0, 0, W, 120);
-  g.fillStyle = "#E2C887"; g.font = "700 30px Georgia"; g.fillText(shop.name, pad, 52);
-  g.fillStyle = "#EFEAF2"; g.font = "16px sans-serif"; g.fillText([shop.tagline, shop.phone].filter(Boolean).join(" · "), pad, 82);
-  if (shop.gstin && b.bill_type === "gst") g.fillText("GSTIN " + shop.gstin, pad, 104);
-  let y = 160;
-  g.fillStyle = "#241B2E"; g.font = "700 22px sans-serif";
-  g.fillText(docName(b).toUpperCase() + " " + b.no, pad, y);
-  g.font = "16px sans-serif"; g.fillStyle = "#6B6175";
-  g.fillText(new Date(b.at).toLocaleString("en-IN"), pad, y += 26);
-  if (b.party_name) g.fillText("To: " + b.party_name + (b.party_phone ? " · " + b.party_phone : ""), pad, y += 24);
-  y += 20; g.strokeStyle = "#E7DBC6"; g.beginPath(); g.moveTo(pad, y); g.lineTo(W - pad, y); g.stroke(); y += 10;
-  for (const l of b.items) {
-    y += lh;
-    g.fillStyle = "#241B2E"; g.font = "600 18px sans-serif";
-    g.fillText([l.item, l.style].filter(Boolean).join(" · ").slice(0, 40), pad, y);
-    g.textAlign = "right"; g.fillText(rupees(l.amount), W - pad, y); g.textAlign = "left";
-    g.fillStyle = "#6B6175"; g.font = "15px sans-serif";
-    g.fillText(`${l.color || ""}  ${l.pkts ? l.pkts + " pkt × " + l.pack + " = " : ""}${l.qty} pcs × ${rupees(l.rate)}  · Box ${l.box_no}`, pad, y += lh * 0.6);
-  }
-  y += 24; g.beginPath(); g.moveTo(pad, y); g.lineTo(W - pad, y); g.stroke();
-  const row = (k: string, v: string, bold = false) => {
-    y += 30; g.font = (bold ? "700 22px " : "17px ") + "sans-serif"; g.fillStyle = "#241B2E";
-    g.fillText(k, pad, y); g.textAlign = "right"; g.fillText(v, W - pad, y); g.textAlign = "left";
+  // Lay out first, then size the canvas from the actual footer. Long item names and
+  // all settlement rows must survive sharing just as they do on the printed bill.
+  const draw: (() => void)[] = [];
+  const text = (value: string, x: number, y: number, font = "17px sans-serif", color = "#241B2E", align: CanvasTextAlign = "left") => {
+    draw.push(() => { g.font = font; g.fillStyle = color; g.textAlign = align; g.fillText(value, x, y); });
   };
-  row(`Pieces ${b.total_qty} · Boxes ${b.box_count}`, rupees(b.gross));
-  if (b.discount) row("Discount", "-" + rupees(b.discount));
-  if (b.packing) row("Packing", rupees(b.packing));
-  if (b.gst) row(`GST${gstLabel(b)}`, rupees(b.gst));
-  row(b.bill_type === "return" ? "CREDIT" : b.bill_type === "challan" ? "VALUE" : "TOTAL", rupees(b.net), true);
-  const d = isSale(b) ? due(b) : 0; if (d > 0) row("Balance due", rupees(d), true);
-  g.fillStyle = "#A07E2E"; g.font = "italic 16px Georgia"; g.fillText("Thank you for shopping with us", pad, y += 44);
-  return await new Promise<Blob>(r => c.toBlob(x => r(x!), "image/png"));
+  const rule = (at: number) => draw.push(() => { g.strokeStyle = "#E7DBC6"; g.beginPath(); g.moveTo(pad, at); g.lineTo(right, at); g.stroke(); });
+  const wrap = (value: string, width: number, font: string) => {
+    g.font = font;
+    const lines: string[] = []; let current = "";
+    // Wrap even an unbroken style code instead of silently truncating it.
+    for (const ch of value) {
+      if (ch === "\n") { lines.push(current); current = ""; continue; }
+      if (current && g.measureText(current + ch).width > width) { lines.push(current.trimEnd()); current = ""; }
+      current += ch;
+    }
+    if (current || !lines.length) lines.push(current.trimEnd());
+    return lines;
+  };
+  // The shop name can also be longer than a single header line.
+  const shopLines = wrap(shop.name, W - 2 * pad, "700 28px Georgia");
+  shopLines.forEach((s, i) => text(s, pad, 44 + i * 32, "700 28px Georgia", "#E2C887"));
+  const headerBottom = 108 + (shopLines.length - 1) * 32;
+  text([shop.tagline, shop.phone].filter(Boolean).join(" · "), pad, headerBottom - 24, "16px sans-serif", "#EFEAF2");
+  if (shop.gstin && b.bill_type === "gst") text("GSTIN " + shop.gstin, pad, headerBottom - 3, "16px sans-serif", "#EFEAF2");
+  let y = headerBottom + 40;
+  const block = (value: string, font = "16px sans-serif", lineHeight = 24, color = "#6B6175", width = W - 2 * pad) => {
+    for (const s of wrap(value, width, font)) { text(s, pad, y, font, color); y += lineHeight; }
+  };
+  block(docName(b).toUpperCase() + " " + b.no, "700 22px sans-serif", 28, "#241B2E");
+  if (b.bill_type === "estimate") {
+    block("APPROVAL CHALLAN · SALE NOT EXECUTED", "700 16px sans-serif", 24, "#8B3550");
+    block("बिक्री निष्पादित नहीं · Not a tax invoice", "16px sans-serif", 24, "#8B3550");
+  }
+  if (b.status === "void") block("CANCELLED", "700 20px sans-serif", 28, "#B00020");
+  block(new Date(b.at).toLocaleString("en-IN"));
+  if (b.party_name) block("To: " + b.party_name + (b.party_phone ? " · " + b.party_phone : ""));
+  if (b.party_address) block(b.party_address);
+  if (b.salesman) block("Salesman: " + b.salesman);
+  y += 8; rule(y); y += 32;
+  for (const [i, l] of b.items.entries()) {
+    const firstY = y;
+    block((i + 1) + ". " + [l.item, l.style].filter(Boolean).join(" · "), "600 18px sans-serif", 25, "#241B2E", W - 2 * pad - 170);
+    text(billAmount(l.amount), right, firstY, "600 18px sans-serif", "#241B2E", "right");
+    block([l.color, l.type, l.pkts ? l.pkts + " pkt × " + l.pack + " = " + l.qty : l.qty + " pcs", "rate " + billAmount(l.rate), "Box " + l.box_no, l.disc ? "disc " + l.disc : ""].filter(Boolean).join(" · "), "15px sans-serif", 22);
+    y += 10;
+  }
+  rule(y); y += 30;
+  const row = (label: string, value: number, bold = false, negative = false) => {
+    const font = (bold ? "700 22px " : "17px ") + "sans-serif", firstY = y;
+    block(label, font, 30, "#241B2E", W - 2 * pad - 200);
+    text((negative ? "-" : "") + billAmount(value), right, firstY, font, "#241B2E", "right");
+  };
+  row("Pieces " + b.total_qty + " · Boxes " + b.box_count, b.gross);
+  if (b.discount) row("Discount", b.discount, false, true);
+  if (b.packing) row("Packing", b.packing);
+  if (b.gst) row("GST" + gstLabel(b), b.gst);
+  if (b.adjust) row("Round off", b.adjust);
+  row(b.bill_type === "return" ? "CREDIT" : b.bill_type === "challan" ? "VALUE" : "TOTAL", b.net, true);
+  if (b.advance) row("Advance", b.advance, false, true);
+  if (b.paid) row("Paid", b.paid, false, true);
+  const d = isSale(b) ? due(b) : 0;
+  if (d > 0) row("Balance due", d, true);
+  if (isSale(b) && d < 0) row("Excess received", -d);
+  if (isSale(b) && b.prev_due) { row("Previous balance", b.prev_due); row("Total due", b.prev_due + d, true); }
+  if (b.remarks) { y += 10; block("Remarks: " + b.remarks); }
+  if (shop.bank) block("Bank: " + shop.bank);
+  y += 16; block("Thank you for shopping with us", "italic 16px Georgia", 24, "#A07E2E");
+  c.height = Math.ceil(y + pad);
+  g.fillStyle = "#FAF6EF"; g.fillRect(0, 0, W, c.height);
+  g.fillStyle = "#241B2E"; g.fillRect(0, 0, W, headerBottom + 12);
+  if (b.bill_type === "estimate") {
+    g.save(); g.translate(W / 2, (headerBottom + c.height) / 2); g.rotate(-Math.PI / 7);
+    g.fillStyle = "rgba(139,53,80,0.10)"; g.font = "700 74px sans-serif"; g.textAlign = "center"; g.fillText("ESTIMATE", 0, 0); g.restore();
+  }
+  draw.forEach(paint => paint());
+  return await new Promise<Blob>((resolve, reject) => c.toBlob(blob => blob ? resolve(blob) : reject(new Error("Could not create the complete bill image")), "image/png"));
 }
 
 /* Android/iPhone: opens the share sheet with the bill picture attached (pick WhatsApp).

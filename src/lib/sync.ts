@@ -3,6 +3,7 @@ import { db, getSetting, setSetting, rebuildStock, now } from "./db";
 import { rfidDefaults } from "./rfid";
 import { ownerOnly } from "./scope";
 import { COLUMNS } from "./columns";
+import { cloudSyncEnabled, assertCloudSyncEnabled } from "./cloudMode";
 
 /* Local-first sync.
    - Every save goes to IndexedDB + an outbox row, so the shop never waits on the internet.
@@ -14,7 +15,7 @@ const TABLES = ["stores", "config", "staff", "locations", "parties", "products",
 const PHOTO_TABLES = ["products", "movements", "bills", "parties", "purchases"];
 type T = (typeof TABLES)[number];
 
-export type SyncState = { status: "local" | "idle" | "syncing" | "error" | "offline"; pending: number; last?: string; error?: string; user?: string };
+export type SyncState = { status: "local" | "idle" | "syncing" | "error" | "offline"; pending: number; last?: string; error?: string; user?: string; cloudEnabled?: boolean };
 let state: SyncState = { status: "local", pending: 0 };
 const subs = new Set<(s: SyncState) => void>();
 const emit = (p: Partial<SyncState>) => { state = { ...state, ...p }; subs.forEach(f => f(state)); };
@@ -97,6 +98,7 @@ async function uploadPhotos(c: SupabaseClient) {
   if (!list.length) return;
   const token = (await c.auth.getSession()).data.session?.access_token || "";
   for (const p of list) {
+    await assertCloudSyncEnabled();
     let url = "";
     try {
       const r = await fetch("/api/media", {
@@ -127,6 +129,7 @@ async function uploadPhotos(c: SupabaseClient) {
 async function uploadVoice(c: SupabaseClient) {
   const list = await db.voice_blobs.where("uploaded").equals(0).limit(10).toArray();
   for (const v of list) {
+    await assertCloudSyncEnabled();
     const ext = v.blob.type.includes("mp4") ? "m4a" : v.blob.type.includes("ogg") ? "ogg" : "webm";
     const path = `${v.created_at.slice(0, 7)}/${v.id}.${ext}`;
     const up = await c.storage.from("voice").upload(path, v.blob, { contentType: (v.blob.type || "audio/webm").split(";")[0], upsert: true, cacheControl: "31536000" });
@@ -155,10 +158,12 @@ export const strip = (t: T, r0: any) => {
 async function push(c: SupabaseClient) {
   const skip = new Set<number>(); // rows the cloud refused this round: kept in the outbox, retried next sync
   for (;;) {
+    await assertCloudSyncEnabled();
     const batch = (await db.outbox.orderBy("seq").limit(200 + skip.size).toArray()).filter(b => !skip.has(b.seq!)).slice(0, 200);
     if (!batch.length) break;
     const done: number[] = [];
     for (const t of TABLES) {
+      await assertCloudSyncEnabled();
       const items = batch.filter(b => b.table === t);
       if (!items.length) continue;
       const ids = [...new Set(items.map(i => i.row_id))];
@@ -168,6 +173,7 @@ async function push(c: SupabaseClient) {
       if (!error) { done.push(...items.map(i => i.seq!)); continue; }
       // one bad row must not hold back the rest: send them one by one and park only the refused ones
       for (const r of rows) {
+        await assertCloudSyncEnabled();
         const e = (await c.from(t).upsert([r], { onConflict: "id" })).error;
         const mine = items.filter(i => i.row_id === r.id);
         if (!e) done.push(...mine.map(i => i.seq!));
@@ -186,48 +192,70 @@ async function push(c: SupabaseClient) {
 /* ---------- pull ---------- */
 async function pull(c: SupabaseClient) {
   let movedStock = false;
-  for (const t of TABLES) {
-    let cursor = await getSetting<string>("cursor_" + t, "1970-01-01T00:00:00Z");
-    for (;;) {
-      const since = new Date(new Date(cursor).getTime() - 5000).toISOString(); // small overlap: late commits are never skipped
-      const { data, error } = await c.from(t).select("*").gt("updated_at", since).order("updated_at").limit(1000);
-      if (error && missingTable(error)) break;      // a newer feature whose cloud table isn't set up yet: skip it, sync the rest
-      if (error) throw error;
-      if (!data || !data.length) break;
-      const table = (db as any)[t];
-      const locals = await table.bulkGet(data.map((r: any) => r.id));
-      const fresh = data.map((r: any, i: number) => ({ r, l: locals[i] }))
-        .filter(({ r, l }: any) => !l || l.updated_at < r.updated_at)
-        .map(({ r, l }: any) => ({ ...r, photo_id: l?.photo_id || r.photo_id || undefined }));
-      if (fresh.length) { await table.bulkPut(fresh); if (t === "movements") movedStock = true; }
-      const last = data[data.length - 1].updated_at;
-      if (last === cursor) break;
-      cursor = last;
-      await setSetting("cursor_" + t, cursor);
-      if (data.length < 1000) break;
+  try {
+    for (const t of TABLES) {
+      const cursor = await getSetting<string>("cursor_" + t, "1970-01-01T00:00:00Z");
+      // Replay one fixed overlap window per run; pages then move strictly forward within it.
+      const since = new Date(new Date(cursor).getTime() - 5000).toISOString();
+      let after: { updated_at: string; id: string } | undefined;
+      let newest = cursor;
+      for (;;) {
+        await assertCloudSyncEnabled();
+        let query = c.from(t).select("*").gt("updated_at", since);
+        if (after) {
+          // PostgREST quoted literals also support text config IDs containing commas/quotes/backslashes.
+          const time = JSON.stringify(after.updated_at), id = JSON.stringify(after.id);
+          query = query.or(`updated_at.gt.${time},and(updated_at.eq.${time},id.gt.${id})`);
+        }
+        const { data, error } = await query.order("updated_at").order("id").limit(1000);
+        if (error && missingTable(error)) break;
+        if (error) throw error;
+        if (!data || !data.length) break;
+        const table = (db as any)[t];
+        const locals = await table.bulkGet(data.map((r: any) => r.id));
+        const fresh = data.map((r: any, i: number) => ({ r, l: locals[i] }))
+          .filter(({ r, l }: any) => !l || l.updated_at < r.updated_at)
+          .map(({ r, l }: any) => ({ ...r, photo_id: l?.photo_id || r.photo_id || undefined }));
+        if (fresh.length) { await table.bulkPut(fresh); if (t === "movements") movedStock = true; }
+        const last = data[data.length - 1];
+        if (after && last.updated_at === after.updated_at && last.id === after.id) throw new Error("Cloud pagination did not advance for " + t);
+        after = { updated_at: last.updated_at, id: last.id };
+        if (Date.parse(last.updated_at) >= Date.parse(newest)) newest = last.updated_at;
+        if (data.length < 1000) break;
+      }
+      // Commit the high-water mark only after draining the table; failed runs can replay safely.
+      if (newest !== cursor) await setSetting("cursor_" + t, newest);
     }
+  } finally {
+    // Applied movement pages must update stock even if a later page fails or the owner pauses sync.
+    if (movedStock) await rebuildStock();
   }
-  if (movedStock) await rebuildStock();
 }
 
 let running = false;
 export async function syncNow() {
-  await pendingCount();
   if (running) return;
-  const c = await sb();
-  if (!c) { emit({ status: "local" }); return; }
-  if (!navigator.onLine) { emit({ status: "offline" }); return; }
-  const { data } = await c.auth.getSession();
-  if (!data.session) { emit({ status: "idle", error: "Sign in to sync", user: undefined }); return; }
-  running = true; emit({ status: "syncing", error: undefined, user: data.session.user.email || "" });
+  running = true;
   try {
+    await pendingCount();
+    const enabled = await cloudSyncEnabled();
+    emit({ cloudEnabled: enabled });
+    if (!enabled) { emit({ status: "local", error: undefined }); return; }
+    if (!navigator.onLine) { emit({ status: "offline", error: undefined }); return; }
+    const c = await sb();
+    if (!c) { emit({ status: "local", error: undefined }); return; }
+    const { data } = await c.auth.getSession();
+    if (!data.session) { emit({ status: "idle", error: "Sign in to sync", user: undefined }); return; }
+    emit({ status: "syncing", error: undefined, user: data.session.user.email || "" });
+    await assertCloudSyncEnabled();
     await uploadPhotos(c);
     await uploadVoice(c).catch(() => { /* voice bucket missing must never block stock sync */ });
     await push(c);
     await pull(c);
     emit({ status: "idle", last: now() });
   } catch (e: any) {
-    emit({ status: "error", error: e?.message || String(e) });
+    const enabled = await cloudSyncEnabled();
+    emit(enabled ? { status: "error", error: e?.message || String(e) } : { status: "local", cloudEnabled: false, error: undefined });
   } finally { running = false; await pendingCount(); }
 }
 

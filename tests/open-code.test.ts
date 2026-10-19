@@ -1,13 +1,14 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it } from "vitest";
-import { db } from "../src/lib/db";
+import { db, setSetting } from "../src/lib/db";
+import { MAIN_STORE, setScope } from "../src/lib/scope";
 import { DEFAULT_OPEN_CODE, codeMatches, normCode, getOpenCode, setOpenCode } from "../src/lib/openCode";
 
 /* One phrase opens the counter. The old screen asked for a cloud email + password,
    then a person, then that person's PIN — three walls before the first bill. */
 
 describe("the shop passcode", () => {
-  beforeEach(async () => { await Promise.all(db.tables.map(t => t.clear())); });
+  beforeEach(async () => { setScope(MAIN_STORE, "owner"); await Promise.all(db.tables.map(t => t.clear())); });
 
   it("opens with the phrase the owner asked for", () => {
     expect(codeMatches("rungnna 2026")).toBe(true);
@@ -47,4 +48,23 @@ describe("the shop passcode", () => {
   it("falls back to the default before anything has been saved", async () => {
     expect(await getOpenCode()).toBe(DEFAULT_OPEN_CODE);
   });
+  it("saves the common entry code to shared config and queues it for counter sync", async () => {
+    await setOpenCode("Our Shop 2026");
+    expect((await db.config.get("open_code"))?.value.code).toBe("our shop 2026");
+    expect(await db.outbox.filter(row => row.table === "config" && row.row_id === "open_code").count()).toBe(1);
+    await setSetting("open_code", "stale counter value");
+    expect(await getOpenCode()).toBe("our shop 2026");
+  });
+
+  it("keeps the legacy local phrase until the owner saves a shared one", async () => {
+    await setSetting("open_code", "legacy phrase");
+    expect(await getOpenCode()).toBe("legacy phrase");
+  });
+
+  it("does not let a salesperson change the common entry code", async () => {
+    setScope(MAIN_STORE, "salesman");
+    await expect(setOpenCode("new phrase")).rejects.toThrow(/role/i);
+    expect(await db.config.get("open_code")).toBeUndefined();
+  });
+
 });

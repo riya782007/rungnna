@@ -16,13 +16,15 @@ async function handle(req: Request) {
     const gsp = provider();
     if (req.method === "GET") return json({ configured: !!gsp, sandbox: gsp?.sandbox ?? true });
     if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
-    const { data: security } = await c.from("config").select("value").eq("id", "owner_security").maybeSingle();
+    const { data: security, error: securityError } = await c.from("config").select("value").eq("id", "owner_security").maybeSingle();
+    if (securityError) return json({ error: "Owner security settings could not be verified. Try again before submitting." }, 503);
     if (security?.value?.enabled) {
       const claims = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
       if (claims.aal !== "aal2") return json({ error: "Owner two-step verification required" }, 403);
     }
     if (!gsp) return json({ error: "Provider not configured", code: "no_gst" }, 503);
     const input = await req.json();
+    if (input.online_approved !== true) return json({ error: "Explicit online approval is required for this bill" }, 400);
     if (!["irn", "ewb"].includes(input.kind) || !["generate", "cancel"].includes(input.action)) return json({ error: "Invalid action" }, 400);
     const kind = input.kind as GstKind;
     const { data: bill, error: billError } = await c.from("bills").select("*").eq("id", input.bill_id).single();

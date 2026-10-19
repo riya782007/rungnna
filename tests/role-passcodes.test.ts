@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { db } from "../src/lib/db";
 import { MAIN_STORE, setScope } from "../src/lib/scope";
-import { newPasscode, roleForPasscode, normPass, PASS_ALPHABET, PASS_LEN, isRoleLogin, permsOf, setRolesCache, type CustomRole } from "../src/lib/roles";
+import { newPasscode, roleForPasscode, normPass, PASS_ALPHABET, PASS_LEN, isRoleLogin, sessionAllowed, permsOf, setRolesCache, type CustomRole } from "../src/lib/roles";
 import { saveRoles, regenerated, withPasscodes } from "../src/lib/roleLogins";
 
 /* A role passcode is a key to the shop. These are the promises it has to keep:
@@ -109,4 +109,24 @@ describe("the sign-in behind each passcode", () => {
     await expect(saveRoles([role()])).rejects.toThrow(/role/i);
     expect(await db.staff.count()).toBe(0);
   });
+  it("revokes an old session when the new role configuration arrives before its retired staff row", async () => {
+    const [first] = await saveRoles([role()]);
+    const original = (await db.staff.get(first.login_id!))!;
+    expect(sessionAllowed(original, [first])).toBe(true);
+    const next = regenerated([first], first.id);
+    expect(sessionAllowed(original, next)).toBe(false);
+    expect(sessionAllowed(original, [])).toBe(false);
+    expect(sessionAllowed({ ...original, role: "owner" }, [first])).toBe(false);
+  });
+
+  it("rolls back the role configuration and queue if creating its sign-in fails", async () => {
+    const fail = () => { throw new Error("Simulated storage failure"); };
+    db.staff.hook("creating", fail);
+    try { await expect(saveRoles([role()])).rejects.toThrow("Simulated storage failure"); }
+    finally { db.staff.hook("creating").unsubscribe(fail); }
+    expect(await db.config.get("roles")).toBeUndefined();
+    expect(await db.staff.count()).toBe(0);
+    expect(await db.outbox.count()).toBe(0);
+  });
+
 });

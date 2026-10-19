@@ -35,10 +35,15 @@ describe("billing box recovery and merging", () => {
   it("combines piece-based lines", () => {
     expect(mergeBoxLine([line({ pack: 1, pkts: 0, qty: 2 }), line({ id: "b", pack: 1, pkts: 0, qty: 3 })], "b")[0]).toMatchObject({ qty: 5, amount: 5000 });
   });
-  it("keeps different boxes, products, rates, discounts and stock histories separate", () => {
-    for (const patch of [{ box_no: 1 }, { product_id: "other" }, { rate: 2000 }, { disc: "10%" }, { stock_done: 1 as const }, { src_line: "original" }, { pack: 6 }]) {
+  it("keeps different boxes, products, rates, discounts, units, tax, descriptions and stock histories separate", () => {
+    for (const patch of [{ box_no: 1 }, { product_id: "other" }, { rate: 2000 }, { disc: "10%" }, { stock_done: 1 as const }, { src_line: "original" }, { pack: 6 }, { type: "SET" }, { hsn: "7117" }, { gst_rate: 5 }, { style: "S2" }, { color: "WHITE" }]) {
       expect(mergeBoxLine([line(), line({ id: "b", ...patch })], "b")).toHaveLength(2);
     }
+  });
+  it("normalizes case and empty HSN while preserving compatible line snapshots", () => {
+    const result = mergeBoxLine([line(), line({ id: "b", type: " pcs ", style: " s ", color: " g ", hsn: "" })], "b");
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ id: "a", type: "PCS", style: "S", color: "G", qty: 24 });
   });
   it("does not lose fixed line discounts or merge unidentified manual items", () => {
     expect(mergeBoxLine([line({ disc: "5" }), line({ id: "b", disc: "5" })], "b")).toHaveLength(2);

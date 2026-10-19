@@ -1,5 +1,6 @@
 import type { Product } from "./db";
 import { qrSvg } from "./qr";
+import { labelHeat, type LabelHeat } from "./label-darkness";
 
 /* ===========================================================================
    Direct TSC printing that looks like the on-screen sticker.
@@ -13,7 +14,7 @@ import { qrSvg } from "./qr";
 =========================================================================== */
 
 export type LabelShow = { shop: boolean; item: boolean; style: boolean; color: boolean; rate: boolean; tk: boolean; code: boolean; qty: boolean; cost_code: boolean };
-export type LabelLook = { w: number; h: number; qr: number; font: number; pad: number; offX: number; offY: number; gapY: number; shop: string; layout?: "shop" | "stack"; show: LabelShow; cur?: string };
+export type LabelLook = LabelHeat & { w: number; h: number; qr: number; font: number; pad: number; offX: number; offY: number; gapY: number; shop: string; layout?: "shop" | "stack"; show: LabelShow; cur?: string };
 export type LabelLine = { text: string; big?: boolean; bold?: boolean; small?: boolean; optional?: boolean };   // optional = may be left off a crowded label (the QR carries it anyway)
 
 /** Sticker rate: whole rupees stay whole (₹24), paise always show two places (₹12.50). */
@@ -53,6 +54,7 @@ const fit = (s: string, maxChars: number) => (s.length > maxChars ? s.slice(0, M
 
 /** TSPL for one product × copies, matching the on-screen sticker. Throws with a plain message when it can't print it correctly. */
 export function labelTSPL(look: LabelLook, p: Product, pack: number, copies: number, qrText: string, opts: { density?: number; speed?: number } = {}): string {
+  const heat = labelHeat({ density: opts.density ?? look.density, speed: opts.speed ?? look.speed });
   const { w, h, pad } = look;
   if (![w, h, pad, look.qr, look.font, look.offX, look.offY].every(Number.isFinite) || w < 10 || w > 200 || h < 8 || h > 300) throw new Error("Check label size in printer settings");
   if (!Number.isSafeInteger(copies) || copies < 1 || copies > 5000) throw new Error("Print quantity must be 1–5000");
@@ -70,7 +72,7 @@ export function labelTSPL(look: LabelLook, p: Product, pack: number, copies: num
   const shopFont = fontFor(look.font * 0.95);
 
   const cmds = [`SIZE ${w} mm, ${h} mm`, `GAP ${look.gapY > 0 ? look.gapY : 2} mm, 0 mm`, "DIRECTION 1", "REFERENCE 0,0",
-    `DENSITY ${Math.max(0, Math.min(15, opts.density ?? 8))}`, `SPEED ${Math.max(1, Math.min(6, opts.speed ?? 3))}`, "CLS"];
+    `DENSITY ${heat.density}`, `SPEED ${heat.speed}`, "CLS"];
   let textX: number, textW: number, qrX: number;
   if ((look.layout || "shop") === "shop") {
     const shopW = shopOn ? shopFont.h + P : 0;

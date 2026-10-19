@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import type { Bill } from "../lib/db";
 import { due, docName, taxSummary, type Shop } from "../lib/billing";
 import { placeCode, GST_STATES } from "../lib/states";
-import { rupees } from "../lib/format";
+import { billAmount } from "../lib/format";
 import { qrSvg } from "../lib/qr";
 import { toast } from "../lib/app";
 
@@ -38,6 +38,7 @@ export function InvoiceSheet({ b, shop, format, copy }: { b: Bill; shop: Shop; f
   const money = b.bill_type !== "challan" && b.bill_type !== "return"; // no "pay now" on a challan or credit note
   const upi = money && shop.upi && d > 0 ? qrSvg(`upi://pay?pa=${shop.upi}&pn=${encodeURIComponent(shop.name)}&am=${(d / 100).toFixed(2)}&cu=INR&tn=${encodeURIComponent(b.no)}`).svg : "";
   const prices = format !== "packing";
+  const estimate = prices && b.bill_type === "estimate";
   const title = format === "packing" ? "PACKING SLIP" : docName(b).toUpperCase();
   const boxes = [...new Set(b.items.map(l => l.box_no))].sort((a, z) => a - z);
   const thermal = format === "80mm" || format === "58mm";
@@ -60,15 +61,15 @@ export function InvoiceSheet({ b, shop, format, copy }: { b: Bill; shop: Shop; f
         <div><div className="inv-shop">{shop.name}</div><div className="inv-sub">{shop.tagline}</div>
           <div className="inv-sub">{[shop.address, shop.phone].filter(Boolean).join(" · ")}</div>
           {shop.gstin && taxDoc && <div className="inv-sub">GSTIN: <b>{shop.gstin}</b>{shop.state ? " · State: " + shop.state + (shopCode ? " (" + shopCode + ")" : "") : ""}</div>}</div>
-        <div className="inv-title">{title}{copy && <div className="inv-copy">{copy}</div>}{b.status === "void" && <div className="inv-void">CANCELLED</div>}
+        <div className="inv-title">{title}{estimate && <div className="inv-approval">APPROVAL CHALLAN</div>}{copy && <div className="inv-copy">{copy}</div>}{b.status === "void" && <div className="inv-void">CANCELLED</div>}
           {notExecuted && <div><span className="inv-notexec">SALE NOT EXECUTED · बिक्री निष्पादित नहीं</span></div>}</div>
       </div>
       {b.compliance && format !== "packing" && <div className="inv-compliance">
         {b.compliance.irn && <><div>{b.compliance.irn.sandbox ? "SANDBOX · " : ""}IRN: {b.compliance.irn.id}{b.compliance.irn.cancelled_at ? " · CANCELLED" : ""}</div><div>Acknowledgement: {b.compliance.irn.ack_no} · {b.compliance.irn.generated_at}</div>{b.compliance.irn.signed_qr && !b.compliance.irn.cancelled_at && <span className="signed-qr" dangerouslySetInnerHTML={{ __html: qrSvg(b.compliance.irn.signed_qr).svg }} />}</>}
         {b.compliance.ewb && <div>{b.compliance.ewb.sandbox ? "SANDBOX · " : ""}EWB: {b.compliance.ewb.id}{b.compliance.ewb.cancelled_at ? " · CANCELLED" : ""}</div>}
       </div>}
-      {notExecuted && !thermal && <div className="inv-wm" aria-hidden="true">
-        <span>SALE NOT EXECUTED<br />बिक्री निष्पादित नहीं</span>
+      {notExecuted && (!thermal || estimate) && <div className="inv-wm" aria-hidden="true">
+        <span>{estimate && <>ESTIMATE{!thermal && <br />}</>}{!thermal && <>SALE NOT EXECUTED<br />बिक्री निष्पादित नहीं</>}</span>
       </div>}
       <div className="inv-meta">
         <div><b>{docName(b)} No:</b> {b.no || "(draft)"}<br /><b>Date:</b> {new Date(b.at).toLocaleString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
@@ -92,33 +93,33 @@ export function InvoiceSheet({ b, shop, format, copy }: { b: Bill; shop: Shop; f
         <div className="inv-left">
           <div><b>Total quantity:</b> {b.total_qty} · <b>Boxes:</b> {b.box_count}</div>
           {format === "packing" && <div className="inv-boxes">{boxes.map(x => <span key={x}>Box {x}: {b.items.filter(l => l.box_no === x).reduce((a, l) => a + l.qty, 0)} pcs</span>)}</div>}
-          {prices && <div className="inv-words">{b.bill_type === "return" ? "Credit: " : ""}{inWords(b.net)}</div>}
+          {estimate && <div className="inv-sub">Approval challan · Not a tax invoice.</div>}
           {b.bill_type === "challan" && <div className="inv-sub">Goods sent on approval / for delivery. Not a tax invoice — the invoice follows.</div>}
           {taxDoc && prices && (byHsn.length > 1
-            ? <div className="inv-sub">{byHsn.map(h => <span key={h.hsn + h.rate} style={{ display: "block" }}>HSN {h.hsn} · GST {pct(h.rate)}% · taxable {rupees(h.taxable)}</span>)}{b.gst_mode === "inclusive" ? "(GST included in rates)" : ""}</div>
+            ? <div className="inv-sub">{byHsn.map(h => <span key={h.hsn + h.rate} style={{ display: "block" }}>HSN {h.hsn} · GST {pct(h.rate)}% · taxable {billAmount(h.taxable)}</span>)}{b.gst_mode === "inclusive" ? "(GST included in rates)" : ""}</div>
             : <div className="inv-sub">HSN {byHsn[0]?.hsn || shop.hsn} · GST {pct(byRate[0]?.rate ?? b.gst_rate)}% {b.gst_mode === "inclusive" ? "(included in rates)" : ""} · Reverse charge: No</div>)}
           {b.remarks && <div><b>Remarks:</b> {b.remarks}</div>}
           {shop.bank && prices && <div className="inv-sub">Bank: {shop.bank}</div>}
-          {upi && prices && <div className="row" style={{ gap: 6, alignItems: "center" }}><span className="inv-qr" dangerouslySetInnerHTML={{ __html: upi }} /><span className="inv-sub">Scan to pay {rupees(d)}<br />UPI: {shop.upi}</span></div>}
+          {upi && prices && <div className="row" style={{ gap: 6, alignItems: "center" }}><span className="inv-qr" dangerouslySetInnerHTML={{ __html: upi }} /><span className="inv-sub">Scan to pay {billAmount(d)}<br />UPI: {shop.upi}</span></div>}
         </div>
         {prices && <table className="inv-sum"><tbody>
-          <tr><td>Gross</td><td className="r">{rupees(b.gross)}</td></tr>
-          {b.discount ? <tr><td>Discount{b.discount_pct ? ` ${b.discount_pct}%` : ""}</td><td className="r">-{rupees(b.discount)}</td></tr> : null}
-          {b.packing ? <tr><td>Packing</td><td className="r">{rupees(b.packing)}</td></tr> : null}
-          {taxDoc && b.gst ? <tr><td>Taxable value</td><td className="r">{rupees(b.net - b.adjust - b.gst)}</td></tr> : null}
-          {byRate.map(g => <Fragment key={g.rate}>{g.cgst ? <tr key={"c" + g.rate}><td>CGST {pct(g.rate / 2)}%</td><td className="r">{rupees(g.cgst)}</td></tr> : null}
-            {g.sgst ? <tr key={"s" + g.rate}><td>SGST {pct(g.rate / 2)}%</td><td className="r">{rupees(g.sgst)}</td></tr> : null}
-            {g.igst ? <tr key={"i" + g.rate}><td>IGST {pct(g.rate)}%</td><td className="r">{rupees(g.igst)}</td></tr> : null}</Fragment>)}
-          {b.adjust ? <tr><td>Round off</td><td className="r">{rupees(b.adjust)}</td></tr> : null}
-          <tr className="inv-net"><td>{b.bill_type === "return" ? "CREDIT" : b.bill_type === "challan" ? "VALUE" : "NET"}</td><td className="r">{rupees(b.net)}</td></tr>
-          {b.advance ? <tr><td>Advance</td><td className="r">-{rupees(b.advance)}</td></tr> : null}
-          {b.paid ? <tr><td>Paid ({b.payments.filter(p => p.mode !== "credit").map(p => p.mode.toUpperCase()).join("+")})</td><td className="r">-{rupees(b.paid)}</td></tr> : null}
-          {money && d > 0 ? <tr className="inv-net"><td>Balance</td><td className="r">{rupees(d)}</td></tr> : null}
-          {money && d < 0 ? <tr><td>Excess received</td><td className="r">{rupees(-d)}</td></tr> : null}
+          <tr><td>Gross</td><td className="r">{billAmount(b.gross)}</td></tr>
+          {b.discount ? <tr><td>Discount{b.discount_pct ? ` ${b.discount_pct}%` : ""}</td><td className="r">-{billAmount(b.discount)}</td></tr> : null}
+          {b.packing ? <tr><td>Packing</td><td className="r">{billAmount(b.packing)}</td></tr> : null}
+          {taxDoc && b.gst ? <tr><td>Taxable value</td><td className="r">{billAmount(b.net - b.adjust - b.gst)}</td></tr> : null}
+          {byRate.map(g => <Fragment key={g.rate}>{g.cgst ? <tr key={"c" + g.rate}><td>CGST {pct(g.rate / 2)}%</td><td className="r">{billAmount(g.cgst)}</td></tr> : null}
+            {g.sgst ? <tr key={"s" + g.rate}><td>SGST {pct(g.rate / 2)}%</td><td className="r">{billAmount(g.sgst)}</td></tr> : null}
+            {g.igst ? <tr key={"i" + g.rate}><td>IGST {pct(g.rate)}%</td><td className="r">{billAmount(g.igst)}</td></tr> : null}</Fragment>)}
+          {b.adjust ? <tr><td>Round off</td><td className="r">{billAmount(b.adjust)}</td></tr> : null}
+          <tr className="inv-net"><td>{b.bill_type === "return" ? "CREDIT" : b.bill_type === "challan" ? "VALUE" : "NET"}</td><td className="r">{billAmount(b.net)}</td></tr>
+          {b.advance ? <tr><td>Advance</td><td className="r">-{billAmount(b.advance)}</td></tr> : null}
+          {b.paid ? <tr><td>Paid ({b.payments.filter(p => p.mode !== "credit").map(p => p.mode.toUpperCase()).join("+")})</td><td className="r">-{billAmount(b.paid)}</td></tr> : null}
+          {money && d > 0 ? <tr className="inv-net"><td>Balance</td><td className="r">{billAmount(d)}</td></tr> : null}
+          {money && d < 0 ? <tr><td>Excess received</td><td className="r">{billAmount(-d)}</td></tr> : null}
           {/* wholesale: what the party owed before this bill, and what they owe now in all */}
           {money && b.bill_type !== "return" && b.prev_due ? <>
-            <tr><td>Previous balance</td><td className="r">{rupees(b.prev_due)}</td></tr>
-            <tr className="inv-net"><td>Total due</td><td className="r">{rupees(b.prev_due + d)}</td></tr></> : null}
+            <tr><td>Previous balance</td><td className="r">{billAmount(b.prev_due)}</td></tr>
+            <tr className="inv-net"><td>Total due</td><td className="r">{billAmount(b.prev_due + d)}</td></tr></> : null}
         </tbody></table>}
       </div>
       <div className="inv-terms">{shop.terms}<span>For {shop.name}{taxDoc && !thermal ? <><br /><br />Authorised signatory</> : null}</span></div>

@@ -1,6 +1,7 @@
 import type { LabelCfg } from "../pages/Labels";
 import type { PurchaseLabelJob } from "./purchase-labels";
 import { LABEL_DOTS_PER_MM, labelArtworkGeometry, renderLabelSvg } from "./label-artwork";
+import { labelHeat } from "./label-darkness";
 
 const dots = (mm: number) => Math.round(mm * LABEL_DOTS_PER_MM);
 const encoder = new TextEncoder();
@@ -29,6 +30,7 @@ export function labelBitmapRows(cfg: LabelCfg, jobs: PurchaseLabelJob[]): Purcha
 }
 
 export function validateLabelBitmapJob(cfg: LabelCfg, jobs: PurchaseLabelJob[]) {
+  labelHeat(cfg);
   if (cfg.mode !== "roll") throw new Error("Direct TSC printing needs roll labels. Use browser printing for sheets.");
   if (![cfg.w, cfg.h, cfg.qr, cfg.font].every(n => Number.isFinite(n) && n > 0) || ![cfg.gapX, cfg.gapY, cfg.pad].every(n => Number.isFinite(n) && n >= 0) || ![cfg.offX, cfg.offY].every(Number.isFinite) || cfg.h > 300 || cfg.pad * 2 >= Math.min(cfg.w, cfg.h)) throw new Error("Check the sticker size, gaps and margins");
   const rows = labelBitmapRows(cfg, jobs);
@@ -65,10 +67,11 @@ function concat(chunks: Uint8Array[]) {
 
 /** Every row is one physical page. GAP is separate from SIZE, so it never feeds blank rows. */
 export function encodeLabelBitmapRow(cfg: LabelCfg, bitmap: Uint8Array): Uint8Array {
+  const heat = labelHeat(cfg);
   const width = dots(labelRowWidth(cfg)), height = dots(cfg.h), stride = Math.ceil(width / 8);
   if (bitmap.length !== stride * height) throw new Error("Label bitmap does not match the sticker row");
   return concat([
-    encoder.encode(`SIZE ${number(labelRowWidth(cfg))} mm,${number(cfg.h)} mm\r\nGAP ${number(cfg.gapY)} mm,0 mm\r\nREFERENCE 0,0\r\nSHIFT 0\r\nOFFSET 0 mm\r\nDIRECTION 1\r\nCLS\r\nBITMAP 0,0,${stride},${height},0,`),
+    encoder.encode(`SIZE ${number(labelRowWidth(cfg))} mm,${number(cfg.h)} mm\r\nGAP ${number(cfg.gapY)} mm,0 mm\r\nREFERENCE 0,0\r\nSHIFT 0\r\nOFFSET 0 mm\r\nDIRECTION 1\r\nDENSITY ${heat.density}\r\nSPEED ${heat.speed}\r\nCLS\r\nBITMAP 0,0,${stride},${height},0,`),
     bitmap, encoder.encode("\r\nPRINT 1,1\r\n"),
   ]);
 }

@@ -26,9 +26,9 @@ describe("roles & permissions", () => {
     expect(can(who("packer", "r1"), "void")).toBe(true);
     expect(can(who("packer", "r1"), "stock.in")).toBe(false);
   });
-  it("a deleted custom role falls back to the person's built-in role", () => {
+  it("a missing or deleted custom role grants nothing while waiting for reassignment", () => {
     setRolesCache([]);
-    expect(permsOf(who("helper", "gone"))).toEqual(new Set(BUILTIN.helper));
+    expect(permsOf(who("manager", "gone"))).toEqual(new Set());
   });
   it("the owner always has everything, whatever role list syncs in", () => {
     setRolesCache([{ id: "x", name: "x", base: "salesman", perms: [] }]);

@@ -18,6 +18,10 @@ npm test         # vitest (unit + IndexedDB flows)
 npm run build    # type-check + production build
 ```
 
+## Counter operation and acceptance
+
+The current [Karan requirement audit and counter checklist](docs/karan-readiness-2026-10-19.md) covers scanned rows, packet totals, estimate printing, barcode darkness, shared entry and personal access. Billing saves locally with or without internet and syncs automatically when connected; Settings can pause cloud sync. Government submission has a separate approval box on each bill.
+
 ## Environment (Vercel)
 
 `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `GEMINI_API_KEY` (`GEMINI_MODEL`), optional `GROQ_*`/`OPENAI_*`, `GST_PROVIDER`, `GST_PROVIDER_URL`, `GST_API_KEY`, `GST_MODE`, `GST_OWNER_EMAILS`, `PURCHASE_OWNER_EMAILS`, `PURCHASE_AI_ACCESS` (`shop` lets any signed-in shop login read purchase bills; unset = owner only), `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `SITE_URL`.

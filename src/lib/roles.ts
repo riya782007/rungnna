@@ -93,8 +93,9 @@ export const BUILTIN: Record<Staff["role"], string[]> = {
   packer: [...STOCK],
 };
 export const ROLE_NOTE: Record<Staff["role"], string> = {
-  owner: "Everything", manager: "Everything except staff", cashier: "Billing + today's sales",
-  salesman: "Billing only", helper: "Stock work only", packer: "Stock work only",
+  owner: "All permissions", manager: "Stock, billing, suppliers & settings; no staff or reports",
+  cashier: "Stock, billing & today's sales", salesman: "Stock & billing",
+  helper: "Stock work only", packer: "Stock work only",
 };
 
 export type CustomRole = {
@@ -146,7 +147,18 @@ export function permsOf(me: Pick<Staff, "role"> & { role_id?: string } | null | 
   if (!me) return new Set();
   if (me.role === "owner") return new Set(ALL_PERMS);
   const custom = me.role_id ? ROLES.find(r => r.id === me.role_id) : undefined;
-  return new Set((custom ? custom.perms : BUILTIN[me.role] || []).filter(p => ALL_PERMS.includes(p)));
+  // A missing custom role can be a deletion or a partial sync. Never silently grant the
+  // broader built-in base while waiting for its permissions to arrive.
+  return new Set((me.role_id ? custom?.perms || [] : BUILTIN[me.role] || []).filter(p => ALL_PERMS.includes(p)));
+}
+
+/** A retired role login must stop working as soon as the role configuration arrives,
+ * even if the retired staff row has not reached this counter yet. */
+export function sessionAllowed(staff: Staff | null | undefined, roles: CustomRole[] = ROLES): boolean {
+  if (!staff || !staff.active || staff.deleted) return false;
+  if (!isRoleLogin(staff)) return true;
+  const role = roles.find(r => r.id === staff.role_id);
+  return staff.role !== "owner" && !!role?.passcode && role.login_id === staff.id;
 }
 export const roleName = (me: Pick<Staff, "role"> & { role_id?: string } | null | undefined) =>
   !me ? "" : me.role === "owner" ? "owner" : (me.role_id && ROLES.find(r => r.id === me.role_id)?.name) || me.role;

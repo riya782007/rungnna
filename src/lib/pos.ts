@@ -1,5 +1,6 @@
 import { uid, type BillLine } from "./db";
 import { fixLine, discError } from "./billing";
+import { mergeBoxLine } from "./billingBox";
 
 export function moneyInput(value: string): number {
   const clean = value.trim().replace(/,/g, "");
@@ -29,4 +30,11 @@ export function repeatedPosLine(lines: BillLine[], added: BillLine): boolean {
   return lines.some(l => l.box_no === added.box_no && l.rate === added.rate && l.disc === added.disc &&
     (added.product_id ? l.product_id === added.product_id : !l.product_id &&
       norm(l.item) === norm(added.item) && norm(l.style) === norm(added.style) && norm(l.color) === norm(added.color) && l.type === added.type && l.hsn === added.hsn));
+}
+
+/** Add the exact sticker/manual quantity without changing another line's pricing or stock history. */
+export function appendPosLine(lines: BillLine[], added: BillLine) {
+  const items = mergeBoxLine([...lines, added], added.id);
+  const line = items.find(l => l.id === added.id) || items.find(l => l.qty !== lines.find(old => old.id === l.id)?.qty)!;
+  return { items, line, added: fixLine(added).qty, repeated: repeatedPosLine(lines, added) };
 }

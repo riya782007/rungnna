@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { finalize, newBill, fixLine, DEFAULT_SHOP, balanceBefore } from "../src/lib/billing";
 import { InvoiceSheet, COPY_NAMES } from "../src/components/Invoice";
 import { db, now, type BillLine } from "../src/lib/db";
-import { rupees } from "../src/lib/format";
+import { rupees, billAmount } from "../src/lib/format";
 import { MAIN_STORE, setScope } from "../src/lib/scope";
 
 /* What a wholesale bill has to say that a shop counter receipt doesn't (checked 16 Oct against the printed
@@ -31,9 +31,9 @@ describe("previous balance on a wholesale bill", () => {
     expect(second.prev_due).toBe(100000 + first.net);
     const html = renderToStaticMarkup(<InvoiceSheet b={second} shop={DEFAULT_SHOP} format="a5" />);
     expect(html).toContain("Previous balance");
-    expect(html).toContain(rupees(100000 + first.net));
+    expect(html).toContain(billAmount(100000 + first.net));
     expect(html).toContain("Total due");
-    expect(html).toContain(rupees(100000 + first.net + second.net));
+    expect(html).toContain(billAmount(100000 + first.net + second.net));
   });
 
   it("keeps the frozen figure when the bill is edited and saved again", async () => {

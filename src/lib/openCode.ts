@@ -1,20 +1,10 @@
-import { getSetting, setSetting } from "./db";
+import { db, getSetting, put } from "./db";
+import { requirePerm } from "./scope";
 
-/* ===========================================================================
-   The passcode that opens the app on a counter.
-
-   The old opening screen asked for a cloud email + password AND then a person
-   AND then that person's PIN, before anyone could sell anything. On a counter in
-   Sadar Bazar at 11am that is three walls in front of the first bill. Now one
-   phrase opens it, and everything else is still there behind "Use a different
-   person" and in Settings.
-
-   This is a shop-floor convenience lock, in the same tier as the staff PINs —
-   it keeps a passer-by out of the till, it is not a secret against an attacker
-   who has the device. Anything that genuinely must be guarded (cancelling a
-   bill, deleting estimates, cost prices) is gated by role permissions, which
-   this does not touch.
-=========================================================================== */
+/* The common entrance code is shared through config. It unlocks person selection;
+   each person still needs their own PIN or role passcode. It never grants owner
+   permissions. Like local PINs, this is a counter convenience lock; someone with
+   full access to the device can inspect or alter its local browser data. */
 
 export const DEFAULT_OPEN_CODE = "rungnna 2026";
 const KEY = "open_code";
@@ -31,11 +21,17 @@ export function codeMatches(typed: string, saved?: string | null): boolean {
   return !!got && !!want && got === want;
 }
 
-export const getOpenCode = () => getSetting<string>(KEY, DEFAULT_OPEN_CODE);
+export async function getOpenCode(): Promise<string> {
+  const shared = (await db.config.get(KEY))?.value?.code;
+  // Keep counters upgraded from the earlier device-only setting working until the
+  // owner saves a common code. New saves use config and therefore sync to counters.
+  return typeof shared === "string" && shared.trim() ? shared : getSetting<string>(KEY, DEFAULT_OPEN_CODE);
+}
 
 /** Saving a blank code would lock the shop out of its own counter, so it restores the default. */
 export async function setOpenCode(code: string) {
+  requirePerm("staff.manage", "changing the shop entry code");
   const v = normCode(code);
-  await setSetting(KEY, v || DEFAULT_OPEN_CODE);
+  await put("config", { id: KEY, value: { code: v || DEFAULT_OPEN_CODE }, updated_at: "" });
   return v || DEFAULT_OPEN_CODE;
 }

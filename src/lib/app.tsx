@@ -2,7 +2,8 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import { db, put, uid, now, getSetting, setSetting, type Staff, type Location } from "./db";
 import { initStores } from "./stores";
 import { setScope, setScopePerms, currentStore, MAIN_STORE } from "./scope";
-import { setRolesCache, permsOf } from "./roles";
+import { resetCounterAccess } from "./entryAuth";
+import { setRolesCache, permsOf, sessionAllowed } from "./roles";
 import { useLiveQuery } from "dexie-react-hooks";
 
 /* ---------- tiny hash router (works offline, no server rewrites needed) ---------- */
@@ -77,18 +78,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [store, setStore] = useState(currentStore());
   const staffRow = useLiveQuery(() => me ? db.staff.get(me.id) : undefined, [me?.id]);
-  useEffect(() => { if (!staffRow || !me || staffRow.updated_at === me.updated_at) return; if (!staffRow.active || staffRow.deleted) { setMeS(null); setSetting("me", ""); return; } setMeS(staffRow); const id = staffRow.role === "owner" ? store : staffRow.store_id || MAIN_STORE; setScope(id, staffRow.role); setScopePerms(permsOf(staffRow)); setStore(id); }, [staffRow?.updated_at]);
+  useEffect(() => { if (!staffRow || !me || staffRow.updated_at === me.updated_at) return; if (!sessionAllowed(staffRow)) { setMe(null); return; } setMeS(staffRow); const id = staffRow.role === "owner" ? store : staffRow.store_id || MAIN_STORE; setScope(id, staffRow.role, permsOf(staffRow)); setStore(id); }, [staffRow?.updated_at]);
   useEffect(() => {
     (async () => {
       await firstRun();
-      const id = await getSetting<string>("me", "");
-      const found = id ? await db.staff.get(id) : null;
-      /* a person switched off, or a role passcode regenerated or deleted, while this device was
-         closed: don't bring the session back on reload. The live check below only fires on change */
-      const staff = found && found.active && !found.deleted ? found : null;
-      if (found && !staff) await setSetting("me", "");
-      const storeId = await initStores(staff); setScope(storeId, staff?.role || ""); setScopePerms(permsOf(staff)); setStore(storeId);
-      if (staff) setMeS(staff);
+      setRolesCache((await db.config.get("roles"))?.value?.roles);
+      // A remembered person must never bypass the common entry code and personal
+      // access on the next opening. Keep business data and the billing draft intact.
+      const fallbackStore = await initStores();
+      const storeId = await getSetting("active_store", fallbackStore);
+      await resetCounterAccess(storeId);
+      setStore(storeId);
       setReady(true);
     })();
   }, []);
@@ -100,7 +100,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // custom roles sync like any setting; every check (lib/roles) and every guarded save (scope.requirePerm) follows them
   const rolesRow = useLiveQuery(() => db.config.get("roles"), []);
   const [, bump] = useState(0);
-  useEffect(() => { setRolesCache((rolesRow?.value as any)?.roles); setScopePerms(permsOf(me)); bump(n => n + 1); }, [rolesRow?.updated_at, me?.id, me?.role, me?.role_id]);
+  useEffect(() => {
+    if (!rolesRow) return;
+    setRolesCache((rolesRow.value as any)?.roles);
+    if (me && !sessionAllowed(me)) { setMe(null); return; }
+    setScopePerms(permsOf(me)); bump(n => n + 1);
+  }, [rolesRow?.updated_at, me?.id, me?.role, me?.role_id]);
   return <AppCtx.Provider value={{ me, setMe, ready, store, switchStore }}>{children}</AppCtx.Provider>;
 }
 

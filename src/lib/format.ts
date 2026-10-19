@@ -3,6 +3,8 @@
 /* -₹0.25, never ₹-0.25 (the round-off line on every bill used to print the sign after the rupee mark) */
 export const rupees = (paise: number) =>
   (Math.round(paise) < 0 ? "-₹" : "₹") + (Math.abs(Math.round(paise)) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/* Customer bills use figures only, as requested by the shop owner; keep the currency in the POS and accounts. */
+export const billAmount = (paise: number) => rupees(paise).replace("₹", "");
 export const toPaise = (v: string | number) => { const n = Number(String(v).replace(/[^\d.]/g, "")); return Number.isFinite(n) ? Math.round(n * 100) : 0; };
 export const when = (iso: string) => {
   const d = new Date(iso);
