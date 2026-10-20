@@ -103,7 +103,7 @@ export default function Billing({ args }: { args: string[] }) {
     const td = el?.closest("td");
     const row = el?.closest<HTMLTableRowElement>("tr.ln");
     if (!row || !el) return;
-    const ids = t ? t.items.map(l => l.id) : [];
+    const ids = t ? displayOrder(t.items).map(l => l.id) : [];
     const rowId = [...rowRefs.current.entries()].find(([, r]) => r === row)?.[0];
     const idx = rowId ? ids.indexOf(rowId) : -1;
     if (idx < 0) return;
@@ -172,19 +172,34 @@ export default function Billing({ args }: { args: string[] }) {
         else if (r.top < p.top + headH + 8) pane.scrollTop -= p.top + headH + 8 - r.top;
         return;
       }
-      // Everywhere else the page scrolls: just bring the row into view. The browser
-      // resolves the correct scroll container itself. scroll-margin-top (set in CSS)
-      // keeps it clear of the sticky top/subnav bars.
-      target.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+      // The page itself only moves when the operator asks ("Show line"). A scan must
+      // never scroll the page, or the scan box leaves the screen and he has to
+      // scroll back up before the next scan.
+      if (_revealPage) target.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
     }));
+  }
+  /* Scan order: the line touched by the latest scan is shown first, right under the
+     scan box, so it is visible without scrolling. Display only — the bill, its line
+     numbers and the printed order stay as added. */
+  const [touched, setTouched] = useState<string[]>([]);
+  function displayOrder<L extends { id: string }>(items: L[]): L[] {
+    const byId = new Map(items.map(l => [l.id, l]));
+    const first = touched.map(id => byId.get(id)).filter((l): l is L => !!l);
+    const seen = new Set(first.map(l => l.id));
+    return [...first, ...items.filter(l => !seen.has(l.id)).reverse()];
   }
   useEffect(() => {
     if (!pendingScan.current) return;
     const added = pendingScan.current; pendingScan.current = null;
+    setTouched(old => [added.id, ...old.filter(id => id !== added.id)]);
     setLastScanId(added.id); showLine(added.id);
     const line = b?.items.find(l => l.id === added.id);
     if (line) setScanFeedback({ sequence: ++scanSequence.current, line: { ...line }, added: added.added, repeated: added.repeated });
+    // keep the scan box ready for the next label, without moving the page
+    const active = document.activeElement;
+    if (!active || active === document.body) scanRef.current?.focus({ preventScroll: true });
   }, [b]);
+  useEffect(() => { setTouched([]); }, [b?.id]);
   useEffect(() => {
     if (!flashId) return;
     const timer = setTimeout(() => { rowRefs.current.get(flashId)?.classList.remove("flash"); setFlashId(null); }, 1600);
@@ -560,7 +575,7 @@ export default function Billing({ args }: { args: string[] }) {
             <table className="pos-t" aria-label="Bill items">
               <thead><tr><th>#</th><th>Box</th><th>Item · Style · Colour</th><th className="r">Pkt</th><th className="r">Qty</th><th className="r">Rate ₹</th><th className="r">Disc</th><th className="r">Amount</th><th /></tr></thead>
               <tbody>
-                {t.items.map((l, i) => (
+                {displayOrder(t.items).map(l => [l, t.items.indexOf(l)] as const).map(([l, i]) => (
                   <tr key={l.id} className={"ln" + (lastScanId === l.id ? " scanned" : "") + (flashId === l.id ? " flash" : "")} aria-current={lastScanId === l.id ? "true" : undefined} ref={row => { if (row) rowRefs.current.set(l.id, row); else rowRefs.current.delete(l.id); }}>
                     <td className="mut" data-l="#"><input type="checkbox" aria-label={"Select bill line " + (i + 1)} checked={selectedLines.has(l.id)} onChange={event => setSelectedLines(old => { const next = new Set(old); event.target.checked ? next.add(l.id) : next.delete(l.id); return next; })} /><span className="xs">{i + 1}</span></td>
                     <td data-l="Box"><input className="cell" style={{ width: 38 }} inputMode="numeric" value={l.box_no} onChange={e => setLine(l.id, { box_no: Math.max(1, parseInt(e.target.value) || 1) })}
