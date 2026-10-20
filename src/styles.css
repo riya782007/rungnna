@@ -646,6 +646,11 @@ html{scrollbar-gutter:stable}
    itself instead of pushing the pinned scan bar away. (On the big-counter layout
    the lines pane scrolls on its own, so this sticky behaviour is overridden.) */
 .pos-entry{position:sticky;top:64px;z-index:15;max-height:calc(100vh - 80px);overflow:auto}
+/* Compact in-bill camera: keep the scanner small so the added bill lines stay
+   visible underneath instead of being pushed off-screen by a full-size preview. */
+.pos-cam{max-width:300px}
+.pos-cam .vf{aspect-ratio:auto;height:180px}
+.pos-cam .vf .guide{inset:14% 12%}
 .pos-entry .in{height:38px;padding:0 10px}
 .pos-entry .btn{height:38px;padding:0 12px}
 .pos-entry .wedge{height:40px}
