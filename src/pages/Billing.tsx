@@ -43,6 +43,7 @@ const PosCalculator = lazy(() => import("../components/PosTools").then(m => ({ d
 
 export default function Billing({ args }: { args: string[] }) {
   const { me } = useApp();
+  const [editorOpen, setEditorOpen] = useState(false);
   const [entryFocus, setEntryFocus] = useState(0), [calculator, setCalculator] = useState(false), [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [shop, setShop] = useState<Shop>(DEFAULT_SHOP);
@@ -154,7 +155,7 @@ export default function Billing({ args }: { args: string[] }) {
     const [lo, hi] = [Math.min(anchor, toIdx), Math.max(anchor, toIdx)];
     setSelectedLines(() => new Set(ids.slice(lo, hi + 1)));
   }
-  function showLine(id: string, _revealPage = false) {
+  function showLine(id: string) {
     const row = rowRefs.current.get(id);
     if (!row) return;
     flashRow(row, id);
@@ -171,12 +172,17 @@ export default function Billing({ args }: { args: string[] }) {
         const r = target.getBoundingClientRect(), p = pane.getBoundingClientRect();
         if (r.bottom > p.bottom) pane.scrollTop += r.bottom - p.bottom + 8;
         else if (r.top < p.top + headH + 8) pane.scrollTop -= p.top + headH + 8 - r.top;
-        return;
       }
-      // The page itself only moves when the operator asks ("Show line"). A scan must
-      // never scroll the page, or the scan box leaves the screen and he has to
-      // scroll back up before the next scan.
-      if (_revealPage) target.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+      // The ledger can be below the viewport on laptops. Reveal the committed
+      // row below the pinned controls as well as scrolling the ledger itself.
+      const r = target.getBoundingClientRect();
+      const dock = counterDockRef.current?.getBoundingClientRect();
+      const top = dock ? Math.max(64, dock.bottom) + 12 : 76;
+      const bottomBar = document.querySelector(".pos-mbar")?.getBoundingClientRect();
+      const bottom = bottomBar && bottomBar.height > 0 ? Math.min(window.innerHeight, bottomBar.top) : window.innerHeight;
+      if (r.top < top || r.bottom > bottom - 12) {
+        target.scrollIntoView({ block: "start", inline: "nearest", behavior: "instant" });
+      }
     }));
   }
   /* Scan order: the line touched by the latest scan is shown first, right under the
@@ -500,7 +506,7 @@ export default function Billing({ args }: { args: string[] }) {
       if (k === "F5") setCalculator(true);
       if (k === "F6") doSave(false);
       if (k === "F7") scanRef.current?.focus();
-      if (k === "F8") setEntryFocus(n => n + 1);
+      if (k === "F8") { setEditorOpen(true); setEntryFocus(n => n + 1); }
       if (k === "F9") doSave(true);
       if (k === "F10") doSave(false, true);
       if (k === "F11") boxSummaryRef.current?.focus({ preventScroll: true });
@@ -579,22 +585,22 @@ export default function Billing({ args }: { args: string[] }) {
               <button className={"btn " + (cam || sheet ? "p" : "g")} onClick={() => (small ? setSheet(true) : setCam(!cam))} title="Scan with the camera"><Icon n="scan" size={20} />Scan</button>
               {!small && <button className={"btn " + (peers ? "p" : "")} onClick={() => setPairOpen(true)} title="Use a phone as the scanner"><Icon n="sell" size={18} />{peers ? "Phone linked" : "Phone as scanner"}</button>}
               <MicButton onAudio={a => doVoice(a)} busy={aiBusy} label="🎙 Speak order" />
-              <button className="btn" aria-pressed="true" aria-expanded="true" aria-controls="pos-item-entry" disabled={saving} onClick={() => setEntryFocus(n => n + 1)}><Plus size={18} />Add item</button>
+              <button className="btn" aria-pressed={editorOpen} aria-expanded={editorOpen} aria-controls="pos-item-entry" disabled={saving} onClick={() => { setEditorOpen(x => !x); setEntryFocus(n => n + 1); }}><Plus size={18} />Add item</button>
               <button className="btn" disabled={saving} title="POS calculator" aria-label="POS calculator" onClick={() => setCalculator(true)}><Calculator size={20} /></button>
             </div>
             <div className={"lastscan" + (lastScan ? " has-item" : "")} role="status" aria-live="polite" aria-atomic="true">
               <span>{lastScan ? <><b>Added: {lastScan.item || lastScan.style || lastScan.code}</b><span className="xs">{[lastScan.style, lastScan.color, `Box ${lastScan.box_no}`, `${lastScan.qty} ${lastScan.type || "PCS"} × ${billAmount(lastScan.rate)}`, billAmount(lastScan.amount)].filter(Boolean).join(" · ")}</span>{lastRead && <span className="xs mono qr-read">{lastRead}</span>}</> : <span className="mut">{t.items.length} bill lines · {t.total_qty} units</span>}</span>
-              {lastScan && <button className="btn sm" onClick={() => showLine(lastScan.id, true)}>Show line</button>}
+              {lastScan && <button className="btn sm" onClick={() => showLine(lastScan.id)}>Show line</button>}
             </div>
             </div>
       </div>
 
       <div className="pos-main">
         <div className="stack pos-workspace" style={{ minWidth: 0 }}>
-          <div className="pos-entry stack" style={{ gap: 8 }}>
+          {(cam && !small || editorOpen) && <div className="pos-entry stack" style={{ gap: 8 }}>
             {cam && !small && <div className="pos-cam"><CameraScanner onCode={c => onCode(c)} /></div>}
-            {itemEditor}
-          </div>
+            {editorOpen && itemEditor}
+          </div>}
 
           <NameItemCodes codes={unnamed} onNamed={(code, name, unit) => setB(x => x && { ...x, items: x.items.map(l =>
             (l.item === "ITEM " + code || (!l.item && l.product_id && pmap.get(l.product_id)?.item_code === code)) ? { ...l, item: name, type: unit } : l) })} />
