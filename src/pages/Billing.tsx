@@ -593,10 +593,12 @@ export default function Billing({ args }: { args: string[] }) {
         <label className="f" style={{ minWidth: 130 }}>Salesman
           <select className="in" value={b.salesman} onChange={e => set({ salesman: e.target.value })}>
             <option value="">—</option>{staff.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}</select></label>
-        <label className="f" style={{ minWidth: 130 }}>Helper
-          <select className="in" value={b.helper || ""} onChange={e => set({ helper: e.target.value })}>
-            <option value="">—</option>
-            {[...staff].sort((x, y) => Number(y.role === "helper") - Number(x.role === "helper")).map(s => <option key={s.id} value={s.name}>{s.name}{s.role === "helper" ? " (helper)" : ""}</option>)}</select></label>
+        {/* who worked the bill, in counter order: salesman → helper → packed by → rechecked by */}
+        {([["Helper", "helper", "helper"], ["Packing done by", "packed_by", "packer"], ["Rechecked by", "checked_by", ""]] as const).map(([title, key, prefer]) =>
+          <label key={key} className="f" style={{ minWidth: 130 }}>{title}
+            <select className="in" value={b[key] || ""} onChange={e => set({ [key]: e.target.value } as Partial<Bill>)}>
+              <option value="">—</option>
+              {[...staff].sort((x, y) => Number(!!prefer && y.role === prefer) - Number(!!prefer && x.role === prefer)).map(s => <option key={s.id} value={s.name}>{s.name}{prefer && s.role === prefer ? ` (${prefer})` : ""}</option>)}</select></label>)}
         <div className="pos-box"><span className="xs mut">Box qty: {b.box_count} · Current box {box}</span>
           <div className="row" style={{ gap: 4 }}>{boxes.map(x => <button key={x} className="chip" aria-pressed={x === box} onClick={() => setBox(x)}>{x}</button>)}
             <button className="chip" onClick={() => setBox(Math.max(...boxes) + 1)}>+</button></div></div>
@@ -662,7 +664,11 @@ export default function Billing({ args }: { args: string[] }) {
           </div>
           <div className="pos-notes grid g2">
             <label className="f">Remarks<input className="in" value={b.remarks} onChange={e => set({ remarks: e.target.value })} placeholder="Transport, marka, instructions…" /></label>
-            <div className="f"><span>Photo of packed goods</span><PhotoButton value={b.photo_id} onChange={v => set({ photo_id: v })} label="Parcel photo" /></div>
+            <div className="pos-bill-total" aria-label="Bill total">
+              <div><span>Total</span><b className="mono">{billAmount(t.gross)}</b><small>{t.total_qty} pcs · {t.items.length} lines</small></div>
+              <div><span>Discount</span><b className="mono">{t.discount ? "− " + billAmount(t.discount) : billAmount(0)}</b></div>
+              <div className="net"><span>Net amount</span><b className="mono">{billAmount(t.net)}</b></div>
+            </div>
           </div>
         </div>
 
