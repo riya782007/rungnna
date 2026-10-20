@@ -1,3 +1,5 @@
+import { renderLabelSvg } from "../src/lib/label-artwork";
+import { labelLines } from "../src/lib/label-tspl";
 import { expect, it, vi } from "vitest";
 import { DEFAULT_CFG, validateLabelPrint, runBatches, printerSig, PrintSheet, upgradeLabelCfg, useLabelPrint, type LabelCfg } from "../src/pages/Labels";
 import { createElement } from "react";
@@ -72,3 +74,17 @@ it("reports invalid queue or incompatible direct output as a failed start", () =
   expect(captureStart(DEFAULT_CFG)([])).toMatchObject({ started: false, message: expect.stringContaining("quantities") });
   expect(captureStart(DEFAULT_CFG)(jobs, true)).toMatchObject({ started: false, message: expect.stringContaining("QZ Tray") });
 });
+
+ it("migrates hidden names to name-only text without changing printer calibration", () => {
+  const cfg = upgradeLabelCfg({ ...DEFAULT_CFG, textVersion: undefined, offX: 3.2, show: { ...DEFAULT_CFG.show, item: false, code: true, rate: true } });
+  expect(cfg.offX).toBe(3.2);
+  expect(cfg.show).toEqual(DEFAULT_CFG.show);
+  expect(cfg.textVersion).toBe(1);
+  const svg = renderLabelSvg(cfg, jobs[0].p, 1, 7);
+  expect([...svg.matchAll(/<text[^>]*>(.*?)<\/text>/g)].map(m => m[1])).toEqual(["BALI"]);
+  expect(svg).toContain('shape-rendering="crispEdges"');
+  expect(labelLines(cfg, jobs[0].p, 1).map(l => l.text)).toEqual(["BALI"]);
+ });
+ it("preserves optional text settings chosen after the name-only migration", () => {
+  expect(upgradeLabelCfg({ ...DEFAULT_CFG, show: { ...DEFAULT_CFG.show, color: true } }).show.color).toBe(true);
+ });

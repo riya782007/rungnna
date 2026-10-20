@@ -35,7 +35,9 @@ describe("printing stickers in batches that can be stopped", () => {
   });
 });
 
-import { DEFAULT_CFG, upgradeLabelCfg, validateLabelPrint, PrintSheet } from "../src/pages/Labels";
+import { DEFAULT_CFG as NAME_ONLY_CFG, upgradeLabelCfg, validateLabelPrint, PrintSheet } from "../src/pages/Labels";
+// These cases exercise the optional detailed-label settings.
+const DEFAULT_CFG = { ...NAME_ONLY_CFG, show: { shop: true, item: true, style: true, color: true, rate: true, tk: false, code: false, qty: true, cost_code: true, line: true } };
 import { renderToStaticMarkup } from "react-dom/server";
 describe("the shop's stickers, printed as the old software prints them", () => {
   const PAGE = { preset: "rjpage", mode: "sheet", sheetW: 101.6, sheetH: 152.4, w: 33, h: 15, cols: 3, rows: 9, gapX: 1.3, gapY: 1.93, left: 3.5, edgeR: 100, qr: 8, font: 5, offX: 0, offY: 0 } as const;
