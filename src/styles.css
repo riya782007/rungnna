@@ -913,3 +913,36 @@ html{scrollbar-gutter:stable}
   .billing-shell .pos-sum{position:static;max-height:none}
   .billing-shell .pos-lines .pos-t tr.ln{scroll-margin-top:40px}
 }
+
+/* Compact pinned controls leave the ledger visible on ordinary laptop screens. */
+.billing-shell .pos-counter-dock .pos-top{gap:6px;padding:6px 8px}
+.billing-shell .pos-counter-dock .pos-scanhead{padding:6px 8px;gap:5px!important}
+.pos-counter-dock .scanrow{gap:5px}
+.pos-counter-dock .wedge{height:34px}
+.pos-counter-dock .wedge input{font-size:14px}
+.pos-counter-dock .scanrow .btn{height:30px;min-height:30px;padding:0 9px;font-size:12px;gap:5px}
+.pos-counter-dock .lastscan{min-height:38px;padding:4px 8px;font-size:12px}
+.pos-counter-dock .lastscan.has-item b{font-size:14px}
+.pos-counter-dock .lastscan .xs{font-size:11px}
+.pos-counter-dock .lastscan .btn{height:28px;min-height:28px;font-size:12px;padding:0 8px}
+.pos-counter-dock .lastscan .qr-read{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+@media(min-width:861px){
+  .billing-shell .pos-counter-dock .pos-top{display:grid;grid-template-columns:minmax(215px,1.25fr) minmax(105px,.65fr) minmax(140px,1fr) minmax(100px,.6fr) minmax(140px,.85fr);align-items:center}
+  .pos-counter-dock .pos-top>div:first-child{flex-wrap:wrap!important;gap:3px!important}
+  .pos-counter-dock .pos-title{display:flex;align-items:baseline;gap:5px}
+  .pos-counter-dock .pos-title b{font-size:15px}
+  .pos-counter-dock .pos-title .xs{font-size:10px}
+  .pos-counter-dock .seg button{height:28px;padding:0 9px;font-size:12px}
+  .pos-counter-dock .pos-no{min-width:0}
+  .pos-counter-dock .pos-no b{font-size:13px}
+  .pos-counter-dock .pos-cust{padding:4px 8px;min-height:44px;min-width:0}
+  .pos-counter-dock .pos-cust b{font-size:14px}
+  .pos-counter-dock .f{min-width:0!important;font-size:11px;gap:3px}
+  .pos-counter-dock .in{height:30px;min-height:30px;padding:0 7px;font-size:13px}
+  .pos-counter-dock .pos-box{min-width:0}
+  .pos-counter-dock .pos-box .xs{font-size:10px}
+  .pos-counter-dock .pos-box .chip{height:25px;min-height:25px;padding:0 7px;font-size:12px}
+}
+@media(max-width:860px){
+  .pos-lines .pos-t tr.ln{scroll-margin-top:120px;scroll-margin-bottom:160px}
+}
