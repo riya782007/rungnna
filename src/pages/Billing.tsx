@@ -1,3 +1,4 @@
+import { parkBillingDraft, resumeBillingDraft } from "../lib/billing-drafts";
 import { DeleteButton } from "../components/DeleteButton";
 import { confirmDelete } from "../lib/confirm-delete";
 import { SelectAll } from "../components/SelectAll";
@@ -13,7 +14,7 @@ import { db, put, getSetting, setSetting, type Bill, type BillLine, type Party, 
 import { findByScan, fillFromItemCode, label, readItemMap, codeInfo } from "../lib/products";
 import { NameItemCodes, unnamedCodes } from "../components/NameItemCodes";
 import { isRfidTag, normTag, soldBill, TagSet, Recent } from "../lib/rfid";
-import { discError, newBill, lineFrom, priceFor, totals, gstLabel, fixLine, finalize, holdBill, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
+import { discError, newBill, lineFrom, priceFor, totals, gstLabel, fixLine, finalize, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
 import { voiceBill } from "../lib/ai";
 import { useApp, toast, beep, go } from "../lib/app";
 import { can } from "../lib/roles";
@@ -46,6 +47,9 @@ export default function Billing({ args }: { args: string[] }) {
   const [editorOpen, setEditorOpen] = useState(false);
   const [entryFocus, setEntryFocus] = useState(0), [calculator, setCalculator] = useState(false), [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
+  const switchingRef = useRef(false);
+  const [switching, setSwitching] = useState(false);
+  const [lastSaved, setLastSaved] = useState<Bill | null>(null);
   const [shop, setShop] = useState<Shop>(DEFAULT_SHOP);
   const [b, setB] = useState<Bill | null>(null);
   const billRef = useRef(b); billRef.current = b;
@@ -219,7 +223,7 @@ export default function Billing({ args }: { args: string[] }) {
   const [held, setHeld] = useState(false);
   const [custOpen, setCustOpen] = useState(false);
   const [printing, setPrinting] = useState<{ bill: Bill; fmt: PrintFormat; bags?: boolean } | null>(null);
-  const [bagWithBill, setBagWithBill] = useState(true);
+  const [bagWithBill, setBagWithBill] = useState(false);
   const [fmt, setFmt] = useState<PrintFormat>("a5");
   const [aiBusy, setAiBusy] = useState(false);
   const [nextNo, setNextNo] = useState("");
@@ -249,10 +253,11 @@ export default function Billing({ args }: { args: string[] }) {
     (async () => {
       const s = await getShop(); setShop(s);
       setFmt(await getSetting<PrintFormat>("print_fmt", "80mm"));
-      setBagWithBill(await getSetting<boolean>("bag_labels_with_bill", true));
-      if (args[0]) { const x = await db.bills.get(args[0]); if (x && inStore(x)) { setBox(selectedBox(x)); setB(x.status === "hold" ? { ...x, items: mergeBillLines(x.items) } : x); return; } }
+      setBagWithBill(await getSetting<boolean>("bag_labels_with_bill", false));
+      if (args[0]) { const x = await db.bills.get(args[0]); if (x && inStore(x) && (!isEstimate(x) || isOpen())) { setBox(selectedBox(x)); setB(x.status === "hold" ? { ...x, items: mergeBillLines(x.items) } : x); return; } }
       const d = await getSetting<BillingDraft | null>("draft_bill", null);
-      const restored = d && d.status === "hold" && !d.no && (d.bill_type !== "estimate" || isOpen()) ? d : null;
+      if (d?.bill_type === "estimate" && !isOpen() && d.items.length) await parkBillingDraft(d, selectedBox(d), s);
+      const restored = d && d.status === "hold" && !d.no && (d.bill_type !== "estimate" || isOpen()) ? d : await resumeBillingDraft("gst");
       setBox(restored ? selectedBox(restored) : 1);
       if (restored) delete (restored as BillingDraft).selected_box;   // draft-only field: never saved onto the bill
       setB(restored ? { ...restored, items: mergeBillLines(restored.items) } : newBill(me?.id || "", s, "gst"));
@@ -269,9 +274,29 @@ export default function Billing({ args }: { args: string[] }) {
   const [askCode, setAskCode] = useState(false);
   useEffect(() => {
     if (priv || !b || b.bill_type !== "estimate") return;
-    // locked while an estimate was open: park it out of sight, continue with a GST invoice
-    (async () => { if (b.items.length) await holdBill(totals(b, shop.state, shop.gstin)); await setSetting("draft_bill", null); setB(newBill(me?.id || "", shop, "gst")); setBox(1); })();
+    // Keep the locked estimate in Held, then return to the separate invoice draft.
+    void openDocument("gst");
   }, [priv]);
+  async function openDocument(type: Bill["bill_type"], heldBill?: Bill) {
+    if (savingRef.current || switchingRef.current || (type === "estimate" && !isOpen())) return;
+    const current = billRef.current;
+    if (!heldBill && current?.bill_type === type) return;
+    switchingRef.current = true; setSwitching(true);
+    try {
+      const held = heldBill ? await db.bills.get(heldBill.id) : null;
+      if (heldBill && (!held || held.deleted || held.no || held.status !== "hold" || !inStore(held))) throw new Error("This held bill is no longer available");
+      if (current && current.id !== held?.id) await parkBillingDraft(current, boxRef.current, shop);
+      const draft = held || await resumeBillingDraft(type);
+      if ((type === "estimate" || (draft && isEstimate(draft))) && !isOpen()) throw new Error("Unlock estimates before resuming");
+      if (billRef.current?.id !== current?.id) throw new Error("Bill changed — choose the document again");
+      const next = draft || newBill(me?.id || "", shop, type);
+      setBox(selectedBox(next));
+      const clean = { ...next }; delete (clean as BillingDraft).selected_box;
+      setB({ ...clean, items: mergeBillLines(clean.items) });
+      if (draft) toast(`Resumed ${type === "estimate" ? "estimate" : type === "gst" ? "tax invoice" : "challan"} · ${draft.party_name || "Walk-in"}`);
+    } catch (error: any) { toast(error.message || "Could not switch bill", true); }
+    finally { switchingRef.current = false; setSwitching(false); }
+  }
   const press = useRef<any>(0);
   const hintProps = {
     onDoubleClick: () => !priv && setAskCode(true),
@@ -302,7 +327,7 @@ export default function Billing({ args }: { args: string[] }) {
   useEffect(() => { tagsRef.current = new TagSet(b?.rfid_tags || []); }, [b?.id]);
 
   function addProduct(p: Product, pkts = 1, pieces = 0, rate = 0, destination = { billId: billRef.current?.id, box: boxRef.current }) {
-    if (savingRef.current || destination.billId !== billRef.current?.id) return false;
+    if (savingRef.current || switchingRef.current || destination.billId !== billRef.current?.id) return false;
     const repeated = billRef.current?.items.some(l => l.product_id === p.id && l.box_no === destination.box);
     beep(repeated ? "repeat" : true);
     setB(x => {
@@ -338,7 +363,7 @@ export default function Billing({ args }: { args: string[] }) {
 
   async function onCode(raw: string): Promise<string> {
     const r = raw.trim(); if (!r) return "";
-    if (savingRef.current) return "Saving bill";
+    if (savingRef.current || switchingRef.current) return "Please wait for the bill";
     // Capture before lookup: a fast BB scan must not move this item to the next box.
     const destination = { billId: billRef.current?.id, box: boxRef.current };
     setScanFeedback(null);
@@ -355,7 +380,7 @@ export default function Billing({ args }: { args: string[] }) {
     }
     if (r.startsWith("#") && r.length > 1) { // typed code in the scan box
       setQ("");
-      if (await unlock(r.slice(1))) { set({ bill_type: "estimate" }); beep(); } else { beep(false); toast("Not found", true); }
+      if (await unlock(r.slice(1))) { await openDocument("estimate"); beep(); } else { beep(false); toast("Not found", true); }
       return "";
     }
     if (isRfidTag(r)) {
@@ -429,7 +454,7 @@ export default function Billing({ args }: { args: string[] }) {
   async function doSave(print = false, share = false, bags = false) {
     if (!b || !t) return;
     if (bags && !b.party_name.trim()) return toast("Enter the customer name before printing bag labels", true);
-    if (savingRef.current) return;
+    if (savingRef.current || switchingRef.current) return;
     if (b.status === "final") {
       beep("repeat"); toast("This bill is already saved");
       const saved = await db.bills.get(b.id);
@@ -456,7 +481,8 @@ export default function Billing({ args }: { args: string[] }) {
     if (missing) return toast("Add the product name before saving: " + (missing.style || missing.code), true);
     const done = await finalize(t, shop.state, b.party_name);
     beep("saved");
-    toast(`Saved ${done.no} · ${billAmount(done.net)}`);
+    setLastSaved(done);
+    toast(`Saved ${done.bill_type === "estimate" ? "estimate" : done.bill_type === "gst" ? "tax invoice" : "challan"} ${done.no} in Bills · ${billAmount(done.net)}`);
     if (done.oversold?.length) toast("Saved with negative stock: " + done.oversold.map(o => `${o.item} (${o.qty} more than recorded)`).join(", "), true);
     await setSetting("draft_bill", null);
     if (bags) setBagBill(done);
@@ -468,9 +494,9 @@ export default function Billing({ args }: { args: string[] }) {
     finally { savingRef.current = false; setSaving(false); }
   }
   async function doHold() {
-    if (savingRef.current) return;
+    if (savingRef.current || switchingRef.current) return;
     if (!b?.items.length) return toast("Nothing to hold", true);
-    await holdBill(totals(b, shop.state, shop.gstin)); await setSetting("draft_bill", null);
+    await parkBillingDraft(b, box, shop); await setSetting("draft_bill", null);
     toast("Bill on hold — F4 to bring it back"); setB(newBill(me?.id || "", shop, b.bill_type)); setBox(1);
   }
   async function doVoice(audio?: Blob, text?: string) {
@@ -499,7 +525,7 @@ export default function Billing({ args }: { args: string[] }) {
       const k = e.key;
       if (!/^F\d+$/.test(k)) return;
       e.preventDefault();
-      if (calculator || savingRef.current || document.querySelector('.modal,dialog[open]')) return;
+      if (calculator || savingRef.current || switchingRef.current || document.querySelector('.modal,dialog[open]')) return;
       if (k === "F2") { const snapshot = billRef.current; void (async () => { if (snapshot?.items.length && !await confirmDelete("Clear the current bill and start a new one? Use Hold to keep it.")) return; if (billRef.current?.id !== snapshot?.id) return; setB(newBill(me?.id || "", shop, priv ? snapshot?.bill_type || "gst" : "gst")); setBox(1); })(); }
       if (k === "F3") doHold();
       if (k === "F4") setHeld(true);
@@ -515,7 +541,8 @@ export default function Billing({ args }: { args: string[] }) {
     addEventListener("keydown", f); return () => removeEventListener("keydown", f);
   });
 
-  if (!b || !t) return <div className="card pad">Loading…</div>;
+  if (!b || !t || switching || (!priv && isEstimate(b))) return <div className="card pad">Loading bill…</div>;
+  const documentName = b.bill_type === "estimate" ? "estimate" : b.bill_type === "gst" ? "tax invoice" : "challan";
   const unnamed = unnamedCodes(t.items, id => (id ? pmap.get(id)?.item_code : undefined));
   const boxes = [...new Set([...t.items.map(l => l.box_no), box])].sort((a, z) => a - z);
   const balance = due(t);
@@ -545,16 +572,16 @@ export default function Billing({ args }: { args: string[] }) {
       <div className="pos-counter-dock" ref={counterDockRef}>
       <div className="pos-top card">
         {priv ? <div className="seg" role="group" aria-label="Bill type">
-          <button aria-pressed={b.bill_type === "estimate"} onClick={() => set({ bill_type: "estimate" })}>Estimate</button>
-          <button aria-pressed={b.bill_type === "gst"} onClick={() => set({ bill_type: "gst" })}>GST Invoice</button>
-          <button aria-pressed={b.bill_type === "challan"} onClick={() => set({ bill_type: "challan" })}>Challan</button>
+          <button aria-pressed={b.bill_type === "estimate"} onClick={() => void openDocument("estimate")}>Estimate</button>
+          <button aria-pressed={b.bill_type === "gst"} onClick={() => void openDocument("gst")}>GST Invoice</button>
+          <button aria-pressed={b.bill_type === "challan"} onClick={() => void openDocument("challan")}>Challan</button>
           <button onClick={() => lockNow()} title="Lock estimates" aria-label="Lock estimates"><Icon n="lock" size={15} /></button>
         </div> : <div className="row" style={{ gap: 8, flexWrap: "nowrap" }}>
           <div className="pos-title" {...hintProps}><b>{b.bill_type === "challan" ? "Delivery challan" : "Tax invoice"}</b><span className="xs mut">{b.bill_type === "challan" ? "goods out · no money" : b.gst_rate + "% GST"}</span></div>
           <div className="seg" role="group" aria-label="Document">
             {can(me, "estimates.open") && <button title="Unlock private estimates" aria-label="Unlock private estimates" onClick={() => setAskCode(true)}><Icon n="lock" size={15} /></button>}
-            <button aria-pressed={b.bill_type !== "challan"} onClick={() => set({ bill_type: "gst" })}>Invoice</button>
-            <button aria-pressed={b.bill_type === "challan"} onClick={() => set({ bill_type: "challan" })} title="Send goods now, invoice later">Challan</button>
+            <button aria-pressed={b.bill_type !== "challan"} onClick={() => void openDocument("gst")}>Invoice</button>
+            <button aria-pressed={b.bill_type === "challan"} onClick={() => void openDocument("challan")} title="Send goods now, invoice later">Challan</button>
           </div></div>}
         <div className="pos-no"><span className="xs mut">{b.no ? "Bill no" : "Next no"}</span><b className="mono">{b.no || nextNo}</b></div>
         <button className="pos-cust" onClick={() => setCustOpen(true)}>
@@ -666,18 +693,20 @@ export default function Billing({ args }: { args: string[] }) {
           <div className="grid g2" style={{ gap: 6 }}>
             <button className="btn" disabled={saving} onClick={doHold}>Hold · F3</button>
             <button className="btn" disabled={saving} onClick={() => setHeld(true)}>Held · F4</button>
-            <button className="btn p" disabled={saving} onClick={() => doSave(false)}>{saving ? "Saving…" : "Save · F6"}</button>
-            <button className="btn dk" disabled={saving} onClick={() => doSave(true)}>Print · F9</button>
+            <button className="btn p" disabled={saving} onClick={() => doSave(false)}>{saving ? "Saving…" : `Save ${documentName}`}</button>
+            <button className="btn dk" disabled={saving} onClick={() => doSave(true)}>Print {documentName}</button>
           </div>
-          <label className="row sm"><input type="checkbox" checked={bagWithBill} onChange={event => { setBagWithBill(event.target.checked); void setSetting("bag_labels_with_bill", event.target.checked); }} /> Offer customer bag labels after bill printing</label>
-          <button className="btn" disabled={saving || !t.items.length} onClick={() => doSave(false, false, true)}>Save & bag labels</button>
+          <div className="xs mut">Saves to Bills → {b.bill_type === "estimate" ? "Estimates (unlocked only)" : b.bill_type === "gst" ? "Tax invoices" : "Challans"}.</div>
+          {lastSaved && (priv || !isEstimate(lastSaved)) && <button className="linkbtn sm" onClick={() => go("bills/" + lastSaved.id)}>View saved {lastSaved.bill_type === "estimate" ? "estimate" : lastSaved.bill_type === "gst" ? "tax invoice" : "challan"} {lastSaved.no}</button>}
+          <label className="row sm"><input type="checkbox" checked={bagWithBill} onChange={event => { setBagWithBill(event.target.checked); void setSetting("bag_labels_with_bill", event.target.checked); }} /> Also print customer bag stickers (optional)</label>
+          <button className="btn" disabled={saving || !t.items.length} onClick={() => doSave(false, false, true)}>Save & bag stickers</button>
           <button className="btn g w" disabled={saving} onClick={() => doSave(false, true)}>Save & WhatsApp · F10</button>
         </aside>
       </div>
 
       <div className="fkeys">{KEYS.map(([k, v]) => <span key={k}><kbd>{k}</kbd>{v}</span>)}</div>
       <div className="pos-mbar"><div><span className="xs">{t.total_qty} pcs · {t.items.length} lines</span><b>{billAmount(t.net)}</b></div>
-        <button className="btn g" disabled={saving} onClick={() => doSave(false, true)}>Save & Send</button><button className="btn p" disabled={saving} onClick={() => doSave(false)}>{saving ? "Saving…" : "Save"}</button></div>
+        <button className="btn g" disabled={saving} onClick={() => doSave(false, true)}>Save & Send</button><button className="btn p" disabled={saving} onClick={() => doSave(false)}>{saving ? "Saving…" : `Save ${documentName}`}</button></div>
       <Suspense fallback={<div className="toast" role="status">Loading billing tool…</div>}>
         {calculator && <PosCalculator lines={t.items} onClose={() => setCalculator(false)} onApply={(value, target: CalcTarget, id) => {
           if (value < 0) throw new Error("Billing amounts cannot be negative");
@@ -690,8 +719,8 @@ export default function Billing({ args }: { args: string[] }) {
       {custOpen && <CustomerPicker bill={b} onPick={p => { set(p); setCustOpen(false); scanRef.current?.focus(); }} onClose={() => setCustOpen(false)} />}
       {sheet && <ScanSheet onCode={onCode} onClose={() => setSheet(false)} lines={t.items.length} pcs={t.total_qty} net={t.net} last={t.items[t.items.length - 1]} />}
       {pairOpen && <PairPhone id={pairId} peers={peers} onNew={async () => { const id = Math.random().toString(36).slice(2, 10); await setSetting("remote_id", id); setPairId(id); }} onClose={() => setPairOpen(false)} />}
-      {askCode && <CodePrompt onDone={ok => { setAskCode(false); if (ok) set({ bill_type: "estimate" }); }} />}
-      {held && <HeldBills onPick={x => { setBox(selectedBox(x)); setB(x); setHeld(false); }} onClose={() => setHeld(false)} />}
+      {askCode && <CodePrompt onDone={ok => { setAskCode(false); if (ok) void openDocument("estimate"); }} />}
+      {held && <HeldBills activeId={b.id} onPick={x => { setHeld(false); void openDocument(x.bill_type, x); }} onClose={() => setHeld(false)} />}
       {bagBill && <BagLabels bill={bagBill} onClose={() => setBagBill(null)} />}
       {printing && <PrintBill b={printing.bill} shop={shop} format={printing.fmt} onDone={() => { setPrinting(null); if (printing.bags) setBagBill(printing.bill); }} />}
     </div>
@@ -717,7 +746,7 @@ function Payments({ pays, left, onChange }: { pays: Payment[]; left: number; onC
 function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Partial<Bill>) => void; onClose: () => void }) {
   const [q, setQ] = useState(bill.party_phone || bill.party_name || "");
   const [photo, setPhoto] = useState<string | undefined>();
-  const parties = useLiveQuery(() => db.parties.filter(p => !p.deleted).toArray(), [], []);
+  const parties = useLiveQuery(() => db.parties.filter(p => !p.deleted && p.kind !== "supplier").toArray(), [], []);
   const list = useMemo(() => { const x = q.trim().toLowerCase(); return x ? parties.filter(p => (p.name + " " + p.phone + " " + p.city).toLowerCase().includes(x)).slice(0, 12) : parties.slice(0, 12); }, [q, parties]);
   const pick = (p: Party) => onPick({ party_id: p.id, party_name: p.name, party_phone: p.phone, party_gstin: p.gstin, party_state: p.state, party_address: [p.address, p.city, p.pin].filter(Boolean).join(", "), price_level: p.tier });
   const create = async () => {
@@ -747,15 +776,15 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
   );
 }
 
-function HeldBills({ onPick, onClose }: { onPick: (b: Bill) => void; onClose: () => void }) {
+function HeldBills({ activeId, onPick, onClose }: { activeId: string; onPick: (b: Bill) => void; onClose: () => void }) {
   const open = usePrivate();
-  const list = useLiveQuery(() => db.bills.where("status").equals("hold").filter(b => inStore(b) && !b.deleted && !b.no && (open || !isEstimate(b))).reverse().sortBy("at"), [open], []);
+  const list = useLiveQuery(() => db.bills.where("status").equals("hold").filter(b => b.id !== activeId && inStore(b) && !b.deleted && !b.no && (open || !isEstimate(b))).reverse().sortBy("at"), [open, activeId], []);
   return (
     <Modal title="Bills on hold" onClose={onClose}>
       <div className="stack" style={{ gap: 6 }}>
         {list.map(b => (
           <div key={b.id} className="item">
-            <span className="grow"><b>{b.party_name || "Walk-in"}</b><div className="xs mut">{b.items.length} lines · {b.total_qty} pcs · {new Date(b.at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</div></span>
+            <span className="grow"><span className="pill">{b.bill_type === "estimate" ? "Estimate" : b.bill_type === "gst" ? "Tax invoice" : "Challan"}</span> <b>{b.party_name || "Walk-in"}</b><div className="xs mut">{b.items.length} lines · {b.total_qty} pcs · {new Date(b.at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</div></span>
             <b className="mono">{billAmount(b.net)}</b>
             <button className="btn sm p" onClick={() => onPick(b)}>Resume</button>
             <DeleteButton className="btn sm bad" onDelete={async () => { if (await confirmDelete("Discard this held bill?")) await put("bills", { ...b, deleted: 1 }); }}>Discard</DeleteButton>

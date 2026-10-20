@@ -9,8 +9,8 @@ export function BagLabels({ bill, onClose }: { bill: Bill; onClose: () => void }
   useEffect(() => { void loadLabelCfg().then(setCfg).catch(e => setError(e.message)); }, []);
   let jobs: ReturnType<typeof bagLabelJobs> = [];
   try { jobs = bagLabelJobs(bill, Number(count)); } catch {}
-  return <Modal title="Customer bag labels" onClose={() => { if (!printer.busy) onClose(); }}>
-    <div className="stack"><b>{bill.party_name}</b><span className="mono">{bill.no}</span>
+  return <Modal title="Print customer bag stickers (optional)" onClose={() => { if (!printer.busy) onClose(); }}>
+    <div className="stack"><div className="note sm">This {bill.bill_type === "estimate" ? "estimate" : bill.bill_type === "gst" ? "tax invoice" : "challan"} is already saved. Print bag stickers if needed, or close this window.</div><b>{bill.party_name}</b><span className="mono">{bill.no}</span>
       <label className="f">Number of bags<input className="in mono" type="number" min={1} max={5000} step={1} value={count} disabled={printer.busy} onChange={e => setCount(e.target.value)} /></label>
       <div className="sm">Each sticker shows this customer's bill name, bill number and its own bag number. Reprinting keeps the same bag barcode.</div>
       {jobs[0] && <div className="labelprev"><LabelView cfg={cfg} p={jobs[0].p} bag={jobs[0].bag} /></div>}

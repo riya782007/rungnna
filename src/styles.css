@@ -969,3 +969,6 @@ html{scrollbar-gutter:stable}
   .billing-shell .item-code-name-form .in{font-size:16px}
   .billing-shell .item-code-name-form .grow{min-width:0}
 }
+
+/* Contextual Save/Print captions fit the compact totals panel. */
+.billing-shell .pos-sum>.g2>.btn{min-width:0;padding:0 7px;font-size:12px}
