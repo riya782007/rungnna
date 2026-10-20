@@ -6,8 +6,8 @@ import { Eye, EyeOff, Copy, RefreshCw } from "lucide-react";
 import { db, uid, type Staff } from "../lib/db";
 import { Head } from "../components/common";
 import { useApp, toast } from "../lib/app";
-import { PERMISSION_GROUPS, BUILTIN, ROLE_NOTE, permLabel, customRoles, isSensitive, isRoleLogin, can, type CustomRole } from "../lib/roles";
-import { saveRoles, regenerated } from "../lib/roleLogins";
+import { PERMISSION_GROUPS, BUILTIN, BUILTIN_DEFAULT, ROLE_NOTE, permLabel, customRoles, isSensitive, isRoleLogin, can, builtinEdited, type CustomRole } from "../lib/roles";
+import { saveRoles, regenerated, saveBuiltinRole } from "../lib/roleLogins";
 
 /* ===========================================================================
    Roles & Permissions, laid out like the reference console
@@ -122,12 +122,25 @@ export default function Roles() {
     </details>)}</div>
 
     <h3 className="sec-title">Built-in roles</h3>
-    <div className="xs mut" style={{ marginBottom: 8 }}>People with a PIN sign in under these, as today. Copy one to start a role with its permissions.</div>
-    <div className="grid g2">{(["owner", ...BASES] as Staff["role"][]).map(b => <div key={b} className="card pad">
-      <div className="row"><b className="grow" style={{ textTransform: "capitalize" }}>{b}</b>
-        {b !== "owner" && <button className="btn sm" onClick={() => startFrom(b)}>Copy</button>}</div>
-      <div className="xs mut">{ROLE_NOTE[b]} · {b === "owner" ? "all" : BUILTIN[b].length} permissions · {(n => `${n} ${n === 1 ? "person" : "people"}`)(people.filter(s => s.role === b && !s.role_id).length)}</div>
-    </div>)}</div>
+    <div className="xs mut" style={{ marginBottom: 8 }}>People with a PIN sign in under these. Tap <b>Edit</b> to change what a built-in role may do — it applies to everyone with that role. Copy one to start a new role from it.</div>
+    <div className="stack">{(["owner", ...BASES] as Staff["role"][]).map(b => b === "owner"
+      ? <div key={b} className="card pad"><b>Owner</b><div className="xs mut">{ROLE_NOTE[b]} · always every permission · {(n => `${n} ${n === 1 ? "person" : "people"}`)(people.filter(s => s.role === b && !s.role_id).length)}</div></div>
+      : <details key={b + (row?.updated_at || "")} className="card role-card">
+        <summary className="pad row">
+          <span className="grow"><b style={{ textTransform: "capitalize" }}>{b}</b>{builtinEdited(b) && <span className="pill warn" style={{ marginLeft: 8 }}>changed by owner</span>}
+            <div className="xs mut">{builtinEdited(b) ? "Custom permissions" : ROLE_NOTE[b]} · {BUILTIN[b].length} permissions · {(n => `${n} ${n === 1 ? "person" : "people"}`)(people.filter(s => s.role === b && !s.role_id).length)}</div></span>
+          {manage && <span className="xs mut">Edit ⌄</span>}
+          <button className="btn sm" onClick={e => { e.preventDefault(); startFrom(b); }}>Copy</button>
+        </summary>
+        {manage && <div style={{ borderTop: "1px solid var(--line-2)" }}>
+          <RoleEditor role={{ id: "builtin:" + b, name: b, base: b, perms: [...BUILTIN[b]] }} builtin submitLabel={`Save ${b} permissions`}
+            onSave={async r => { try { await saveBuiltinRole(b, r.perms); toast(`${b[0].toUpperCase() + b.slice(1)} permissions saved — applies on every counter after sync`); } catch (e: any) { toast(e.message, true); } }} />
+          {builtinEdited(b) && <div className="pad" style={{ paddingTop: 0 }}><button className="linkbtn" onClick={async () => {
+            if (!confirm(`Put the ${b} role back to its original ${BUILTIN_DEFAULT[b].length} permissions?`)) return;
+            try { await saveBuiltinRole(b, null); toast(`${b} reset to original permissions`); } catch (e: any) { toast(e.message, true); }
+          }}><RefreshCw size={13} /> Reset to original</button></div>}
+        </div>}
+      </details>)}</div>
   </div>;
 }
 
@@ -147,7 +160,7 @@ export function PasscodeChip({ code }: { code?: string }) {
   </span>;
 }
 
-export function RoleEditor({ role, onSave, submitLabel = "Save role", isNew }: { role: CustomRole; onSave: (r: CustomRole) => void; submitLabel?: string; isNew?: boolean }) {
+export function RoleEditor({ role, onSave, submitLabel = "Save role", isNew, builtin }: { role: CustomRole; onSave: (r: CustomRole) => void; submitLabel?: string; isNew?: boolean; builtin?: boolean }) {
   const { me } = useApp();
   const [name, setName] = useState(role.name);
   const [base, setBase] = useState<Staff["role"]>(role.base);
@@ -162,23 +175,23 @@ export function RoleEditor({ role, onSave, submitLabel = "Save role", isNew }: {
   const groups = PERMISSION_GROUPS.map(g => ({ ...g, perms: g.perms.filter(match) })).filter(g => g.perms.length);
 
   // what this role gains and loses against the built-in role it starts from
-  const baseSet = new Set(BUILTIN[base] || []);
+  const baseSet = new Set((builtin ? BUILTIN_DEFAULT[base] : BUILTIN[base]) || []);
   const added = [...checked].filter(k => !baseSet.has(k)).length;
   const dropped = [...baseSet].filter(k => !checked.has(k)).length;
 
   // the owner is never locked out, but someone editing their OWN role can remove the
   // very permission that lets them reach this page, and only the owner could undo it
-  const ownRole = !!me && me.role !== "owner" && me.role_id === role.id;
+  const ownRole = !!me && me.role !== "owner" && (me.role_id === role.id || (!!builtin && !me.role_id && me.role === role.base));
   const lockout = ownRole && !checked.has("staff.manage");
 
   return <div className="pad stack role-editor">
-    <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+    {!builtin && <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
       <input className="in grow" style={{ minWidth: 220 }} placeholder="Role name (e.g. Counter staff)" value={name} onChange={e => setName(e.target.value)} />
       {isNew && <label className="f" style={{ margin: 0 }}>Start from
         <select className="in" value={base} onChange={e => { const b = e.target.value as Staff["role"]; setBase(b); setChecked(new Set(BUILTIN[b])); }}>
           {BASES.map(b => <option key={b} value={b}>{b}</option>)}
         </select></label>}
-    </div>
+    </div>}
     <input className="in" placeholder="Find a permission…" value={find} onChange={e => setFind(e.target.value)} />
     {lockout && <div className="note bad sm">This is your own role. Saving without “Staff, roles &amp; permissions” will lock you out of this page — only the owner could give it back.</div>}
     {!groups.length && <div className="note sm">No permission matches “{find}”.</div>}
@@ -193,7 +206,7 @@ export function RoleEditor({ role, onSave, submitLabel = "Save role", isNew }: {
     })}</div>
     <div className="row">
       <button className="btn p" onClick={() => onSave({ ...role, name, base, perms: [...checked] })}>{submitLabel}</button>
-      <span className="xs mut">{checked.size} selected{added || dropped ? ` · +${added} / −${dropped} vs ${base}` : ` · same as ${base}`}</span>
+      <span className="xs mut">{checked.size} selected{added || dropped ? ` · +${added} / −${dropped} vs ${builtin ? "original " : ""}${base}` : ` · same as ${builtin ? "original " : ""}${base}`}</span>
     </div>
   </div>;
 }

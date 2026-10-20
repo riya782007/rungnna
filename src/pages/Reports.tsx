@@ -17,6 +17,7 @@ const tabs = [
   ["byParty", "Party-wise"],
   ["byArea", "Area / city"],
   ["bySalesman", "Salesman"],
+  ["byHelper", "Helper"],
   ["valuation", "Stock valuation"],
   ["dead", "Dead stock"],
   ["pl", "P&L"],

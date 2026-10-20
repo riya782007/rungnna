@@ -83,7 +83,7 @@ export const permLabel = (k: string) => LABELS[k] || k;
 /* Built-in roles: the app's original rules, written as permissions. Stock work was open to everyone, so it still is. */
 const STOCK = ["stock.view", "stock.in", "stock.move", "stock.count", "racks.manage", "stores.transfer", "products.edit", "labels.print", "catalogue.share"];
 const COUNTER = ["billing.sell", "billing.returns", "billing.merge", "customers.manage", "receipts.take", "money.vouchers"];
-export const BUILTIN: Record<Staff["role"], string[]> = {
+export const BUILTIN_DEFAULT: Record<Staff["role"], string[]> = {
   owner: ALL_PERMS,
   // a manager already runs suppliers and purchases, so reading a supplier's bill photo belongs here
   manager: [...STOCK, ...COUNTER, "sales.today", "billing.rates", "billing.discount_over", "billing.void", "estimates.delete", "settings.manage", "rates.view", "suppliers.manage", "purchases.photo", "dealers.manage", "ai.use"],
@@ -141,6 +141,22 @@ export const isRoleLogin = (s: { login?: string } | null | undefined) => s?.logi
 let ROLES: CustomRole[] = [];
 /** Called by the app whenever the synced role list changes. */
 export function setRolesCache(r: unknown) { ROLES = Array.isArray(r) ? r.filter(x => x && typeof x.id === "string" && Array.isArray(x.perms)) : []; }
+
+/* The owner can change what each built-in role may do (Roles page → Built-in roles → Edit).
+   Changes live in config "roles" as { builtin: { salesman: [...] } } and sync like custom roles.
+   The owner role always keeps everything. */
+let BUILTIN_EDITS: Partial<Record<Staff["role"], string[]>> = {};
+export function setBuiltinCache(v: unknown) {
+  const out: Partial<Record<Staff["role"], string[]>> = {};
+  if (v && typeof v === "object") for (const [k, perms] of Object.entries(v as Record<string, unknown>))
+    if (k !== "owner" && k in BUILTIN_DEFAULT && Array.isArray(perms)) out[k as Staff["role"]] = perms.filter(p => typeof p === "string" && ALL_PERMS.includes(p));
+  BUILTIN_EDITS = out;
+}
+export const builtinEdited = (role: Staff["role"]) => role !== "owner" && !!BUILTIN_EDITS[role];
+/** What a built-in role grants right now (the owner's edit, or the original default). */
+export const BUILTIN: Record<Staff["role"], string[]> = new Proxy(BUILTIN_DEFAULT, {
+  get: (base, role: string) => (role !== "owner" && BUILTIN_EDITS[role as Staff["role"]]) || base[role as Staff["role"]],
+});
 export const customRoles = () => ROLES;
 
 export function permsOf(me: Pick<Staff, "role"> & { role_id?: string } | null | undefined): Set<string> {

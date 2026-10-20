@@ -436,6 +436,7 @@ export async function billImage(b: Bill, shop: Shop): Promise<Blob> {
   if (b.party_name) block("To: " + b.party_name + (b.party_phone ? " · " + b.party_phone : ""));
   if (b.party_address) block(b.party_address);
   if (b.salesman) block("Salesman: " + b.salesman);
+  if (b.helper) block("Helper: " + b.helper);
   y += 8; rule(y); y += 32;
   for (const [i, l] of b.items.entries()) {
     const firstY = y;

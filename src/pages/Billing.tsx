@@ -275,6 +275,7 @@ export default function Billing({ args }: { args: string[] }) {
   useEffect(() => {
     if (priv || !b || b.bill_type !== "estimate") return;
     // Keep the locked estimate in Held, then return to the separate invoice draft.
+    if (b.items.length) toast("Estimate kept safe — unlock, then press Estimate to continue it");
     void openDocument("gst");
   }, [priv]);
   async function openDocument(type: Bill["bill_type"], heldBill?: Bill) {
@@ -592,6 +593,10 @@ export default function Billing({ args }: { args: string[] }) {
         <label className="f" style={{ minWidth: 130 }}>Salesman
           <select className="in" value={b.salesman} onChange={e => set({ salesman: e.target.value })}>
             <option value="">—</option>{staff.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}</select></label>
+        <label className="f" style={{ minWidth: 130 }}>Helper
+          <select className="in" value={b.helper || ""} onChange={e => set({ helper: e.target.value })}>
+            <option value="">—</option>
+            {[...staff].sort((x, y) => Number(y.role === "helper") - Number(x.role === "helper")).map(s => <option key={s.id} value={s.name}>{s.name}{s.role === "helper" ? " (helper)" : ""}</option>)}</select></label>
         <div className="pos-box"><span className="xs mut">Box qty: {b.box_count} · Current box {box}</span>
           <div className="row" style={{ gap: 4 }}>{boxes.map(x => <button key={x} className="chip" aria-pressed={x === box} onClick={() => setBox(x)}>{x}</button>)}
             <button className="chip" onClick={() => setBox(Math.max(...boxes) + 1)}>+</button></div></div>
@@ -638,7 +643,7 @@ export default function Billing({ args }: { args: string[] }) {
               <tbody>
                 {displayOrder(t.items).map(l => [l, t.items.indexOf(l)] as const).map(([l, i]) => (
                   <tr key={l.id} className={"ln" + (lastScanId === l.id ? " scanned" : "") + (flashId === l.id ? " flash" : "")} aria-current={lastScanId === l.id ? "true" : undefined} ref={row => { if (row) rowRefs.current.set(l.id, row); else rowRefs.current.delete(l.id); }}>
-                    <td className="mut" data-l="#"><input type="checkbox" aria-label={"Select bill line " + (i + 1)} checked={selectedLines.has(l.id)} onChange={event => setSelectedLines(old => { const next = new Set(old); event.target.checked ? next.add(l.id) : next.delete(l.id); return next; })} /><span className="xs">{i + 1}</span></td>
+                    <td className="mut" data-l="#"><input type="checkbox" aria-label={"Select bill line " + (i + 1)} checked={selectedLines.has(l.id)} onChange={event => setSelectedLines(old => { const next = new Set(old); event.target.checked ? next.add(l.id) : next.delete(l.id); return next; })} /><span className="line-no">{i + 1}</span></td>
                     <td data-l="Box"><input className="cell" style={{ width: 38 }} inputMode="numeric" value={l.box_no} onChange={e => setLine(l.id, { box_no: Math.max(1, parseInt(e.target.value) || 1) })}
                       onBlur={() => setB(x => x ? { ...x, items: mergeBoxLine(x.items, l.id) } : x)} /></td>
                     <td data-l=""><input className="cell" style={{ width: "100%", fontWeight: 700 }} title={l.item} aria-label={`Product name for line ${i + 1}`} placeholder="Product name" value={/^ITEM\s+\d+$/i.test(l.item || "") ? "" : l.item || ""} onChange={e => setLine(l.id, { item: e.target.value })} /> <span className="mono">{l.style}</span> <span className="mut">{l.color} · {l.type}</span>{!l.product_id && <span className="pill">Custom</span>}{l.product_id && pmap.get(l.product_id)?.tk?.trim() ? <span className="pill warn" style={{ marginLeft: 6 }}>dead stock</span> : null}</td>
