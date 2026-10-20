@@ -16,13 +16,18 @@ it("opens Add item in custom mode with stock entry still available", () => {
   expect(html).not.toContain("Search products");
 });
 
-it("keeps persistent entry available without a close button", () => {
+it("keeps persistent entry as one row: no tabs, no HSN, no close button", () => {
   const html = renderToStaticMarkup(createElement(ManualItems, {
     products: [], box: 1, level: "wholesale", canRates: true, inline: true, persistent: true,
     onProduct: () => {}, onCustom: () => {}, onClose: () => {},
   }));
   expect(html).toContain('id="pos-item-entry"');
-  expect(html).toContain("Add to bill");
+  expect(html).toContain("pos-quick-row");
+  for (const box of ["Product name", "Unit", "Style", "Colour", "Quantity", "Rate per PCS"]) expect(html).toContain(`aria-label="${box}"`);
+  expect(html).toContain("Add</button>");
+  expect(html).not.toContain("Stock item");
+  expect(html).not.toContain("Custom item");
+  expect(html).not.toContain("HSN");
   expect(html).not.toContain("Close item entry");
   expect(html).not.toContain("Add &amp; next");
   expect(html).not.toContain("autofocus");
