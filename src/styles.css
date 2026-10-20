@@ -888,3 +888,28 @@ html{scrollbar-gutter:stable}
 .purchase-photo .purchase-lines tbody td:focus-within{background:#fde68a}
 .purchase-photo .purchase-lines tbody .in:focus{background:#fef08a;color:#422006;border-color:#a16207;outline:2px solid #a16207;outline-offset:-2px;box-shadow:none}
 .purchase-photo .purchase-lines tbody tr:focus-within>td.line-no{color:#713f12;box-shadow:inset 4px 0 #eab308}
+
+/* The bill header, including box selection, travels with the pinned scan bar. */
+.pos-counter-dock{flex:none;background:#fff;border-bottom:1px solid var(--line)}
+.pos-counter-dock .pos-scanhead{position:static;padding:8px 12px}
+.pos-box-summary{position:sticky;top:-12px;z-index:2;background:#fff;padding:8px 0;border-bottom:1px solid var(--line)}
+.pos-box-totals{display:flex;flex-wrap:wrap;gap:5px;max-height:110px;overflow:auto;margin-top:6px}
+.pos-box-totals .chip{display:flex;gap:8px;align-items:center}
+.pos-box-totals .chip[aria-pressed="true"]{background:#FFF3B0;border-color:#B77900;color:#422006}
+.pos-lines .pos-t th:nth-child(8){width:10%}
+@media(min-width:861px){
+  .pos-counter-dock{position:sticky;top:64px;z-index:20}
+  .billing-shell .pos-box{flex:0 1 240px;min-width:150px}
+  .billing-shell .pos-box>.row{flex-wrap:nowrap;overflow-x:auto;padding-bottom:3px}
+  .billing-shell .pos-box .chip{flex:none}
+  .pos-lines .pos-t tr.ln{scroll-margin-top:calc(76px + var(--counter-dock-height,200px))}
+}
+@media(min-width:1001px){
+  .billing-shell .pos-main{grid-template-columns:minmax(0,1fr) 280px;gap:10px}
+  .billing-shell .pos-sum{position:sticky;top:calc(76px + var(--counter-dock-height,200px));max-height:calc(100dvh - 88px - var(--counter-dock-height,200px));overflow:auto;overscroll-behavior:contain}
+}
+@media(min-width:1200px) and (min-height:850px){
+  .billing-shell .pos-counter-dock{position:static}
+  .billing-shell .pos-sum{position:static;max-height:none}
+  .billing-shell .pos-lines .pos-t tr.ln{scroll-margin-top:40px}
+}
