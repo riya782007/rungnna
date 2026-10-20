@@ -122,7 +122,9 @@ export function InvoiceSheet({ b, shop, format, copy }: { b: Bill; shop: Shop; f
             <tr className="inv-net"><td>Total due</td><td className="r">{billAmount(b.prev_due + d)}</td></tr></> : null}
         </tbody></table>}
       </div>
-      <div className="inv-terms">{shop.terms}<span>For {shop.name}{taxDoc && !thermal ? <><br /><br />Authorised signatory</> : null}</span></div>
+      {/* Estimates and challans end at the totals (owner's request). A GST tax invoice keeps the
+          supplier's signature line, which CGST Rule 46 requires; its terms come from Settings. */}
+      {taxDoc && <div className="inv-terms">{shop.terms}<span>For {shop.name}{!thermal ? <><br /><br />Authorised signatory</> : null}</span></div>}
     </div>
   );
 }
