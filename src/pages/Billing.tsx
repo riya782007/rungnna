@@ -701,6 +701,22 @@ export default function Billing({ args }: { args: string[] }) {
               <div className="net"><span>Net amount</span><b className="mono">{billAmount(t.net)}</b></div>
             </div>
           </div>
+          {/* Print / save actions sit under the lines (counter request 21/10/2026): the right
+              panel keeps only the box summary and the money, so it needs no scrolling. */}
+          <div className="pos-actions" aria-label="Print and save">
+            <select className="in" aria-label="Print size" title="Roll printer: choose 58 mm or 80 mm thermal to match your paper. Enable auto-cut in the printer's preferences." value={fmt} onChange={e => { setFmt(e.target.value as PrintFormat); setSetting("print_fmt", e.target.value); }}>
+              <option value="a5">A5 invoice</option><option value="a4">A4 invoice</option><option value="80mm">80 mm thermal</option><option value="58mm">58 mm thermal</option><option value="packing">Packing slip (no rates)</option></select>
+            <button className="btn" disabled={saving} onClick={doHold}>Hold · F3</button>
+            <button className="btn" disabled={saving} onClick={() => setHeld(true)}>Held · F4</button>
+            <button className="btn p" disabled={saving} title={"Saves to Bills → " + (b.bill_type === "estimate" ? "Estimates (unlocked only)" : b.bill_type === "gst" ? "Tax invoices" : "Challans")} onClick={() => doSave(false)}>{saving ? "Saving…" : `Save ${documentName}`}</button>
+            <button className="btn dk" disabled={saving} onClick={() => doSave(true)}>Print {documentName}</button>
+            <button className="btn g" disabled={saving} onClick={() => doSave(false, true)}>Save & WhatsApp · F10</button>
+            <span className="pos-actions-bags">
+              <label className="row sm" title="Also print customer bag stickers with the bill"><input type="checkbox" checked={bagWithBill} onChange={event => { setBagWithBill(event.target.checked); void setSetting("bag_labels_with_bill", event.target.checked); }} /> Bag stickers with print</label>
+              <button className="btn" disabled={saving || !t.items.length} onClick={() => doSave(false, false, true)}>Save & bag stickers</button>
+            </span>
+            {lastSaved && (priv || !isEstimate(lastSaved)) && <button className="linkbtn sm" onClick={() => go("bills/" + lastSaved.id)}>View saved {lastSaved.bill_type === "estimate" ? "estimate" : lastSaved.bill_type === "gst" ? "tax invoice" : "challan"} {lastSaved.no}</button>}
+          </div>
         </div>
 
         <aside className="pos-sum card">
@@ -727,22 +743,6 @@ export default function Billing({ args }: { args: string[] }) {
           <div className="sumrow"><span>Advance</span><MoneyInput inputRef={advanceRef} className="cell r" style={{ width: 80 }} paise={b.advance} onPaise={v => set({ advance: v })} /></div>
           <Payments pays={b.payments} left={t.net - b.advance} onChange={payments => set({ payments })} />
           <div className={"sumrow " + (balance > 0 ? "due" : "")}><span>{balance > 0 ? "Balance (credit)" : balance < 0 ? "Return to customer" : "Balance"}</span><b className="mono">{billAmount(Math.abs(balance))}</b></div></>}
-          <div className="row" style={{ gap: 6 }}>
-            <select className="in" style={{ flex: 1, minHeight: 36, padding: "4px 8px" }} value={fmt} onChange={e => { setFmt(e.target.value as PrintFormat); setSetting("print_fmt", e.target.value); }}>
-              <option value="a5">A5 invoice</option><option value="a4">A4 invoice</option><option value="80mm">80 mm thermal</option><option value="58mm">58 mm thermal</option><option value="packing">Packing slip (no rates)</option></select>
-          </div>
-          <div className="xs mut">Roll printer: choose 58 mm or 80 mm thermal to match your paper. Enable auto-cut in the printer's preferences.</div>
-          <div className="grid g2" style={{ gap: 6 }}>
-            <button className="btn" disabled={saving} onClick={doHold}>Hold · F3</button>
-            <button className="btn" disabled={saving} onClick={() => setHeld(true)}>Held · F4</button>
-            <button className="btn p" disabled={saving} onClick={() => doSave(false)}>{saving ? "Saving…" : `Save ${documentName}`}</button>
-            <button className="btn dk" disabled={saving} onClick={() => doSave(true)}>Print {documentName}</button>
-          </div>
-          <div className="xs mut">Saves to Bills → {b.bill_type === "estimate" ? "Estimates (unlocked only)" : b.bill_type === "gst" ? "Tax invoices" : "Challans"}.</div>
-          {lastSaved && (priv || !isEstimate(lastSaved)) && <button className="linkbtn sm" onClick={() => go("bills/" + lastSaved.id)}>View saved {lastSaved.bill_type === "estimate" ? "estimate" : lastSaved.bill_type === "gst" ? "tax invoice" : "challan"} {lastSaved.no}</button>}
-          <label className="row sm"><input type="checkbox" checked={bagWithBill} onChange={event => { setBagWithBill(event.target.checked); void setSetting("bag_labels_with_bill", event.target.checked); }} /> Also print customer bag stickers (optional)</label>
-          <button className="btn" disabled={saving || !t.items.length} onClick={() => doSave(false, false, true)}>Save & bag stickers</button>
-          <button className="btn g w" disabled={saving} onClick={() => doSave(false, true)}>Save & WhatsApp · F10</button>
         </aside>
       </div>
 
