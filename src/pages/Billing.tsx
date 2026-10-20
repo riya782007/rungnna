@@ -68,6 +68,72 @@ export default function Billing({ args }: { args: string[] }) {
     row.classList.add("flash");
     setFlashId(id);
   }
+
+  /* Keyboard-only navigation across the bill-lines grid, so the counter can be
+     worked without a mouse:
+       ↑ / ↓        move to the cell above / below (same column)
+       ← / →        move to the field left / right in the same row
+       Space        tick / untick the current row (select many lines)
+       Shift+↑/↓    extend the selection over a range of rows
+       Enter        step down to the next row (fast data entry)
+     Arrow keys inside a text field only jump cells when the caret is already at
+     the field's edge, so normal typing/editing still works. */
+  const selectAnchor = useRef<string | null>(null);
+  function cellsOf(row: HTMLTableRowElement): HTMLElement[] {
+    return Array.from(row.querySelectorAll<HTMLElement>('input:not([type="checkbox"]):not([disabled]), select:not([disabled])'));
+  }
+  function onGridKey(e: React.KeyboardEvent<HTMLDivElement>) {
+    const key = e.key;
+    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Enter"].includes(key)) return;
+    const el = document.activeElement as HTMLElement | null;
+    const cell = el?.closest("td");
+    const row = el?.closest<HTMLTableRowElement>("tr.ln");
+    if (!row) return;
+    const ids = t ? t.items.map(l => l.id) : [];
+    const rowId = [...rowRefs.current.entries()].find(([, r]) => r === row)?.[0];
+    const idx = rowId ? ids.indexOf(rowId) : -1;
+    if (idx < 0) return;
+    const isText = el && (el.tagName === "INPUT" || el.tagName === "SELECT");
+    const input = el as HTMLInputElement;
+    const atStart = !isText || input.selectionStart === 0;
+    const atEnd = !isText || input.selectionStart === (input.value?.length ?? 0);
+
+    const focusRow = (nextIdx: number) => {
+      const nextRow = rowRefs.current.get(ids[nextIdx]);
+      if (!nextRow) return;
+      const cells = cellsOf(nextRow);
+      const col = cell ? Array.from(row.children).indexOf(cell) : 0;
+      // land on the same column if possible, else the nearest field
+      const target = nextRow.querySelector<HTMLElement>(`td:nth-child(${col + 1}) input, td:nth-child(${col + 1}) select`) || cells[0];
+      target?.focus();
+      if (target instanceof HTMLInputElement) target.select?.();
+      showLine(ids[nextIdx]);
+    };
+
+    if (key === "ArrowDown" || (key === "Enter" && !e.shiftKey)) {
+      if (idx < ids.length - 1) { e.preventDefault(); focusRow(idx + 1); }
+      if (e.shiftKey && key === "ArrowDown") toggleRange(ids, idx + 1);
+    } else if (key === "ArrowUp") {
+      if (idx > 0) { e.preventDefault(); focusRow(idx - 1); }
+      if (e.shiftKey) toggleRange(ids, idx - 1);
+    } else if (key === "ArrowRight" && atEnd) {
+      const cells = cellsOf(row); const here = cells.indexOf(el as HTMLElement);
+      if (here > -1 && here < cells.length - 1) { e.preventDefault(); cells[here + 1].focus(); (cells[here + 1] as HTMLInputElement).select?.(); }
+    } else if (key === "ArrowLeft" && atStart) {
+      const cells = cellsOf(row); const here = cells.indexOf(el as HTMLElement);
+      if (here > 0) { e.preventDefault(); cells[here - 1].focus(); (cells[here - 1] as HTMLInputElement).select?.(); }
+    } else if (key === " " && (!isText || input.type === "checkbox")) {
+      e.preventDefault();
+      setSelectedLines(old => { const next = new Set(old); next.has(ids[idx]) ? next.delete(ids[idx]) : next.add(ids[idx]); return next; });
+      selectAnchor.current = ids[idx];
+    }
+  }
+  function toggleRange(ids: string[], toIdx: number) {
+    if (toIdx < 0 || toIdx >= ids.length) return;
+    const anchor = selectAnchor.current ? ids.indexOf(selectAnchor.current) : toIdx;
+    const [lo, hi] = [Math.min(anchor, toIdx), Math.max(anchor, toIdx)];
+    setSelectedLines(() => new Set(ids.slice(lo, hi + 1)));
+  }
   function showLine(id: string, _revealPage = false) {
     const row = rowRefs.current.get(id);
     if (!row) return;
@@ -468,8 +534,8 @@ export default function Billing({ args }: { args: string[] }) {
 
           <NameItemCodes codes={unnamed} onNamed={(code, name, unit) => setB(x => x && { ...x, items: x.items.map(l =>
             (l.item === "ITEM " + code || (!l.item && l.product_id && pmap.get(l.product_id)?.item_code === code)) ? { ...l, item: name, type: unit } : l) })} />
-          <div className="selection-bar"><SelectAll ids={t.items.map(l => l.id)} selected={selectedLines} onChange={setSelectedLines} label="Select all bill lines" /><span className="sm">{t.items.filter(l => selectedLines.has(l.id)).length} selected</span><DeleteButton className="btn sm bad" disabled={saving || !t.items.some(l => selectedLines.has(l.id))} onDelete={() => dropLines(t.items.filter(l => selectedLines.has(l.id)).map(l => l.id))}>Delete selected</DeleteButton></div>
-          <div className="tw pos-lines" ref={linesPane} role="region" aria-label="Bill items" tabIndex={0}>
+          <div className="selection-bar"><SelectAll ids={t.items.map(l => l.id)} selected={selectedLines} onChange={setSelectedLines} label="Select all bill lines" /><span className="sm">{t.items.filter(l => selectedLines.has(l.id)).length} selected</span><DeleteButton className="btn sm bad" disabled={saving || !t.items.some(l => selectedLines.has(l.id))} onDelete={() => dropLines(t.items.filter(l => selectedLines.has(l.id)).map(l => l.id))}>Delete selected</DeleteButton><span className="xs mut" style={{ marginLeft: "auto" }}>Keys: ↑↓ rows · ←→ fields · Space select · Shift+↑↓ range</span></div>
+          <div className="tw pos-lines" ref={linesPane} role="region" aria-label="Bill items" tabIndex={0} onKeyDown={onGridKey}>
             <table className="pos-t" aria-label="Bill items">
               <thead><tr><th>#</th><th>Box</th><th>Item · Style · Colour</th><th className="r">Pkt</th><th className="r">Qty</th><th className="r">Rate ₹</th><th className="r">Disc</th><th className="r">Amount</th><th /></tr></thead>
               <tbody>
