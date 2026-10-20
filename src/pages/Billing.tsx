@@ -525,6 +525,7 @@ export default function Billing({ args }: { args: string[] }) {
       <div className="pos-main">
         <div className="stack pos-workspace" style={{ minWidth: 0 }}>
           <div className="pos-entry stack" style={{ gap: 8 }}>
+            <div className="pos-scanhead stack" style={{ gap: 8 }}>
             <div className="row scanrow">
               <div className="wedge grow" style={{ position: "relative" }}>
                 <Icon n="scan" size={16} />
@@ -546,6 +547,7 @@ export default function Billing({ args }: { args: string[] }) {
             <div className={"lastscan" + (lastScan ? " has-item" : "")} role="status" aria-live="polite" aria-atomic="true">
               <span>{lastScan ? <><b>Added: {lastScan.item || lastScan.style || lastScan.code}</b><span className="xs">{[lastScan.style, lastScan.color, `Box ${lastScan.box_no}`, `${lastScan.qty} ${lastScan.type || "PCS"} × ${rupees(lastScan.rate)}`, rupees(lastScan.amount)].filter(Boolean).join(" · ")}</span></> : <span className="mut">{t.items.length} bill lines · {t.total_qty} units</span>}</span>
               {lastScan && <button className="btn sm" onClick={() => showLine(lastScan.id, true)}>Show line</button>}
+            </div>
             </div>
             {cam && !small && <div className="pos-cam"><CameraScanner onCode={c => onCode(c)} /></div>}
             {itemEditor}
