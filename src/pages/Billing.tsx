@@ -62,19 +62,36 @@ export default function Billing({ args }: { args: string[] }) {
   const dismissScanFeedback = useCallback(() => setScanFeedback(null), []);
   const [lastScanId, setLastScanId] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
-  function showLine(id: string, revealPage = false) {
-    const row = rowRefs.current.get(id);
-    if (!row) return;
-    const pane = linesPane.current;
-    if (pane && pane.scrollHeight > pane.clientHeight) {
-      const r = row.getBoundingClientRect(), p = pane.getBoundingClientRect();
-      if (r.bottom > p.bottom) pane.scrollTop += r.bottom - p.bottom;
-      else if (r.top < p.top + 40) pane.scrollTop -= p.top + 40 - r.top;
-    } else if (revealPage) row.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "auto" });
+  function flashRow(row: HTMLElement, id: string) {
     row.classList.remove("flash");
     void row.offsetWidth; // restart the highlight when the same item is scanned again
     row.classList.add("flash");
     setFlashId(id);
+  }
+  function showLine(id: string, _revealPage = false) {
+    const row = rowRefs.current.get(id);
+    if (!row) return;
+    flashRow(row, id);
+    // Scroll AFTER layout has actually happened. A single rAF can fire before the
+    // browser lays out a just-inserted <tr>, so the new row still measures as 0 /
+    // in-view and nothing scrolls. Two frames guarantees layout is done.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const target = rowRefs.current.get(id);
+      if (!target) return;
+      const pane = linesPane.current;
+      // On big counter screens the bill-lines table is its own scroll box — scroll that.
+      if (pane && pane.scrollHeight > pane.clientHeight + 1) {
+        const headH = pane.querySelector("thead")?.getBoundingClientRect().height || 0;
+        const r = target.getBoundingClientRect(), p = pane.getBoundingClientRect();
+        if (r.bottom > p.bottom) pane.scrollTop += r.bottom - p.bottom + 8;
+        else if (r.top < p.top + headH + 8) pane.scrollTop -= p.top + headH + 8 - r.top;
+        return;
+      }
+      // Everywhere else the page scrolls: just bring the row into view. The browser
+      // resolves the correct scroll container itself. scroll-margin-top (set in CSS)
+      // keeps it clear of the sticky top/subnav bars.
+      target.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+    }));
   }
   useEffect(() => {
     if (!pendingScan.current) return;
