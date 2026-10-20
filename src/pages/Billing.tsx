@@ -19,7 +19,7 @@ import { useApp, toast, beep, go } from "../lib/app";
 import { can } from "../lib/roles";
 import { usePrivate, unlock, lockNow, getPrivate, isOpen, isEstimate } from "../lib/privacy";
 import { Icon } from "../components/Icon";
-import { rupees, toPaise } from "../lib/format";
+import { billAmount, toPaise } from "../lib/format";
 import { CameraScanner, useScannerGun } from "../components/Scanner";
 import { hostRemote } from "../lib/remote";
 import { qrSvg } from "../lib/qr";
@@ -220,7 +220,17 @@ export default function Billing({ args }: { args: string[] }) {
   const [due0, setDue0] = useState(0);
   const scanRef = useRef<HTMLInputElement>(null);
   const advanceRef = useRef<HTMLInputElement>(null);
-  const [boxSummary, setBoxSummary] = useState(false);
+  const boxSummaryRef = useRef<HTMLElement>(null);
+  const counterDockRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const dock = counterDockRef.current;
+    if (!dock) return;
+    const measure = () => dock.parentElement?.style.setProperty("--counter-dock-height", `${dock.getBoundingClientRect().height}px`);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(dock);
+    return () => observer.disconnect();
+  }, [b?.id]);
   /* private estimates: hidden until the owner's code is entered */
   const priv = usePrivate();
   const products = useLiveQuery(() => db.products.filter(p => !p.deleted).toArray(), [], []);
@@ -375,7 +385,7 @@ export default function Billing({ args }: { args: string[] }) {
     // The sticker's printed rate is the operator's check: say so when the bill differs.
     const printed = parsed.rate && ["shop label", "rungnna"].includes(parsed.how) ? toPaise(parsed.rate) : 0;
     const billed = priceFor(p, billRef.current?.price_level || "wholesale");
-    if (printed && billed && printed !== billed) toast(`Check rate: sticker says ${rupees(printed)}, bill uses ${rupees(billed)} for ${label(p)}`, true);
+    if (printed && billed && printed !== billed) toast(`Check rate: sticker says ${billAmount(printed)}, bill uses ${billAmount(billed)} for ${label(p)}`, true);
     // show exactly what the QR carried, so a mislabelled sticker is visible at the counter
     if (["shop label", "rungnna"].includes(parsed.how)) {
       const means = parsed.icode ? codeInfo(parsed.icode, readItemMap(itemNames?.value))?.name : parsed.item?.toUpperCase();
@@ -440,7 +450,7 @@ export default function Billing({ args }: { args: string[] }) {
     if (missing) return toast("Add the product name before saving: " + (missing.style || missing.code), true);
     const done = await finalize(t, shop.state, b.party_name);
     beep("saved");
-    toast(`Saved ${done.no} · ${rupees(done.net)}`);
+    toast(`Saved ${done.no} · ${billAmount(done.net)}`);
     if (done.oversold?.length) toast("Saved with negative stock: " + done.oversold.map(o => `${o.item} (${o.qty} more than recorded)`).join(", "), true);
     await setSetting("draft_bill", null);
     if (bags) setBagBill(done);
@@ -493,7 +503,7 @@ export default function Billing({ args }: { args: string[] }) {
       if (k === "F8") setEntryFocus(n => n + 1);
       if (k === "F9") doSave(true);
       if (k === "F10") doSave(false, true);
-      if (k === "F11") setBoxSummary(x => !x);
+      if (k === "F11") boxSummaryRef.current?.focus({ preventScroll: true });
       if (k === "F12") advanceRef.current?.focus();
     };
     addEventListener("keydown", f); return () => removeEventListener("keydown", f);
@@ -526,6 +536,7 @@ export default function Billing({ args }: { args: string[] }) {
   return (
     <div className="pos">
       {scanFeedback && createPortal(<BillScanNotice key={scanFeedback.sequence} feedback={scanFeedback} onClose={dismissScanFeedback} />, document.body)}
+      <div className="pos-counter-dock" ref={counterDockRef}>
       <div className="pos-top card">
         {priv ? <div className="seg" role="group" aria-label="Bill type">
           <button aria-pressed={b.bill_type === "estimate"} onClick={() => set({ bill_type: "estimate" })}>Estimate</button>
@@ -543,7 +554,7 @@ export default function Billing({ args }: { args: string[] }) {
         <button className="pos-cust" onClick={() => setCustOpen(true)}>
           <span className="xs mut">Client name</span>
           <b>{b.party_name || "Walk-in / cash"}</b>
-          <span className="xs">{b.party_phone}{due0 > 0 ? <span className="pill bad" style={{ marginLeft: 6 }}>Due {rupees(due0)}</span> : null}</span>
+          <span className="xs">{b.party_phone}{due0 > 0 ? <span className="pill bad" style={{ marginLeft: 6 }}>Due {billAmount(due0)}</span> : null}</span>
         </button>
         <label className="f" style={{ minWidth: 130 }}>Salesman
           <select className="in" value={b.salesman} onChange={e => set({ salesman: e.target.value })}>
@@ -552,10 +563,6 @@ export default function Billing({ args }: { args: string[] }) {
           <div className="row" style={{ gap: 4 }}>{boxes.map(x => <button key={x} className="chip" aria-pressed={x === box} onClick={() => setBox(x)}>{x}</button>)}
             <button className="chip" onClick={() => setBox(Math.max(...boxes) + 1)}>+</button></div></div>
       </div>
-
-      <div className="pos-main">
-        <div className="stack pos-workspace" style={{ minWidth: 0 }}>
-          <div className="pos-entry stack" style={{ gap: 8 }}>
             <div className="pos-scanhead stack" style={{ gap: 8 }}>
             <div className="row scanrow">
               <div className="wedge grow" style={{ position: "relative" }}>
@@ -567,7 +574,7 @@ export default function Billing({ args }: { args: string[] }) {
                     <button key={p.id} onClick={() => { addProduct(p); setQ(""); scanRef.current?.focus(); }}>
                       <Thumb photo_id={p.photo_id} url={p.photo_url} text={p.item} size={34} />
                       <span className="grow"><b>{p.style || p.code}</b> <span className="mut">{p.item} · {p.color}</span></span>
-                      <span className="mono">{p.rate ? rupees(p.rate) : ""}{p.pack ? " ×" + p.pack : ""}</span></button>))}</div>)}
+                      <span className="mono">{p.rate ? billAmount(p.rate) : ""}{p.pack ? " ×" + p.pack : ""}</span></button>))}</div>)}
               </div>
               <button className={"btn " + (cam || sheet ? "p" : "g")} onClick={() => (small ? setSheet(true) : setCam(!cam))} title="Scan with the camera"><Icon n="scan" size={20} />Scan</button>
               {!small && <button className={"btn " + (peers ? "p" : "")} onClick={() => setPairOpen(true)} title="Use a phone as the scanner"><Icon n="sell" size={18} />{peers ? "Phone linked" : "Phone as scanner"}</button>}
@@ -576,10 +583,15 @@ export default function Billing({ args }: { args: string[] }) {
               <button className="btn" disabled={saving} title="POS calculator" aria-label="POS calculator" onClick={() => setCalculator(true)}><Calculator size={20} /></button>
             </div>
             <div className={"lastscan" + (lastScan ? " has-item" : "")} role="status" aria-live="polite" aria-atomic="true">
-              <span>{lastScan ? <><b>Added: {lastScan.item || lastScan.style || lastScan.code}</b><span className="xs">{[lastScan.style, lastScan.color, `Box ${lastScan.box_no}`, `${lastScan.qty} ${lastScan.type || "PCS"} × ${rupees(lastScan.rate)}`, rupees(lastScan.amount)].filter(Boolean).join(" · ")}</span>{lastRead && <span className="xs mono qr-read">{lastRead}</span>}</> : <span className="mut">{t.items.length} bill lines · {t.total_qty} units</span>}</span>
+              <span>{lastScan ? <><b>Added: {lastScan.item || lastScan.style || lastScan.code}</b><span className="xs">{[lastScan.style, lastScan.color, `Box ${lastScan.box_no}`, `${lastScan.qty} ${lastScan.type || "PCS"} × ${billAmount(lastScan.rate)}`, billAmount(lastScan.amount)].filter(Boolean).join(" · ")}</span>{lastRead && <span className="xs mono qr-read">{lastRead}</span>}</> : <span className="mut">{t.items.length} bill lines · {t.total_qty} units</span>}</span>
               {lastScan && <button className="btn sm" onClick={() => showLine(lastScan.id, true)}>Show line</button>}
             </div>
             </div>
+      </div>
+
+      <div className="pos-main">
+        <div className="stack pos-workspace" style={{ minWidth: 0 }}>
+          <div className="pos-entry stack" style={{ gap: 8 }}>
             {cam && !small && <div className="pos-cam"><CameraScanner onCode={c => onCode(c)} /></div>}
             {itemEditor}
           </div>
@@ -589,7 +601,7 @@ export default function Billing({ args }: { args: string[] }) {
           <div className="selection-bar"><SelectAll ids={t.items.map(l => l.id)} selected={selectedLines} onChange={setSelectedLines} label="Select all bill lines" /><span className="sm">{t.items.filter(l => selectedLines.has(l.id)).length} selected</span><DeleteButton className="btn sm bad" disabled={saving || !t.items.some(l => selectedLines.has(l.id))} onDelete={() => dropLines(t.items.filter(l => selectedLines.has(l.id)).map(l => l.id))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }}>Keys: ↑↓ rows · ←→ fields · Space select · Shift+↑↓ range</span></div>
           <div className="tw pos-lines" ref={linesPane} role="region" aria-label="Bill items" tabIndex={0} onKeyDown={onGridKey}>
             <table className="pos-t" aria-label="Bill items">
-              <thead><tr><th>#</th><th>Box</th><th>Item · Style · Colour</th><th className="r">Pkt</th><th className="r">Qty</th><th className="r">Rate ₹</th><th className="r">Disc</th><th className="r">Amount</th><th /></tr></thead>
+              <thead><tr><th>#</th><th>Box</th><th>Item · Style · Colour</th><th className="r">Pkt</th><th className="r">Qty</th><th className="r">Rate</th><th className="r">Disc</th><th className="r">Amount</th><th /></tr></thead>
               <tbody>
                 {displayOrder(t.items).map(l => [l, t.items.indexOf(l)] as const).map(([l, i]) => (
                   <tr key={l.id} className={"ln" + (lastScanId === l.id ? " scanned" : "") + (flashId === l.id ? " flash" : "")} aria-current={lastScanId === l.id ? "true" : undefined} ref={row => { if (row) rowRefs.current.set(l.id, row); else rowRefs.current.delete(l.id); }}>
@@ -601,8 +613,8 @@ export default function Billing({ args }: { args: string[] }) {
                       <input className="cell r" style={{ width: 44 }} inputMode="numeric" value={l.pkts || ""} onChange={e => setLine(l.id, { pkts: parseInt(e.target.value) || 0 })} /><span className="xs mut">×{l.pack}</span></span> : <span className="mut">—</span>}</td>
                     <td className="r" data-l={l.type || "Quantity"}><input className="cell r" style={{ width: 56 }} inputMode="numeric" value={l.qty || ""} disabled={l.pack > 1 && l.pkts > 0}
                       onChange={e => setLine(l.id, { qty: parseInt(e.target.value) || 0, pkts: 0 })} /></td>
-                    <td className="r" data-l="Rate ₹"><MoneyInput className="cell r" style={{ width: 70 }} disabled={!can(me, "billing.rates") && !!(l.product_id && pmap.get(l.product_id)?.rate)} paise={l.rate} onPaise={v => setLine(l.id, { rate: v })} /></td>
-                    <td className="r" data-l="Disc"><input className={"cell r" + (discError(l.disc) ? " bad" : "")} style={{ width: 54 }} placeholder="—" title={discError(l.disc) || "10% or ₹ amount"} value={l.disc} onChange={e => setLine(l.id, { disc: e.target.value })} /></td>
+                    <td className="r" data-l="Rate"><MoneyInput className="cell r" style={{ width: 70 }} disabled={!can(me, "billing.rates") && !!(l.product_id && pmap.get(l.product_id)?.rate)} paise={l.rate} onPaise={v => setLine(l.id, { rate: v })} /></td>
+                    <td className="r" data-l="Disc"><input className={"cell r" + (discError(l.disc) ? " bad" : "")} style={{ width: 54 }} placeholder="—" title={discError(l.disc) || "10% or amount"} value={l.disc} onChange={e => setLine(l.id, { disc: e.target.value })} /></td>
                     <td className="r mono b" data-l="Amount">{(l.amount / 100).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
                     <td data-l=""><DeleteButton className="x" aria-label="Remove line" onDelete={() => dropLines([l.id])}>✕</DeleteButton></td>
                   </tr>))}
@@ -617,25 +629,29 @@ export default function Billing({ args }: { args: string[] }) {
         </div>
 
         <aside className="pos-sum card">
-          <button className="btn" aria-expanded={boxSummary} onClick={() => setBoxSummary(x => !x)}>Box summary</button>
-          {boxSummary && <table className="pos-t"><thead><tr><th>Box</th><th>Qty</th></tr></thead><tbody>{boxes.map(n => <tr key={n}><td>{n}</td><td>{t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}</td></tr>)}</tbody></table>}
+          <section className="pos-box-summary" ref={boxSummaryRef} tabIndex={-1} aria-label="Box summary">
+            <b>Box summary</b>
+            <div className="pos-box-totals">{boxes.map(n => <button key={n} className="chip" aria-pressed={n === box} onClick={() => setBox(n)} aria-label={`Box ${n}, quantity ${t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}`}>
+              Box {n} <b>{t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}</b>
+            </button>)}</div>
+          </section>
           <div className="sumrow"><span>Pieces · Boxes</span><b className="mono">{t.total_qty} · {t.box_count}</b></div>
           {b.rfid_tags?.length ? <div className="sumrow"><span>RFID tags</span><b className="mono">{b.rfid_tags.length}</b></div> : null}
-          <div className="sumrow"><span>Gross</span><b className="mono">{rupees(t.gross)}</b></div>
+          <div className="sumrow"><span>Gross</span><b className="mono">{billAmount(t.gross)}</b></div>
           <div className="sumrow"><span>Discount</span>
             <span className="row" style={{ gap: 4, flexWrap: "nowrap" }}>
               <MoneyInput className={"cell r" + (b.discount_pct > 100 ? " bad" : "")} style={{ width: 48 }} placeholder="%" paise={Math.round((b.discount_pct || 0) * 100)} onPaise={v => set({ discount_pct: v / 100 })} />
-              {b.discount_pct ? <input className="cell r" style={{ width: 72 }} disabled value={(t.discount / 100).toFixed(2)} readOnly /> : <MoneyInput className="cell r" style={{ width: 72 }} placeholder="₹" paise={b.discount} onPaise={v => set({ discount: v })} />}</span></div>
+              {b.discount_pct ? <input className="cell r" style={{ width: 72 }} disabled value={(t.discount / 100).toFixed(2)} readOnly /> : <MoneyInput className="cell r" style={{ width: 72 }} placeholder="Amount" paise={b.discount} onPaise={v => set({ discount: v })} />}</span></div>
           <div className="sumrow"><span>Packing</span><MoneyInput className="cell r" style={{ width: 80 }} paise={b.packing} onPaise={v => set({ packing: v })} /></div>
-          {b.bill_type === "gst" && <div className="sumrow"><span>GST{gstLabel(t)} <button className="linkbtn" onClick={() => set({ gst_mode: b.gst_mode === "exclusive" ? "inclusive" : "exclusive" })}>{b.gst_mode === "exclusive" ? "added" : "included"}</button></span><b className="mono">{rupees(t.gst)}</b></div>}
+          {b.bill_type === "gst" && <div className="sumrow"><span>GST{gstLabel(t)} <button className="linkbtn" onClick={() => set({ gst_mode: b.gst_mode === "exclusive" ? "inclusive" : "exclusive" })}>{b.gst_mode === "exclusive" ? "added" : "included"}</button></span><b className="mono">{billAmount(t.gst)}</b></div>}
           {b.bill_type === "gst" && b.party_state && !placeCode(b.party_gstin, b.party_state) && <div className="xs" style={{ textAlign: "right", color: "var(--bad)" }}>Check buyer state “{b.party_state}” — not recognised, GST type may be wrong</div>}
-          {t.igst ? <div className="xs mut" style={{ textAlign: "right" }}>IGST (other state)</div> : t.gst ? <div className="xs mut" style={{ textAlign: "right" }}>CGST {rupees(t.cgst)} + SGST {rupees(t.sgst)}</div> : null}
-          {t.adjust ? <div className="sumrow"><span>Round off</span><span className="mono">{rupees(t.adjust)}</span></div> : null}
-          <div className="net"><span>{b.bill_type === "challan" ? "VALUE" : "NET"}</span><b>{rupees(t.net)}</b></div>
+          {t.igst ? <div className="xs mut" style={{ textAlign: "right" }}>IGST (other state)</div> : t.gst ? <div className="xs mut" style={{ textAlign: "right" }}>CGST {billAmount(t.cgst)} + SGST {billAmount(t.sgst)}</div> : null}
+          {t.adjust ? <div className="sumrow"><span>Round off</span><span className="mono">{billAmount(t.adjust)}</span></div> : null}
+          <div className="net"><span>{b.bill_type === "challan" ? "VALUE" : "NET"}</span><b>{billAmount(t.net)}</b></div>
           {b.bill_type === "challan" ? <div className="note sm">A challan sends the goods out with no money taken. Convert it to an invoice from Bills when the customer is billed.</div> : <>
           <div className="sumrow"><span>Advance</span><MoneyInput inputRef={advanceRef} className="cell r" style={{ width: 80 }} paise={b.advance} onPaise={v => set({ advance: v })} /></div>
           <Payments pays={b.payments} left={t.net - b.advance} onChange={payments => set({ payments })} />
-          <div className={"sumrow " + (balance > 0 ? "due" : "")}><span>{balance > 0 ? "Balance (credit)" : balance < 0 ? "Return to customer" : "Balance"}</span><b className="mono">{rupees(Math.abs(balance))}</b></div></>}
+          <div className={"sumrow " + (balance > 0 ? "due" : "")}><span>{balance > 0 ? "Balance (credit)" : balance < 0 ? "Return to customer" : "Balance"}</span><b className="mono">{billAmount(Math.abs(balance))}</b></div></>}
           <div className="row" style={{ gap: 6 }}>
             <select className="in" style={{ flex: 1, minHeight: 36, padding: "4px 8px" }} value={fmt} onChange={e => { setFmt(e.target.value as PrintFormat); setSetting("print_fmt", e.target.value); }}>
               <option value="a5">A5 invoice</option><option value="a4">A4 invoice</option><option value="80mm">80 mm thermal</option><option value="58mm">58 mm thermal</option><option value="packing">Packing slip (no rates)</option></select>
@@ -654,7 +670,7 @@ export default function Billing({ args }: { args: string[] }) {
       </div>
 
       <div className="fkeys">{KEYS.map(([k, v]) => <span key={k}><kbd>{k}</kbd>{v}</span>)}</div>
-      <div className="pos-mbar"><div><span className="xs">{t.total_qty} pcs · {t.items.length} lines</span><b>{rupees(t.net)}</b></div>
+      <div className="pos-mbar"><div><span className="xs">{t.total_qty} pcs · {t.items.length} lines</span><b>{billAmount(t.net)}</b></div>
         <button className="btn g" disabled={saving} onClick={() => doSave(false, true)}>Save & Send</button><button className="btn p" disabled={saving} onClick={() => doSave(false)}>{saving ? "Saving…" : "Save"}</button></div>
       <Suspense fallback={<div className="toast" role="status">Loading billing tool…</div>}>
         {calculator && <PosCalculator lines={t.items} onClose={() => setCalculator(false)} onApply={(value, target: CalcTarget, id) => {
@@ -734,7 +750,7 @@ function HeldBills({ onPick, onClose }: { onPick: (b: Bill) => void; onClose: ()
         {list.map(b => (
           <div key={b.id} className="item">
             <span className="grow"><b>{b.party_name || "Walk-in"}</b><div className="xs mut">{b.items.length} lines · {b.total_qty} pcs · {new Date(b.at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</div></span>
-            <b className="mono">{rupees(b.net)}</b>
+            <b className="mono">{billAmount(b.net)}</b>
             <button className="btn sm p" onClick={() => onPick(b)}>Resume</button>
             <DeleteButton className="btn sm bad" onDelete={async () => { if (await confirmDelete("Discard this held bill?")) await put("bills", { ...b, deleted: 1 }); }}>Discard</DeleteButton>
           </div>))}
@@ -773,7 +789,7 @@ function ScanSheet({ onCode, onClose, lines, pcs, net }: { onCode: (t: string) =
       <div className="card pad stack" style={{ gap: 6 }}>
         {msg && <div className="sm b" style={{ color: bad ? "var(--bad)" : "var(--ok)" }}>{msg}</div>}
         {!msg && <div className="xs mut">Point at one sticker at a time. The same sticker counts again after it leaves the picture.</div>}
-        <div className="row between"><span className="sm">{lines} lines · {pcs} pcs</span><b style={{ fontSize: 24 }}>{rupees(net)}</b></div>
+        <div className="row between"><span className="sm">{lines} lines · {pcs} pcs</span><b style={{ fontSize: 24 }}>{billAmount(net)}</b></div>
         <button className="btn p big" onClick={onClose}>Done — go to bill</button>
       </div>
     </div>, document.body);
