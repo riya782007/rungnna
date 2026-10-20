@@ -26,7 +26,7 @@ describe("owner's photographed QR", () => {
   it("reuses the same product on four scans and respects shop overrides", async () => {
     const ids = await Promise.all([1, 2, 3, 4].map(async () => (await resolveBillingScan(photographedQr, "o"))!.id));
     expect(new Set(ids).size).toBe(1);
-    await db.config.put({ id: "item_codes", value: { "5186": { name: "Shop BALI", unit: "PAIR" } }, updated_at: "" });
+    await db.config.put({ id: "item_codes", value: { "5186": { name: "Shop BALI", unit: "PAIR", owner: true } }, updated_at: "" });
     await db.products.clear();
     expect((await resolveBillingScan(photographedQr, "o"))?.item).toBe("SHOP BALI");
   });

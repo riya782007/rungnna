@@ -1,8 +1,7 @@
 import { checkedEntryReference } from "./entry-reference";
 import { db, uid, setSetting, type Product, type Purchase, type Party } from "./db";
-import { blankProduct, findByKey, saveProduct, itemMap, normUnit, productKey } from "./products";
+import { blankProduct, findByKey, saveProduct, itemMap, normUnit, productKey, resolvedItemMap } from "./products";
 import { newPurchase, lineOf, finalizePurchase } from "./stockin";
-import { VERIFIED_ITEM_CODES } from "./verified-labels";
 import { readCount, readPacketSize } from "./purchase-quantities";
 import { moneyInput } from "./pos";
 import { requirePerm } from "./scope";
@@ -150,7 +149,7 @@ export function draftLabelProducts(rows: PhotoRow[], by: string, rule: PricingRu
 /** Fill printed packet sizes, known article sizes and learned legacy codes before review. */
 export async function preparePhotoRows(rows: PhotoRow[], supplierId: string, fallbackPack = "1"): Promise<PhotoRow[]> {
   const [products, learned] = await Promise.all([db.products.filter(p => !p.deleted).toArray(), itemMap()]);
-  const known = { ...VERIFIED_ITEM_CODES, ...learned };
+  const known = resolvedItemMap(learned);
   return rows.map(row => {
     const item = row.item.trim().toUpperCase(), unit = normUnit(row.unit);
     const old = products.find(p => productKey(p) === productKey({ model: row.style, style: row.style, color: row.color, vendor_id: supplierId }));
