@@ -9,7 +9,7 @@ import { createPortal } from "react-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, getSetting, setSetting, recordMovement, type Product } from "../lib/db";
 import { ownPayload, parseLabel } from "../lib/parse";
-import { blankProduct, saveProduct, findByScan, fromParsed, fillFromItemCode, distinct, DEFAULT_ITEMS, DEFAULT_TYPES, label, itemCodeFor } from "../lib/products";
+import { blankProduct, saveProduct, findByScan, fromParsed, fillFromItemCode, distinct, DEFAULT_ITEMS, DEFAULT_TYPES, label, itemCodeFor, labelCodeProblem, itemMap } from "../lib/products";
 import { VERIFIED_ITEM_CODES, verifiedCodeFor } from "../lib/verified-labels";
 import { Head, DeadToggle , MoneyInput } from "../components/common";
 import { RackPicker } from "../components/RackPicker";
@@ -30,6 +30,7 @@ import { listQzPrinters, printQzTSPL } from "../lib/qz";
 import { labelHeat, DEFAULT_LABEL_DENSITY, DEFAULT_LABEL_SPEED } from "../lib/label-darkness";
 import { bagPayload, bagLabelCfg, type BagLabel } from "../lib/bag-labels";
 import { legacyLabelCopy, validateLegacyCopy } from "../lib/legacy-label-copy";
+import { ItemCodeCheck } from "../components/ItemCodeCheck";
 import { fakeLetterPool, printedCostCode } from "../lib/label-cost-code";
 
 /* Label settings — every number is in millimetres so what you see is what the printer gets. */
@@ -143,6 +144,13 @@ export function validateLabelPrint(cfg: LabelCfg, jobs: Job[]) {
   const lastX = cfg.offX + (cfg.cols - 1) * (cfg.w + cfg.gapX);
   const minWidth = cfg.mode === "sheet" ? cellBox(cfg, cfg.cols - 1, 0).w : Math.min(cfg.w, (cfg.edgeR ?? Infinity) - lastX);
   if (minWidth <= 0) throw new Error("Labels do not fit the printer's right edge");
+  // the printed name must match what the QR's item code means (old-software QR carries only the code)
+  for (const j of jobs) {
+    if (j.bag) continue;
+    const code = j.sourceQr ? parseLabel(j.sourceQr).icode : cfg.format !== "rungnna" && j.p.style ? j.p.item_code : undefined;
+    const problem = labelCodeProblem(j.p.item, code);
+    if (problem) throw new Error(problem);
+  }
   for (const j of jobs) { const look = j.bag ? bagLabelCfg(cfg) : cfg; renderLabelSvg(minWidth < cfg.w ? { ...look, w: minWidth } : look, j.p, j.qtyOnLabel, j.line, j.labelIndex, j.bag ? bagPayload(j.bag) : validateLegacyCopy(j)); }
 }
 
@@ -151,6 +159,7 @@ export default function Labels({ args }: { args: string[] }) {
   const [cfg, setCfg] = useState<LabelCfg>(DEFAULT_CFG);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [oldCopy, setOldCopy] = useState<Job | null>(null);
+  useEffect(() => { void itemMap(); }, []);   // load the shop's own item names for the label check
   const [queueSelection, setQueueSelection] = useState<Set<string>>(new Set());
   const [form, setForm] = useState<Product>(() => blankProduct(""));
   const [qty, setQty] = useState("1");
@@ -272,6 +281,7 @@ export default function Labels({ args }: { args: string[] }) {
         <button className="btn g" disabled={!total || printer.busy} onClick={doPrint}>Print {total || ""} labels</button>
       </Head>
       {printError && <div className="note warn" role="alert">{printError}</div>}
+      <details className="card pad item-code-check"><summary><b>Item code check</b> <span className="xs mut">— finds products whose label name and QR code disagree</span></summary><ItemCodeCheck /></details>
       <div className="label-dock card" aria-label="Pinned sticker preview">
         <div className="labelprev"><LabelView cfg={cfg} p={oldCopy?.p || jobs[0]?.p || form} qtyOnLabel={oldCopy?.qtyOnLabel || jobs[0]?.qtyOnLabel || parseInt(qty) || 1} line={oldCopy ? undefined : jobs[0]?.line} sourceQr={oldCopy?.sourceQr || jobs[0]?.sourceQr} /></div>
         <div className="grow stack" style={{ gap: 3 }}><b>{oldCopy?.p.item || jobs[0]?.p.item || form.item || "Sticker preview"}</b><span className="sm">{oldCopy?.p.type || jobs[0]?.p.type || form.type} · {cfg.w} × {cfg.h} mm · all text bold</span><span className="xs">QR: {oldCopy || cfg.format === "shop" ? "Old software format" : "Rungnna only"}</span>{oldCopy && <span className="xs">Exact old QR copy — original price, packet and reference</span>}</div>

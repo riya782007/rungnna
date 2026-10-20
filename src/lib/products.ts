@@ -2,7 +2,7 @@ import { db, put, uid, now, deviceId, getSetting, type Product } from "./db";
 import { parseLabel, newCode, type Parsed, type Pattern } from "./parse";
 import { toPaise } from "./format";
 import { isRfidTag, normTag } from "./rfid";
-import { VERIFIED_ITEM_CODES, verifiedCodeFor } from "./verified-labels";
+import { VERIFIED_ITEM_CODES } from "./verified-labels";
 import { requirePerm } from "./scope";
 
 export async function patterns(): Promise<Pattern[]> { return getSetting<Pattern[]>("patterns", []); }
@@ -171,7 +171,7 @@ export function fromParsed(x: Parsed, by: string): Product {
    The list lives in config "item_codes" (synced): { "202": { name: "F-RING", unit: "PAIR" } }.
    Older copies stored just the name ("202": "F-RING"); those still read fine. */
 export const UNITS = ["PCS", "PAIR", "SET"] as const;
-export type ItemInfo = { name: string; unit: string };
+export type ItemInfo = { name: string; unit: string; owner?: boolean };   // owner: named on purpose by the shop
 export type ItemMap = Record<string, ItemInfo>;
 
 export function normUnit(v: unknown): string {
@@ -190,12 +190,41 @@ export function readItemMap(value: unknown): ItemMap {
     else if (v && typeof v === "object") {
       const o = v as Partial<ItemInfo>;
       const name = String(o.name || "").trim().toUpperCase(), unit = normUnit(o.unit);
-      if (name || unit) out[k] = { name, unit };
+      if (name || unit) out[k] = o.owner ? { name, unit, owner: true } : { name, unit };
     }
   }
   return out;
 }
-export async function itemMap(): Promise<ItemMap> { return readItemMap((await db.config.get("item_codes"))?.value); }
+export async function itemMap(): Promise<ItemMap> { return (learnedCache = readItemMap((await db.config.get("item_codes"))?.value)); }
+
+/* Which name an item code really means.
+   The old software's own item list (VERIFIED_ITEM_CODES) is the authority for its codes:
+   a name the app picked up as a side effect of saving some product can't override it —
+   that is how "203" came to mean BALI instead of EARING. Only a name the owner set on
+   purpose (owner: true) overrides the list. Codes not on the list use what was learned. */
+let learnedCache: ItemMap = {};
+export function codeInfo(code?: string, learned: ItemMap = learnedCache): ItemInfo | undefined {
+  if (!code) return undefined;
+  const m = learned[code], v = VERIFIED_ITEM_CODES[code];
+  if (v && !(m?.owner && m.name)) return { name: v.name, unit: v.unit || (m?.name === v.name ? m.unit : "") };
+  return m && (m.name || m.unit) ? m : undefined;
+}
+/* A label must say what its QR means. An old-software QR carries only the item CODE, so
+   the name printed beside it has to be that code's name — otherwise the sticker reads
+   EARING while every scanner (ours and the old software) reads BALI. */
+export function labelCodeProblem(item: string, code?: string): string {
+  const name = (item || "").trim().toUpperCase(), means = codeInfo(code)?.name;
+  if (!name || !code || !means || means === name) return "";
+  const right = Object.entries(resolvedItemMap(learnedCache)).filter(([, v]) => v.name === name).map(([c]) => c);
+  return `This label would say ${name}, but its QR carries item code ${code}, which is ${means}. ` +
+    (right.length === 1 ? `${name} is code ${right[0]} — fix the ITEM CODE before printing.` : `Fix the ITEM CODE (or the item name) before printing.`);
+}
+/** Every code the app can name, with that priority applied. */
+export function resolvedItemMap(learned: ItemMap): ItemMap {
+  const out: ItemMap = {};
+  for (const code of new Set([...Object.keys(VERIFIED_ITEM_CODES), ...Object.keys(learned)])) { const i = codeInfo(code, learned); if (i) out[code] = i; }
+  return out;
+}
 
 /* Merge names/units into the list. keep=true only fills numbers that aren't named yet. */
 export async function learnItems(entries: Record<string, Partial<ItemInfo>>, keep = false) {
@@ -204,11 +233,13 @@ export async function learnItems(entries: Record<string, Partial<ItemInfo>>, kee
     if (!code) continue;
     const old = cur[code], name = (e.name || "").trim().toUpperCase(), unit = normUnit(e.unit);
     if (keep && old?.name) { if (!old.unit && unit) { cur[code] = { ...old, unit }; changed = true; } continue; }
-    const next = { name: name || old?.name || "", unit: unit || old?.unit || "" };
+    const owner = !!(e.owner || (old?.owner && !name));
+    const next: ItemInfo = { name: name || old?.name || "", unit: unit || old?.unit || "", ...(owner ? { owner: true } : {}) };
     if (!next.name && !next.unit) continue;
-    if (old?.name !== next.name || old?.unit !== next.unit) { cur[code] = next; changed = true; }
+    if (old?.name !== next.name || old?.unit !== next.unit || !!old?.owner !== owner) { cur[code] = next; changed = true; }
   }
   if (changed) await put("config", { id: "item_codes", value: cur, updated_at: now() } as any);
+  learnedCache = cur;
   return cur;
 }
 
@@ -228,11 +259,12 @@ export function withItemInfo(p: Product, info?: ItemInfo): Product | null {
 
 export async function itemInfoFor(icode?: string): Promise<ItemInfo | undefined> {
   if (!icode) return undefined;
-  const m = (await itemMap())[icode];
-  if (m?.name) return m;
+  const known = codeInfo(icode, await itemMap());
+  if (known?.name) return known;
+  // a code nobody has named: borrow the name of a product already carrying it
   const hit = await db.products.where("item_code").equals(icode).filter(p => !p.deleted && !needsName(p)).first();
-  if (hit) return { name: hit.item, unit: m?.unit || (hit.type && hit.type !== "PCS" ? hit.type : "") };
-  return m?.name ? m : { ...VERIFIED_ITEM_CODES[icode as keyof typeof VERIFIED_ITEM_CODES], ...m };
+  if (hit) return { name: hit.item, unit: known?.unit || (hit.type && hit.type !== "PCS" ? hit.type : "") };
+  return known;
 }
 export async function itemNameFor(icode?: string) { return (await itemInfoFor(icode))?.name || ""; }
 
@@ -250,31 +282,77 @@ export async function nameKnownItemCodes(): Promise<number> {
   const unnamed = await db.products.filter(p => !p.deleted && needsName(p)).toArray();
   let n = 0;
   for (const p of unnamed) {
-    const code = p.item_code!, info = learned[code]?.name ? learned[code] : VERIFIED_ITEM_CODES[code];
+    const code = p.item_code!, info = codeInfo(code, learned);
     const x = withItemInfo(p, info);
     if (x) { await put("products", x); n++; }
   }
   return n;
 }
 
+/* Item-code checkup: the data problems that make a scan report the wrong item.
+   - wrongCode: a product whose name disagrees with what its item code means. Every
+     label printed for it carries the other item's code (EARING sticker → BALI scan).
+   - ignoredNames: names the app learned for an old-software code that disagree with
+     the old software's own list (now ignored; shown so the owner knows).
+   - sharedLabels: one sticker text attached to more than one product. */
+export type CodeAudit = {
+  wrongCode: { p: Product; means: string; fixCode: string }[];
+  ignoredNames: { code: string; learned: string; means: string }[];
+  sharedLabels: { raw: string; products: Product[] }[];
+};
+export async function auditItemCodes(): Promise<CodeAudit> {
+  const learned = await itemMap(), resolved = resolvedItemMap(learned);
+  const products = await db.products.filter(p => !p.deleted).toArray();
+  const byName = new Map<string, string[]>();
+  for (const [code, v] of Object.entries(resolved)) if (v.name) byName.set(v.name, [...(byName.get(v.name) || []), code]);
+  const wrongCode = products.flatMap(p => {
+    const means = codeInfo(p.item_code, learned)?.name, name = up(p.item);
+    if (!p.item_code || !means || !hasProductName(p.item) || means === name) return [];
+    const codes = byName.get(name) || [];
+    return [{ p, means, fixCode: codes.length === 1 ? codes[0] : "" }];
+  });
+  const ignoredNames = Object.entries(learned).flatMap(([code, m]) => {
+    const v = VERIFIED_ITEM_CODES[code];
+    return v && m.name && !m.owner && m.name !== v.name ? [{ code, learned: m.name, means: v.name }] : [];
+  });
+  const owners = new Map<string, Product[]>();
+  for (const p of products) for (const raw of p.barcodes || []) if (DETAILED.includes(parseLabel(raw).how)) owners.set(raw, [...(owners.get(raw) || []), p]);
+  const sharedLabels = [...owners].filter(([, ps]) => ps.length > 1).map(([raw, ps]) => ({ raw, products: ps }));
+  return { wrongCode, ignoredNames, sharedLabels };
+}
+/** Fix: give the product the code that really means its name (or clear the wrong one). */
+export async function fixProductCode(p: Product, code: string) {
+  return saveProduct({ ...p, item_code: code || undefined });
+}
+/** Fix: a shared sticker stays only on the product whose details it actually carries. */
+export async function unshareLabel(raw: string) {
+  const x = parseLabel(raw), labelName = x.icode ? up(codeInfo(x.icode)?.name) : "";
+  const ps = await db.products.where("barcodes").equals(raw).filter(q => !q.deleted).toArray();
+  const keep = ps.filter(q => !contradicts(q, x, labelName));
+  const keepId = keep.length === 1 ? keep[0].id : undefined;
+  for (const q of ps) if (q.id !== keepId) await saveProduct({ ...q, barcodes: (q.barcodes || []).filter(b => b !== raw) });
+  return keepId;
+}
+
 /* The owner names a number: remember it, and fix every product that still carries no name. */
 export async function nameItemCode(code: string, name: string, unit: string) {
   const info = { name: name.trim().toUpperCase(), unit: normUnit(unit) || "PCS" };
   if (!code || !info.name) return info;
-  await learnItems({ [code]: info });
+  await learnItems({ [code]: { ...info, owner: true } });
   const ps = await db.products.where("item_code").equals(code).filter(p => !p.deleted).toArray();
   for (const p of ps) { const x = withItemInfo(p, info); if (x) await put("products", x); }
   return info;
 }
 export async function itemCodeFor(item: string) {
   if (!item) return "";
-  const hit = await db.products.where("item").equals(item).filter(p => !!p.item_code && !p.deleted).first();
-  if (hit?.item_code) return hit.item_code;
-  // no product yet: use the shop's learned list, then the old software's item list
+  // the code that authoritatively means this name comes first; a product's stored
+  // code may be the very mistake we must not copy onto new labels
   const want = item.trim().toUpperCase();
-  const learned = Object.entries(await itemMap()).filter(([, v]) => v.name === want).map(([code]) => code);
-  if (learned.length === 1) return learned[0];
-  return learned.length ? "" : verifiedCodeFor(want);
+  const named = Object.entries(resolvedItemMap(await itemMap())).filter(([, v]) => v.name === want).map(([code]) => code);
+  if (named.length === 1) return named[0];
+  if (named.length > 1) return "";
+  const hit = await db.products.where("item").equals(item).filter(p => !!p.item_code && !p.deleted && !codeInfo(p.item_code)?.name).first();
+  return hit?.item_code || "";
 }
 
 export async function hideProducts(ids: string[]) {
@@ -292,7 +370,8 @@ export async function saveProduct(p: Product) {
   if (!(p.barcodes || []).includes(p.code)) p.barcodes = [...(p.barcodes || []), p.code];
   const saved = await put("products", p);
   // the first time a number gets a real name (e.g. typed on Scan & record), every later label learns it
-  if (p.item_code && !needsName(p)) await learnItems({ [p.item_code]: { name: p.item, unit: p.type !== "PCS" ? p.type : "" } }, true);
+  // (codes on the old software's own list are already named — never relearn them from a product)
+  if (p.item_code && !needsName(p) && !VERIFIED_ITEM_CODES[p.item_code]) await learnItems({ [p.item_code]: { name: p.item, unit: p.type !== "PCS" ? p.type : "" } }, true);
   return saved;
 }
 

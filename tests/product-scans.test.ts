@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { db } from "../src/lib/db";
-import { blankProduct, findByScan, label, nameItemCode } from "../src/lib/products";
+import { blankProduct, findByScan, label, nameItemCode, auditItemCodes, fixProductCode, itemCodeFor, labelCodeProblem, itemMap } from "../src/lib/products";
 import { resolveScan, lineOf } from "../src/lib/stockin";
 import { resolveBillingScan } from "../src/lib/billing-products";
 import { ownPayload } from "../src/lib/parse";
@@ -60,7 +60,7 @@ describe("consistent named products across scanners", () => {
     expect(label(p)).toContain("JHUMKI");
   });
   it("honours learned names and never replaces real names, units or prices", async () => {
-    await db.config.put({ id: "item_codes", value: { "5186": { name: "SHOP BALI", unit: "PAIR" } }, updated_at: "" });
+    await db.config.put({ id: "item_codes", value: { "5186": { name: "SHOP BALI", unit: "PAIR", owner: true } }, updated_at: "" });
     const p = { ...blankProduct("o"), barcodes: [legacy] }; await db.products.put(p);
     expect((await findByScan(legacy))?.item).toBe("SHOP BALI");
     // the owner renames the scanned product (it now carries the label's item code)
@@ -131,5 +131,41 @@ describe("scan accuracy when items share a style", () => {
   it("reads an old label typed with '-' instead of '~' by a scanner on the wrong keyboard layout", async () => {
     const p = (await resolveBillingScan("255-224-1-183--K5208/2T-KXZ", "o"))!;
     expect(lineFrom(p)).toMatchObject({ item: "N-SET", style: "K5208/2T", color: "KXZ", rate: 22400 });
+  });
+});
+
+/* Counter report: sticker EARING · K5209/11P · W/XZBSPHL · ₹360 X1 PAIR billed as BALI · PCS.
+   On a clean system this QR reads EARING (see negative-stock tests); on the shop's system a
+   name learned as a side effect had re-pointed code 203 at BALI. */
+describe("item code authority", () => {
+  const sticker = "203~360~1~212~~K5209/11P~W/XZBSPHL";
+  it("reads the old software's name and unit even when a stray learned name disagrees", async () => {
+    await db.config.put({ id: "item_codes", value: { "203": { name: "BALI", unit: "" } }, updated_at: "" });
+    const p = (await resolveBillingScan(sticker, "o"))!;
+    expect(lineFrom(p)).toMatchObject({ item: "EARING", type: "PAIR", rate: 36000, style: "K5209/11P", color: "W/XZBSPHL" });
+  });
+  it("never lets a product with the wrong code teach that code a new name", async () => {
+    await db.products.put({ ...blankProduct("o"), item: "BALI", item_code: "203", style: "X1", color: "G" });
+    await fixProductCode((await db.products.toArray())[0], "203");   // saving it must not relearn 203 = BALI
+    expect((await itemMap())["203"]).toBeUndefined();
+    expect((await resolveBillingScan(sticker, "o"))?.item).toBe("EARING");
+  });
+  it("finds products that print another item's code, and fixes them", async () => {
+    const wrong = { ...blankProduct("o"), item: "EARING", item_code: "5186", style: "K5209/11P", color: "W/XZBSPHL" };
+    await db.products.put(wrong);
+    const audit = await auditItemCodes();
+    expect(audit.wrongCode.map(w => [w.p.id, w.means, w.fixCode])).toEqual([[wrong.id, "BALI", "203"]]);
+    await fixProductCode(audit.wrongCode[0].p, "203");
+    expect((await auditItemCodes()).wrongCode).toEqual([]);
+  });
+  it("blocks printing a label whose name and QR code disagree", async () => {
+    await itemMap();
+    expect(labelCodeProblem("EARING", "5186")).toContain("EARING is code 203");
+    expect(labelCodeProblem("EARING", "203")).toBe("");
+    expect(await itemCodeFor("EARING")).toBe("203");
+  });
+  it("keeps an owner's deliberate name for a code", async () => {
+    await nameItemCode("203", "EAR TOPS", "PAIR");
+    expect((await resolveBillingScan(sticker, "o"))?.item).toBe("EAR TOPS");
   });
 });

@@ -10,7 +10,7 @@ import { appendPosLine, repeatedPosLine, validatePosLines } from "../lib/pos";
 import type { CalcTarget } from "../components/PosTools";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, type Bill, type BillLine, type Party, type Payment, type Product } from "../lib/db";
-import { findByScan, fillFromItemCode, label, readItemMap } from "../lib/products";
+import { findByScan, fillFromItemCode, label, readItemMap, codeInfo } from "../lib/products";
 import { NameItemCodes, unnamedCodes } from "../components/NameItemCodes";
 import { isRfidTag, normTag, soldBill, TagSet, Recent } from "../lib/rfid";
 import { discError, newBill, lineFrom, priceFor, totals, gstLabel, fixLine, finalize, holdBill, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
@@ -183,6 +183,7 @@ export default function Billing({ args }: { args: string[] }) {
      scan box, so it is visible without scrolling. Display only — the bill, its line
      numbers and the printed order stay as added. */
   const [touched, setTouched] = useState<string[]>([]);
+  const [lastRead, setLastRead] = useState("");
   function displayOrder(items: BillLine[]): BillLine[] {
     const byId = new Map(items.map(l => [l.id, l]));
     const first = touched.map(id => byId.get(id)).filter((l): l is BillLine => !!l);
@@ -200,7 +201,7 @@ export default function Billing({ args }: { args: string[] }) {
     const active = document.activeElement;
     if (!active || active === document.body) scanRef.current?.focus({ preventScroll: true });
   }, [b]);
-  useEffect(() => { setTouched([]); }, [b?.id]);
+  useEffect(() => { setTouched([]); setLastRead(""); }, [b?.id]);
   useEffect(() => {
     if (!flashId) return;
     const timer = setTimeout(() => { rowRefs.current.get(flashId)?.classList.remove("flash"); setFlashId(null); }, 1600);
@@ -375,6 +376,11 @@ export default function Billing({ args }: { args: string[] }) {
     const printed = parsed.rate && ["shop label", "rungnna"].includes(parsed.how) ? toPaise(parsed.rate) : 0;
     const billed = priceFor(p, billRef.current?.price_level || "wholesale");
     if (printed && billed && printed !== billed) toast(`Check rate: sticker says ${rupees(printed)}, bill uses ${rupees(billed)} for ${label(p)}`, true);
+    // show exactly what the QR carried, so a mislabelled sticker is visible at the counter
+    if (["shop label", "rungnna"].includes(parsed.how)) {
+      const means = parsed.icode ? codeInfo(parsed.icode, readItemMap(itemNames?.value))?.name : parsed.item?.toUpperCase();
+      setLastRead(["QR: " + (parsed.icode ? `code ${parsed.icode}${means ? " = " + means : " (not named)"}` : means || "—"), parsed.rate && "₹" + parsed.rate, parsed.qty && "×" + parsed.qty, parsed.style, parsed.color].filter(Boolean).join(" · "));
+    } else setLastRead("Barcode: " + r);
     return "Added · " + label(p);
   }
   const onCodeRef = useRef(onCode); onCodeRef.current = onCode;
@@ -570,7 +576,7 @@ export default function Billing({ args }: { args: string[] }) {
               <button className="btn" disabled={saving} title="POS calculator" aria-label="POS calculator" onClick={() => setCalculator(true)}><Calculator size={20} /></button>
             </div>
             <div className={"lastscan" + (lastScan ? " has-item" : "")} role="status" aria-live="polite" aria-atomic="true">
-              <span>{lastScan ? <><b>Added: {lastScan.item || lastScan.style || lastScan.code}</b><span className="xs">{[lastScan.style, lastScan.color, `Box ${lastScan.box_no}`, `${lastScan.qty} ${lastScan.type || "PCS"} × ${rupees(lastScan.rate)}`, rupees(lastScan.amount)].filter(Boolean).join(" · ")}</span></> : <span className="mut">{t.items.length} bill lines · {t.total_qty} units</span>}</span>
+              <span>{lastScan ? <><b>Added: {lastScan.item || lastScan.style || lastScan.code}</b><span className="xs">{[lastScan.style, lastScan.color, `Box ${lastScan.box_no}`, `${lastScan.qty} ${lastScan.type || "PCS"} × ${rupees(lastScan.rate)}`, rupees(lastScan.amount)].filter(Boolean).join(" · ")}</span>{lastRead && <span className="xs mono qr-read">{lastRead}</span>}</> : <span className="mut">{t.items.length} bill lines · {t.total_qty} units</span>}</span>
               {lastScan && <button className="btn sm" onClick={() => showLine(lastScan.id, true)}>Show line</button>}
             </div>
             </div>
