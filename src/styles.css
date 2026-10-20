@@ -649,6 +649,19 @@ html{scrollbar-gutter:stable}
    stays put after a scan. The camera and the manual item editor stay below and
    are NOT pinned, so they never cover the bill lines list. */
 .pos-scanhead{position:sticky;top:64px;z-index:15;background:#fff;padding:4px 0}
+/* Responsive billing: nothing may sit on top of the bill.
+   Phones/tablets: the top bar + tabs are already pinned, so the scan head scrolls
+   normally (no stacking under them), the key hint is hidden (no keyboard), and the
+   "Item added" receipt sits above the bottom bar instead of over the scan box. */
+@media(max-width:1000px){
+  .bill-scan-notice{top:auto;left:auto;right:20px;bottom:96px}
+}
+@media(max-width:860px){
+  .pos-scanhead{position:static}
+  .keys-hint{display:none}
+  .bill-scan-notice{left:12px;right:12px;width:auto;bottom:calc(156px + env(safe-area-inset-bottom))}
+  .selection-bar{gap:8px}
+}
 /* Compact in-bill camera: keep the scanner small so the added bill lines stay
    visible underneath instead of being pushed off-screen by a full-size preview. */
 .pos-cam{max-width:300px}

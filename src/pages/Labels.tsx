@@ -10,6 +10,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, getSetting, setSetting, recordMovement, type Product } from "../lib/db";
 import { ownPayload, parseLabel } from "../lib/parse";
 import { blankProduct, saveProduct, findByScan, fromParsed, fillFromItemCode, distinct, DEFAULT_ITEMS, DEFAULT_TYPES, label, itemCodeFor } from "../lib/products";
+import { VERIFIED_ITEM_CODES, verifiedCodeFor } from "../lib/verified-labels";
 import { Head, DeadToggle , MoneyInput } from "../components/common";
 import { RackPicker } from "../components/RackPicker";
 import { SupplierNo } from "../components/SupplierNo";
@@ -306,8 +307,8 @@ export default function Labels({ args }: { args: string[] }) {
               {oldCopy && <div className="note stack" role="status"><b>Copy a working old sticker</b><span className="sm">This copy keeps the original QR exactly, including its old reference and price. Edits in the item form below apply only to newly generated labels.</span><code style={{ overflowWrap: "anywhere" }}>{oldCopy.sourceQr}</code><div className="row"><button className="btn p" disabled={printer.busy} onClick={() => { const n = Number(copies); if (!Number.isSafeInteger(n) || n < 1 || n > 5000) return toast("Check print quantity (1–5000)", true); showStart(printer.start(expandJobs([{ ...oldCopy, p: { ...oldCopy.p, item: oldCopy.p.item || form.item }, copies: n }]))); }}>Print exact old QR copy</button><button className="btn" onClick={() => setOldCopy(null)}>Use edited item instead</button></div></div>}
               <div className="grid g2">
                 <label className="f">ITEM
-                  <input className="in" list="litems" value={form.item} onChange={e => set("item", e.target.value.toUpperCase())} autoFocus />
-                  <datalist id="litems">{[...new Set([...items, ...DEFAULT_ITEMS])].map(i => <option key={i} value={i} />)}</datalist></label>
+                  <input className="in" list="litems" value={form.item} onChange={e => { const v = e.target.value.toUpperCase(); set("item", v); const c = verifiedCodeFor(v); if (c && !form.item_code) set("item_code", c); }} autoFocus />
+                  <datalist id="litems">{[...new Set([...items, ...DEFAULT_ITEMS, ...Object.values(VERIFIED_ITEM_CODES).map(v => v.name)])].map(i => <option key={i} value={i} />)}</datalist></label>
                 <label className="f">TYPE
                   <select className="in" value={form.type} onChange={e => set("type", e.target.value)}>{DEFAULT_TYPES.map(t => <option key={t}>{t}</option>)}</select></label>
                 <label className="f">STYLE<input className="in mono" value={form.style} onChange={e => set("style", e.target.value.toUpperCase())} placeholder="K5209/59SH" /></label>
@@ -316,7 +317,7 @@ export default function Labels({ args }: { args: string[] }) {
                 <details className="label-advanced" open={cfg.format === "shop"}><summary>More details</summary><div className="grid g2">
                 <label className="f">MODEL / ARTICLE No.<input className="in mono" value={form.model || ""} onChange={e => set("model", e.target.value.toUpperCase() || undefined)} placeholder="vendor's article no" /></label>
                 <SupplierNo suppliers={vendors} id={form.vendor_id} label="VENDOR roll no." onPick={v => { set("vendor_id", v?.id); set("vendor_name", v?.name); }} />
-                <label className="f">ITEM CODE (old software)<input className="in mono" inputMode="numeric" value={form.item_code || ""} placeholder="Copy the old system’s numeric code" onChange={e => set("item_code", e.target.value.replace(/\D/g, "") || undefined)} /></label>
+                <label className="f">ITEM CODE (old software)<input className="in mono" inputMode="numeric" value={form.item_code || ""} placeholder="Copy the old system’s numeric code" onChange={e => { const c = e.target.value.replace(/\D/g, "") || undefined; set("item_code", c); const known = c ? VERIFIED_ITEM_CODES[c]?.name : ""; if (known && !form.item.trim()) set("item", known); }} /></label>
                 <label className="f">REF / roll reference (old software)<input className="in mono" value={form.ref || ""} onChange={e => set("ref", e.target.value || undefined)} placeholder="Copy the working label’s reference" /></label>
                 {can(me, "rates") && <label className="f">COST ₹
                   <input className="in mono" inputMode="decimal" value={cost} placeholder="enter cost" onChange={e => applyCost(e.target.value)} /></label>}
