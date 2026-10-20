@@ -44,7 +44,8 @@ const PosCalculator = lazy(() => import("../components/PosTools").then(m => ({ d
 
 export default function Billing({ args }: { args: string[] }) {
   const { me } = useApp();
-  const [editorOpen, setEditorOpen] = useState(false);
+  // the custom-item row stays open on the counter PC; phones open it with "Add item"
+  const [editorOpen, setEditorOpen] = useState(() => !(typeof matchMedia !== "undefined" && matchMedia("(max-width: 860px)").matches));
   const [entryFocus, setEntryFocus] = useState(0), [calculator, setCalculator] = useState(false), [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const switchingRef = useRef(false);
@@ -643,7 +644,7 @@ export default function Billing({ args }: { args: string[] }) {
               <button className={"btn " + (cam || sheet ? "p" : "g")} onClick={() => (small ? setSheet(true) : setCam(!cam))} title="Scan with the camera"><Icon n="scan" size={20} />Scan</button>
               {!small && <button className={"btn " + (peers ? "p" : "")} onClick={() => setPairOpen(true)} title="Use a phone as the scanner"><Icon n="sell" size={18} />{peers ? "Phone linked" : "Phone as scanner"}</button>}
               <MicButton onAudio={a => doVoice(a)} busy={aiBusy} label="🎙 Speak order" />
-              <button className="btn" aria-pressed={editorOpen} aria-expanded={editorOpen} aria-controls="pos-item-entry" disabled={saving} onClick={() => { setEditorOpen(x => !x); setEntryFocus(n => n + 1); }}><Plus size={18} />Add item</button>
+              <button className="btn" aria-pressed={editorOpen} aria-expanded={editorOpen} aria-controls="pos-item-entry" disabled={saving} onClick={() => { setEditorOpen(x => small ? !x : true); setEntryFocus(n => n + 1); }}><Plus size={18} />Add item</button>
               <button className="btn" disabled={saving} title="POS calculator" aria-label="POS calculator" onClick={() => setCalculator(true)}><Calculator size={20} /></button>
             </div>
             <div className={"lastscan" + (lastScan ? " has-item" : "")} role="status" aria-live="polite" aria-atomic="true">

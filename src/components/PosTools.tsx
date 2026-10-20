@@ -34,6 +34,21 @@ export function ManualItems({ products, box, level, canRates, onProduct, onCusto
       setChosen(null); setQ(""); setItem(""); setRate(""); setQty("1"); setStyle(""); setColor(""); setHsn(""); setPieces(false); setError(""); search.current?.focus({ preventScroll: true });
     } catch (e: any) { beep(false); setError(e.message); }
   };
+  /* Counter screen: one always-open row — name, unit, style, colour, qty, rate, add.
+     No Stock/Custom switch (stock items come in through the scan box) and no HSN
+     (counter request 21/10/2026). Enter in any box adds the line. */
+  if (persistent) return <section className="pos-inline pos-quick" id="pos-item-entry" aria-label="Add custom item">
+    <form className="pos-quick-row" onSubmit={e => { e.preventDefault(); submit(false); }}>
+      <input ref={search} className="in" aria-label="Product name" placeholder="Product name" value={item} onChange={e => setItem(e.target.value)} />
+      <select className="in" aria-label="Unit" value={unit} onChange={e => setUnit(e.target.value)}>{["PCS", "PAIR", "SET"].map(u => <option key={u}>{u}</option>)}</select>
+      <input className="in" aria-label="Style" placeholder="Style" value={style} onChange={e => setStyle(e.target.value)} />
+      <input className="in" aria-label="Colour" placeholder="Colour" value={color} onChange={e => setColor(e.target.value)} />
+      <input className="in r" aria-label="Quantity" placeholder="Qty" type="number" min={1} step={1} value={qty} onChange={e => setQty(e.target.value)} />
+      <input className="in r" aria-label={"Rate per " + unit} placeholder="Rate" inputMode="decimal" value={rate} onChange={e => setRate(e.target.value)} />
+      <button className="btn p" title="Tracked in stock when saved; zero stock can go negative"><Plus size={16} />Add</button>
+    </form>
+    {error && <div role="alert" className="note warn sm">{error}</div>}
+  </section>;
   const content = <div className="stack pos-tools">
     <div className="seg" role="group" aria-label="Item source"><button aria-pressed={mode === "catalog"} onClick={() => { setMode("catalog"); setError(""); }}>Stock item</button><button aria-pressed={mode === "custom"} onClick={() => { setMode("custom"); setChosen(null); setRate(""); setError(""); }}>Custom item</button></div>
     {mode === "catalog" && <><label className="f">Search products<input className="in" autoFocus={!persistent} ref={search} value={q} onChange={e => { setQ(e.target.value); setChosen(null); }} placeholder="Name, item number, style or colour" /></label>
