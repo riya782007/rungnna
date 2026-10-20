@@ -61,6 +61,80 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
     if (!rows.length || !await confirmDelete("Remove " + rows.length + " purchase line(s) from this draft?")) return;
     setReviewed(false); setD(latest => ({ ...latest, rows: latest.rows.filter(r => !wanted.has(r.review_id || "")), check: undefined })); setSelection(new Set());
   };
+
+  /* Keyboard-only movement across the bill-photo grid, so you can check an
+     uploaded bill without the mouse:
+       ↑ / ↓        move to the same field one line up / down
+       ← / →        move to the field left / right in the same line
+       Space        tick / untick the current line (select many)
+       Shift+↑/↓    extend the selection over a range of lines
+     ↑/↓ always move between lines (they never just move the text caret), so
+     going box to box is immediate. Enter keeps its existing "copy down" job on
+     the count fields. */
+  const selectAnchor = useRef<string | null>(null);
+  function focusGridCell(el: HTMLElement | null | undefined) {
+    if (!el) return;
+    el.focus();
+    if (el instanceof HTMLInputElement && el.type !== "checkbox") el.select?.();
+  }
+  function gridFields(row: HTMLTableRowElement): { el: HTMLElement; col: number }[] {
+    const out: { el: HTMLElement; col: number }[] = [];
+    Array.from(row.children).forEach((td, col) => {
+      const f = td.querySelector<HTMLElement>('input:not([type="checkbox"]):not([disabled]), select:not([disabled])');
+      if (f) out.push({ el: f, col });
+    });
+    return out;
+  }
+  function onPurchaseGridKey(e: React.KeyboardEvent<HTMLDivElement>) {
+    const key = e.key;
+    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(key)) return;
+    const el = document.activeElement as HTMLElement | null;
+    const td = el?.closest("td");
+    const row = el?.closest<HTMLTableRowElement>("tr");
+    const body = row?.closest("tbody");
+    if (!row || !body || !el) return;
+    const rows = Array.from(body.querySelectorAll<HTMLTableRowElement>(":scope > tr"));
+    const idx = rows.indexOf(row);
+    if (idx < 0) return;
+    const ids = draftRef.current.rows.map(r => r.review_id || "");
+    const isText = el.tagName === "INPUT" || el.tagName === "SELECT";
+    const input = el as HTMLInputElement;
+    const curCol = td ? Array.from(row.children).indexOf(td) : 0;
+
+    const moveRow = (nextIdx: number) => {
+      const next = rows[nextIdx]; if (!next) return;
+      const fields = gridFields(next); if (!fields.length) return;
+      const target = fields.find(f => f.col === curCol) || fields.filter(f => f.col >= curCol)[0] || fields[fields.length - 1];
+      focusGridCell(target.el);
+    };
+
+    if (key === "ArrowDown") {
+      e.preventDefault();
+      if (idx < rows.length - 1) moveRow(idx + 1);
+      if (e.shiftKey) toggleSelRange(ids, idx + 1);
+    } else if (key === "ArrowUp") {
+      e.preventDefault();
+      if (idx > 0) moveRow(idx - 1);
+      if (e.shiftKey) toggleSelRange(ids, idx - 1);
+    } else if (key === "ArrowRight") {
+      const fields = gridFields(row); const here = fields.findIndex(f => f.el === el);
+      if (here > -1 && here < fields.length - 1) { e.preventDefault(); focusGridCell(fields[here + 1].el); }
+    } else if (key === "ArrowLeft") {
+      const fields = gridFields(row); const here = fields.findIndex(f => f.el === el);
+      if (here > 0) { e.preventDefault(); focusGridCell(fields[here - 1].el); }
+    } else if (key === " " && (!isText || input.type === "checkbox")) {
+      e.preventDefault();
+      const id = ids[idx];
+      setSelection(old => { const next = new Set(old); next.has(id) ? next.delete(id) : next.add(id); return next; });
+      selectAnchor.current = id;
+    }
+  }
+  function toggleSelRange(ids: string[], toIdx: number) {
+    if (toIdx < 0 || toIdx >= ids.length) return;
+    const anchor = selectAnchor.current ? ids.indexOf(selectAnchor.current) : toIdx;
+    const [lo, hi] = [Math.min(anchor, toIdx), Math.max(anchor, toIdx)];
+    setSelection(new Set(ids.slice(lo, hi + 1)));
+  }
   const [ready, setReady] = useState(false), [busy, setBusy] = useState(false), [reviewed, setReviewed] = useState(false), [error, setError] = useState("");
   const [connection, setConnection] = useState(""), [checking, setChecking] = useState(false);
   const [probe, setProbe] = useState<{ provider: string; model: string; ok: boolean; plain: string }[] | null>(null), [probing, setProbing] = useState(false);
@@ -386,8 +460,8 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         </label>)}</div>
       </details>}
 
-      <div className="selection-bar"><SelectAll ids={d.rows.map(r => r.review_id!)} selected={selection} onChange={setSelection} label="Select all purchase lines" /><span className="sm">{d.rows.filter(r => selection.has(r.review_id!)).length} selected</span><DeleteButton className="btn sm bad" disabled={busy || !d.rows.some(r => selection.has(r.review_id!))} onDelete={() => removeRows(d.rows.filter(r => selection.has(r.review_id!)).map(r => r.review_id!))}>Delete selected</DeleteButton></div>
-      <div className="tw purchase-lines"><table className="pos-t"><thead><tr>{["No.", "Supplier S.No.", ...FIELDS.map(f => captions[f]), ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
+      <div className="selection-bar"><SelectAll ids={d.rows.map(r => r.review_id!)} selected={selection} onChange={setSelection} label="Select all purchase lines" /><span className="sm">{d.rows.filter(r => selection.has(r.review_id!)).length} selected</span><DeleteButton className="btn sm bad" disabled={busy || !d.rows.some(r => selection.has(r.review_id!))} onDelete={() => removeRows(d.rows.filter(r => selection.has(r.review_id!)).map(r => r.review_id!))}>Delete selected</DeleteButton><span className="xs mut" style={{ marginLeft: "auto" }}>Keys: ↑↓ lines · ←→ fields · Space select · Shift+↑↓ range</span></div>
+      <div className="tw purchase-lines" onKeyDown={onPurchaseGridKey}><table className="pos-t"><thead><tr>{["No.", "Supplier S.No.", ...FIELDS.map(f => captions[f]), ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
         {d.rows.map((r, i) => <tr key={r.review_id || i}>
           <td className="line-no" data-l="Line" title="Line number: the same small boxed number printed on this line's stickers"><input type="checkbox" aria-label={"Select purchase line " + (i + 1)} checked={selection.has(r.review_id!)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(r.review_id!) : next.delete(r.review_id!); return next; })} />{i + 1}</td>
           <td data-l="Supplier S.No." className="supplier-number mono" title="Saved supplier roll number">{vendor?.vendor_code || "—"}</td>
