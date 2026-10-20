@@ -17,13 +17,13 @@ export function NameItemCodes({ codes, onNamed }: { codes: string[]; onNamed: (c
     return (t ? known.filter(i => i.includes(t) && i !== t) : known).slice(0, 6);
   };
   return (
-    <div className="card pad stack" style={{ borderColor: "#E3CF9E", background: "var(--gold-l)" }}>
+    <div className="card pad stack item-code-names" style={{ borderColor: "#E3CF9E", background: "var(--gold-l)" }}>
       <b className="sm">Name {codes.length > 1 ? "these item numbers" : "this item number"} once</b>
       <datalist id="item-code-names">{known.map(i => <option key={i} value={i} />)}</datalist>
       {codes.map(c => {
         const f = get(c);
         return (
-          <form key={c} className="stack" style={{ gap: 6 }} onSubmit={async e => {
+          <form key={c} className="stack item-code-name-form" style={{ gap: 6 }} onSubmit={async e => {
             e.preventDefault(); const name = f.name.trim().toUpperCase(); if (!name) return;
             const info = await nameItemCode(c, name, f.unit);
             onNamed(c, info.name, info.unit); toast(`Item ${c} = ${info.name} (${info.unit}) — remembered for every label`);

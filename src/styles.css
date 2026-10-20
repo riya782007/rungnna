@@ -946,3 +946,26 @@ html{scrollbar-gutter:stable}
 @media(max-width:860px){
   .pos-lines .pos-t tr.ln{scroll-margin-top:120px;scroll-margin-bottom:160px}
 }
+
+/* Keep one-time item naming compact and put the visual emphasis on bill rows. */
+.billing-shell .item-code-names{padding:6px 8px;gap:4px}
+.billing-shell .item-code-names>.sm{font-size:12px}
+.billing-shell .item-code-name-form{gap:4px!important}
+.billing-shell .item-code-name-form>.row{gap:6px}
+.billing-shell .item-code-name-form .mono{font-size:12px;flex:none;width:60px!important}
+.billing-shell .item-code-name-form .in{height:30px;min-height:30px;padding:0 7px;font-size:13px}
+.billing-shell .item-code-name-form select.in{width:70px!important;flex:none}
+.billing-shell .item-code-name-form .btn{height:30px;min-height:30px;padding:0 10px;font-size:12px}
+.billing-shell .item-code-name-form .chips{gap:4px}
+.billing-shell .item-code-name-form .chip{height:24px;min-height:24px;padding:0 8px;font-size:11px}
+.billing-shell .pos-lines .pos-t{font-size:16px}
+.billing-shell .pos-lines .pos-t th{font-size:14px;font-weight:700;padding:8px 5px}
+.billing-shell .pos-lines .pos-t td{padding:8px 5px;vertical-align:middle}
+.billing-shell .pos-lines .pos-t .cell{height:40px;min-height:40px;font-size:17px;padding:0 5px;max-width:100%}
+.billing-shell .pos-lines .pos-t td:nth-child(3) .cell{font-size:18px}
+.billing-shell .pos-lines .pos-t td[data-l="Amount"]{font-size:18px;font-weight:700}
+.billing-shell .pos-lines .pos-t td:nth-child(3)>.mono,.billing-shell .pos-lines .pos-t td:nth-child(3)>.mut{font-size:14px}
+@media(max-width:860px){
+  .billing-shell .item-code-name-form .in{font-size:16px}
+  .billing-shell .item-code-name-form .grow{min-width:0}
+}
