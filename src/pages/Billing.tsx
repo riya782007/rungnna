@@ -62,15 +62,27 @@ export default function Billing({ args }: { args: string[] }) {
   const dismissScanFeedback = useCallback(() => setScanFeedback(null), []);
   const [lastScanId, setLastScanId] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
-  function showLine(id: string, revealPage = false) {
+  function showLine(id: string, _revealPage = false) {
     const row = rowRefs.current.get(id);
     if (!row) return;
     const pane = linesPane.current;
-    if (pane && pane.scrollHeight > pane.clientHeight) {
+    // The lines table is its own scroll area only on tall, wide counter screens; on
+    // laptops and shorter windows the whole page scrolls instead. So: if the inner
+    // pane scrolls, nudge the row into view there; otherwise (and whenever the row
+    // is still outside the viewport) scroll the page so the just-scanned / merged
+    // line is always visible. This keeps "where am I putting this?" on screen.
+    let handled = false;
+    if (pane && pane.scrollHeight > pane.clientHeight + 1) {
       const r = row.getBoundingClientRect(), p = pane.getBoundingClientRect();
-      if (r.bottom > p.bottom) pane.scrollTop += r.bottom - p.bottom;
-      else if (r.top < p.top + 40) pane.scrollTop -= p.top + 40 - r.top;
-    } else if (revealPage) row.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "auto" });
+      if (r.bottom > p.bottom) { pane.scrollTop += r.bottom - p.bottom; handled = true; }
+      else if (r.top < p.top + 40) { pane.scrollTop -= p.top + 40 - r.top; handled = true; }
+      else handled = true; // already visible inside the scrollable pane
+    }
+    if (!handled) {
+      const r = row.getBoundingClientRect();
+      const offTop = r.top < 60, offBottom = r.bottom > (window.innerHeight || document.documentElement.clientHeight);
+      if (offTop || offBottom) row.scrollIntoView({ block: offTop ? "start" : "nearest", inline: "nearest", behavior: "smooth" });
+    }
     row.classList.remove("flash");
     void row.offsetWidth; // restart the highlight when the same item is scanned again
     row.classList.add("flash");
