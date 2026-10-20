@@ -640,6 +640,12 @@ html{scrollbar-gutter:stable}
 .billing-shell .pos-top{border-radius:0;background:#fff;gap:10px;padding:10px 12px}
 .pos-workspace{min-height:0}
 .pos-entry,.pos-notes{background:#fff;border:1px solid var(--line);padding:12px}
+/* Keep the scan bar + "what's scanning" strip pinned at the top while the bill
+   lines scroll underneath, so the operator never loses the scan box after a scan.
+   If the camera/manual-entry opens and makes this block tall, it scrolls inside
+   itself instead of pushing the pinned scan bar away. (On the big-counter layout
+   the lines pane scrolls on its own, so this sticky behaviour is overridden.) */
+.pos-entry{position:sticky;top:64px;z-index:15;max-height:calc(100vh - 80px);overflow:auto}
 .pos-entry .in{height:38px;padding:0 10px}
 .pos-entry .btn{height:38px;padding:0 12px}
 .pos-entry .wedge{height:40px}
@@ -688,7 +694,7 @@ html{scrollbar-gutter:stable}
   .billing-shell .pos{gap:8px;padding-bottom:0}
   .billing-shell .pos-main{flex:1;min-height:0;align-items:stretch}
   .billing-shell .pos-workspace{height:100%;overflow:hidden;gap:8px}
-  .billing-shell .pos-entry{flex:none}
+  .billing-shell .pos-entry{flex:none;position:static}
   .billing-shell .pos-entry:has(video){max-height:55%;overflow-y:auto}
   .billing-shell .pos-lines{flex:1;min-height:130px;overflow:auto}
   .billing-shell .pos-sum{overflow:auto;overscroll-behavior:contain}
