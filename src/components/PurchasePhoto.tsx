@@ -28,7 +28,7 @@ import { newParty } from "../lib/billing";
 const blank = (pack = "1"): PhotoRow => ({ review_id: uid(), item: "", style: "", color: "", unit: "PCS", hsn: "", qty: "", pack, packSource: "default", stickers: "", cost: "", rate: "" });
 const captions: Record<string, string> = { item: "Item", style: "Style/article", color: "Colour", unit: "Unit", entry_code: "Reference Code", hsn: "HSN", qty: "Total qty", pack: "Pieces per packet (X)", stickers: "Stickers", cost: "Cost ₹", rate: "Rate ₹" };
 /* pack = the "X1" / "X3" after the rate on his stickers: pieces in one packet (his old software's QTY box) */
-const FIELDS = ["entry_code", "item", "style", "unit", "rate", "stickers", "qty", "pack", "color", "cost"] as const;
+const FIELDS = ["entry_code", "item", "style", "unit", "rate", "cost", "stickers", "qty", "pack", "color"] as const;
 type Field = (typeof FIELDS)[number];
 const defaultStickers = (r: PhotoRow) => {
   const qty = Number(r.qty), pack = Number(r.pack || "1");
