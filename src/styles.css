@@ -694,12 +694,15 @@ html{scrollbar-gutter:stable}
 /* keep a scanned row clear of the sticky top/subnav bars when it is scrolled into view */
 .pos-lines .pos-t tr.ln{scroll-margin-top:120px;scroll-margin-bottom:80px}
 .pos-lines .pos-t tr.ln:nth-child(even){background:#FAFBFC}
-.pos-lines .pos-t tr.ln.scanned td{background:#FFF3B0}
-.pos-lines .pos-t tr.ln.scanned td:first-child{box-shadow:inset 3px 0 #B77900}
-.pos-lines .pos-t tr.ln.flash td{animation:none;background:#FDE68A}
-.pos-lines .pos-t tr.ln.flash td:first-child{box-shadow:inset 3px 0 #B77900}
+/* the line touched by the latest scan: strong, unmistakable yellow */
+.pos-lines .pos-t tr.ln.scanned td{background:#FFD60A;font-weight:700;border-top:2px solid #B77900;border-bottom:2px solid #B77900}
+.pos-lines .pos-t tr.ln.scanned td:first-child{box-shadow:inset 6px 0 #8A5A00}
+.pos-lines .pos-t tr.ln.scanned .cell{background:#FFF7CC;font-weight:700}
+.pos-lines .pos-t tr.ln.flash td{animation:none;background:#FFD60A}
+.pos-lines .pos-t tr.ln.flash td:first-child{box-shadow:inset 6px 0 #8A5A00}
 .lastscan{min-height:54px;border-radius:0;background:#F8F9FA;border-left:3px solid #DADCE0;padding:5px 8px;flex-wrap:nowrap}
-.lastscan.has-item{background:#FFF3B0;border-left-color:#B77900}
+.lastscan.has-item{background:#FFD60A;border-left:6px solid #8A5A00;color:#2B2100}
+.lastscan.has-item b{font-size:17px}
 .lastscan>span{flex:1;min-width:0;overflow-wrap:anywhere}
 .lastscan>span>span{display:block}
 .lastscan .btn{flex:none}

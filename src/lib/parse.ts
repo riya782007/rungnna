@@ -76,6 +76,17 @@ export function parseLabel(rawIn: string, patterns: Pattern[] = []): Parsed {
     const [icode, rate, qty, ref, tk, style, color] = tl.map(t => t.trim());
     return { raw, how: "shop label", tokens: tl, icode, rate: num(rate), qty: num(qty), ref, tk, style, color };
   }
+  // 1c. the same old label typed by a scanner on the wrong keyboard layout, which turns
+  //     "~" into "-", "`" or "^":  255-224-1-183--K5208/2T-KXZ. Styles can contain "-",
+  //     so the colour is the last piece and everything between tk and colour is style.
+  const alt = !raw.includes("~") && /^(\d+)([-`^])(\d+(?:\.\d+)?)\2(\d+)\2/.exec(raw);
+  if (alt) {
+    const t = raw.split(alt[2]).map(x => x.trim());
+    if (t.length >= 7) {
+      const [icode, rate, qty, ref, tk] = t, color = t[t.length - 1], style = t.slice(5, -1).join(alt[2]);
+      if (style && !/[|{}]/.test(raw)) return { raw, how: "shop label", tokens: [icode, rate, qty, ref, tk, style, color], icode, rate: num(rate), qty: num(qty), ref, tk, style, color };
+    }
+  }
 
   // 2. JSON
   if (/^[\[{]/.test(raw)) {

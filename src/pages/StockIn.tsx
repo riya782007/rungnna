@@ -1,4 +1,5 @@
 import { SelectAll } from "../components/SelectAll";
+import { parseLabel } from "../lib/parse";
 import { DeleteButton } from "../components/DeleteButton";
 import { confirmDelete } from "../lib/confirm-delete";
 import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
@@ -102,7 +103,9 @@ function StockInSession() {
     }
     const { product, created } = await resolveScan(r, me?.id || "");
     if (!product) {
-      const hits = products.filter(x => (x.style + " " + x.code + " " + x.item).toUpperCase().includes(r.toUpperCase()));
+      // typed text may pick its one match; an unreadable scanned label must never be swapped for another product
+      const scannedLabel = parseLabel(r).how !== "code" || r.length > 20 || /[~|`^]/.test(r);
+      const hits = scannedLabel ? [] : products.filter(x => (x.style + " " + x.code + " " + x.item).toUpperCase().includes(r.toUpperCase()));
       if (hits.length === 1) { beep(); add(await fillFromItemCode(hits[0])); setQ(""); return; }
       beep(false); toast("Not recognised — use Scan & record for this one", true); return;
     }
