@@ -972,3 +972,21 @@ html{scrollbar-gutter:stable}
 
 /* Contextual Save/Print captions fit the compact totals panel. */
 .billing-shell .pos-sum>.g2>.btn{min-width:0;padding:0 7px;font-size:12px}
+
+/* Failed scan: a full-screen red flash alongside the loud buzz */
+.scan-fail-flash{position:fixed;inset:0;z-index:200;pointer-events:none;background:rgba(220,38,38,.38);box-shadow:inset 0 0 0 10px #DC2626;animation:scanfail .9s ease-out forwards}
+@keyframes scanfail{0%,40%{opacity:1}100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.scan-fail-flash{animation:none;opacity:.6}}
+
+/* Bill lines: rate always dark and readable (even when locked), serial and box numbers
+   bold and big, each fitting inside its own cell. */
+.pos-lines .pos-t .cell:disabled{opacity:1;color:#111;-webkit-text-fill-color:#111;background:transparent;font-weight:700}
+.pos-lines .pos-t td[data-l="Rate"] .cell{color:#111;-webkit-text-fill-color:#111;font-weight:700}
+.pos-lines .pos-t th:nth-child(1){width:58px}
+.pos-lines .pos-t th:nth-child(2){width:58px}
+.pos-lines .pos-t td[data-l="#"]{white-space:nowrap}
+.pos-lines .pos-t td[data-l="#"]>input{vertical-align:middle;margin:0 4px 0 0}
+.pos-lines .pos-t .line-no{display:inline-block;min-width:22px;font-size:18px;font-weight:800;color:#111;vertical-align:middle;text-align:center}
+.pos-lines .pos-t td[data-l="Box"] .cell{width:100%!important;min-width:0;font-size:18px;font-weight:800;color:#111;text-align:center;padding:0 2px}
+.billing-shell .pos-lines .pos-t .line-no,.billing-shell .pos-lines .pos-t td[data-l="Box"] .cell{font-size:20px}
+@media(max-width:860px){.pos-lines .pos-t .line-no{font-size:17px}}

@@ -56,6 +56,15 @@ export async function syncRoleLogins(roles: CustomRole[]) {
 }
 
 /** Save the roles and keep every passcode's sign-in in step. Returns the roles as saved. */
+/** Owner edits what a built-in role (manager, cashier, salesman, helper, packer) may do. null = back to the original. */
+export async function saveBuiltinRole(role: Staff["role"], perms: string[] | null) {
+  requirePerm("staff.manage", "changing roles");
+  if (role === "owner") throw new Error("The owner always has every permission");
+  const value = { ...(((await db.config.get("roles"))?.value as any) || {}) };
+  const builtin = { ...(value.builtin || {}) };
+  if (perms) builtin[role] = perms; else delete builtin[role];
+  await put("config", { id: "roles", value: { roles: value.roles || [], builtin }, updated_at: now() } as Config);
+}
 export async function saveRoles(next: CustomRole[]): Promise<CustomRole[]> {
   requirePerm("staff.manage", "changing roles");
   const roles = withPasscodes(next);
@@ -63,7 +72,8 @@ export async function saveRoles(next: CustomRole[]): Promise<CustomRole[]> {
   if (new Set(codes).size !== codes.length) throw new Error("Two roles ended up with the same passcode — regenerate one of them");
   // A failed staff write must not leave a saved code pointing at a missing login.
   await db.transaction("rw", [db.config, db.staff, db.outbox], async () => {
-    await put("config", { id: "roles", value: { roles }, updated_at: now() } as Config);
+    const builtin = ((await db.config.get("roles"))?.value as any)?.builtin;   // keep the owner's built-in edits
+    await put("config", { id: "roles", value: builtin ? { roles, builtin } : { roles }, updated_at: now() } as Config);
     await syncRoleLogins(roles);
   });
   return roles;

@@ -145,13 +145,23 @@ async function uploadVoice(c: SupabaseClient) {
    a newer app version's field) must never stop the whole shop's sync. */
 const missingTable = (e: { code?: string; message?: string }) => e.code === "PGRST205" || e.code === "42P01" || /could not find the table|does not exist/i.test(e.message || "");
 
+/* A column added by a newer migration that this shop's cloud hasn't run yet (e.g. bills.helper).
+   The cloud answers "Could not find the 'helper' column"; we stop sending just that column
+   instead of refusing whole bills. It is kept on the device and sent once the column exists. */
+const missingCols: Record<string, Set<string>> = {};
+export function missingColumn(t: string, message?: string): string | undefined {
+  const m = /could not find the '(\w+)' column/i.exec(message || "") || /column "?(\w+)"? of relation "?\w+"? does not exist/i.exec(message || "");
+  if (!m || !COLUMNS[t]?.includes(m[1]) || missingCols[t]?.has(m[1])) return undefined;
+  (missingCols[t] ||= new Set()).add(m[1]);
+  return m[1];
+}
 export const strip = (t: T, r0: any) => {
   const { photo_id, ...rest } = rfidDefaults(t, r0);
   const row: any = PHOTO_TABLES.includes(t) ? { ...rest, photo_id: photo_id || null } : rest;
   const cols = COLUMNS[t];
   if (!cols) return row;
   const out: any = {};
-  for (const k of cols) if (k in row && row[k] !== undefined) out[k] = row[k];
+  for (const k of cols) if (k in row && row[k] !== undefined && !missingCols[t]?.has(k)) out[k] = row[k];
   return out;
 };
 
@@ -167,8 +177,13 @@ async function push(c: SupabaseClient) {
       const items = batch.filter(b => b.table === t);
       if (!items.length) continue;
       const ids = [...new Set(items.map(i => i.row_id))];
-      const rows = (await (db as any)[t].bulkGet(ids)).filter(Boolean).map((r: any) => strip(t, r));
+      const local = (await (db as any)[t].bulkGet(ids)).filter(Boolean);
+      let rows = local.map((r: any) => strip(t, r));
       let error = rows.length ? (await c.from(t).upsert(rows, { onConflict: "id" })).error : null;
+      while (error && missingColumn(t, error.message)) {   // cloud is behind on a migration: drop that column, retry
+        rows = local.map((r: any) => strip(t, r));
+        error = (await c.from(t).upsert(rows, { onConflict: "id" })).error;
+      }
       if (error && /fetch|network|timeout|jwt|auth/i.test(error.message || "")) throw error; // offline / signed out: try everything later
       if (!error) { done.push(...items.map(i => i.seq!)); continue; }
       // one bad row must not hold back the rest: send them one by one and park only the refused ones

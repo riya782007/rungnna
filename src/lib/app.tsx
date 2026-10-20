@@ -3,7 +3,7 @@ import { db, put, uid, now, getSetting, setSetting, type Staff, type Location } 
 import { initStores } from "./stores";
 import { setScope, setScopePerms, currentStore, MAIN_STORE } from "./scope";
 import { resetCounterAccess } from "./entryAuth";
-import { setRolesCache, permsOf, sessionAllowed } from "./roles";
+import { setRolesCache, setBuiltinCache, permsOf, sessionAllowed } from "./roles";
 import { useLiveQuery } from "dexie-react-hooks";
 
 /* ---------- tiny hash router (works offline, no server rewrites needed) ---------- */
@@ -32,15 +32,46 @@ export function Toasts() {
 
 /* ---------- beep + vibrate on scan (the shop floor is noisy; hands are full) ---------- */
 let ac: AudioContext | null = null;
+/* Counter sounds, loud enough to hear over a busy shop:
+   added      → two bright rising beeps
+   repeat     → one firm mid beep (same item again)
+   saved      → three quick high beeps
+   not found  → three long, low, harsh buzzes that can't be mistaken for success */
+const TONES: Record<string, { f: number; ms: number; wave: OscillatorType; gap?: number }[]> = {
+  ok: [{ f: 1200, ms: 90, wave: "square" }, { f: 1700, ms: 140, wave: "square", gap: 30 }],
+  repeat: [{ f: 900, ms: 180, wave: "square" }],
+  saved: [{ f: 1500, ms: 80, wave: "square" }, { f: 1900, ms: 80, wave: "square", gap: 40 }, { f: 2300, ms: 140, wave: "square", gap: 40 }],
+  bad: [{ f: 220, ms: 260, wave: "sawtooth" }, { f: 180, ms: 260, wave: "sawtooth", gap: 90 }, { f: 220, ms: 420, wave: "sawtooth", gap: 90 }],
+};
 export function beep(ok: boolean | "repeat" | "saved" = true) {
+  const kind = ok === "repeat" ? "repeat" : ok === "saved" ? "saved" : ok ? "ok" : "bad";
   try {
     ac = ac || new AudioContext();
-    const o = ac.createOscillator(), g = ac.createGain();
     void ac.resume();
-    o.frequency.value = ok === "repeat" ? 750 : ok === "saved" ? 1650 : ok ? 1250 : 320; g.gain.value = 0.08;
-    o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + (ok ? 0.09 : 0.25));
+    const master = ac.createGain(); master.gain.value = kind === "bad" ? 0.9 : 0.7;
+    const squash = ac.createDynamicsCompressor();   // as loud as possible without crackling
+    master.connect(squash); squash.connect(ac.destination);
+    let t = ac.currentTime + 0.01;
+    for (const tone of TONES[kind]) {
+      t += (tone.gap || 0) / 1000;
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = tone.wave; o.frequency.value = tone.f;
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(1, t + 0.005);
+      g.gain.setValueAtTime(1, t + tone.ms / 1000 - 0.01); g.gain.linearRampToValueAtTime(0, t + tone.ms / 1000);
+      o.connect(g); g.connect(master); o.start(t); o.stop(t + tone.ms / 1000 + 0.02);
+      t += tone.ms / 1000;
+    }
   } catch { /* no audio */ }
-  try { navigator.vibrate?.(ok ? 40 : [60, 40, 60]); } catch { /* no vibrate */ }
+  try { navigator.vibrate?.(kind === "bad" ? [200, 80, 200, 80, 300] : kind === "ok" ? [60, 30, 60] : 60); } catch { /* no vibrate */ }
+  if (kind === "bad") flashScreen();
+}
+/* A failed scan also flashes the screen red, so it is seen even if the speaker is off. */
+function flashScreen() {
+  try {
+    const el = document.createElement("div");
+    el.className = "scan-fail-flash"; el.setAttribute("aria-hidden", "true");
+    document.body.appendChild(el); setTimeout(() => el.remove(), 900);
+  } catch { /* no DOM */ }
 }
 
 /* ---------- who is using this device ---------- */
@@ -82,7 +113,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     (async () => {
       await firstRun();
-      setRolesCache((await db.config.get("roles"))?.value?.roles);
+      { const v = (await db.config.get("roles"))?.value as any; setRolesCache(v?.roles); setBuiltinCache(v?.builtin); }
       // A remembered person must never bypass the common entry code and personal
       // access on the next opening. Keep business data and the billing draft intact.
       const fallbackStore = await initStores();
@@ -102,7 +133,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [, bump] = useState(0);
   useEffect(() => {
     if (!rolesRow) return;
-    setRolesCache((rolesRow.value as any)?.roles);
+    setRolesCache((rolesRow.value as any)?.roles); setBuiltinCache((rolesRow.value as any)?.builtin);
     if (me && !sessionAllowed(me)) { setMe(null); return; }
     setScopePerms(permsOf(me)); bump(n => n + 1);
   }, [rolesRow?.updated_at, me?.id, me?.role, me?.role_id]);

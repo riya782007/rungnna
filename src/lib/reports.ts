@@ -53,6 +53,7 @@ export async function reportData(r: Range) {
     return [p?.city, p?.state || b.party_state].filter(Boolean).join(", ");
   });
   const bySalesman = groupedBills(b => b.salesman || "No salesman");
+  const byHelper = groupedBills(b => b.helper || "No helper");
   const costByProduct = new Map(products.map(p => [p.id, p.cost || 0]));
   const cogs = lines.reduce((a, x) => a + (costByProduct.get(x.l.product_id || "") || 0) * x.l.qty, 0) -
     returnLines.reduce((a, x) => a + (costByProduct.get(x.l.product_id || "") || 0) * x.l.qty, 0);
@@ -89,7 +90,7 @@ export async function reportData(r: Range) {
       gstr.set(k, row);
     }
   }
-  return { byDay, byMonth, byHour, byItem, byParty, byArea, bySalesman, valuation, dead, pl, gstr: [...gstr.values()], supplierReturns: returnsRows, dues: saleBills.reduce((a, b) => a + Math.max(0, due(b)), 0) };
+  return { byDay, byMonth, byHour, byItem, byParty, byArea, bySalesman, byHelper, valuation, dead, pl, gstr: [...gstr.values()], supplierReturns: returnsRows, dues: saleBills.reduce((a, b) => a + Math.max(0, due(b)), 0) };
 }
 
 export function csv(rows: ReportRow[]) {
