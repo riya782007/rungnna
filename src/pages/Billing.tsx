@@ -527,7 +527,7 @@ export default function Billing({ args }: { args: string[] }) {
           <div className="pos-entry stack" style={{ gap: 8 }}>
             <div className="row scanrow">
               <div className="wedge grow" style={{ position: "relative" }}>
-                <Icon n="scan" size={20} />
+                <Icon n="scan" size={16} />
                 <input ref={scanRef} autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Scan label, or type style / item (F7)"
                   onKeyDown={e => { if (e.key === "Tab" && isRfidTag(q)) { e.preventDefault(); onCode(q); return; } if (e.key === "Enter") { e.preventDefault(); onCode(q); } }} />
                 {suggestions.length > 0 && q.length < 25 && (
@@ -547,7 +547,7 @@ export default function Billing({ args }: { args: string[] }) {
               <span>{lastScan ? <><b>Added: {lastScan.item || lastScan.style || lastScan.code}</b><span className="xs">{[lastScan.style, lastScan.color, `Box ${lastScan.box_no}`, `${lastScan.qty} ${lastScan.type || "PCS"} × ${rupees(lastScan.rate)}`, rupees(lastScan.amount)].filter(Boolean).join(" · ")}</span></> : <span className="mut">{t.items.length} bill lines · {t.total_qty} units</span>}</span>
               {lastScan && <button className="btn sm" onClick={() => showLine(lastScan.id, true)}>Show line</button>}
             </div>
-            {cam && !small && <div style={{ maxWidth: 560 }}><CameraScanner onCode={c => onCode(c)} /></div>}
+            {cam && !small && <div className="pos-cam"><CameraScanner onCode={c => onCode(c)} /></div>}
             {itemEditor}
           </div>
 
