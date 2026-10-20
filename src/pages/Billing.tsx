@@ -62,16 +62,6 @@ export default function Billing({ args }: { args: string[] }) {
   const dismissScanFeedback = useCallback(() => setScanFeedback(null), []);
   const [lastScanId, setLastScanId] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
-  // The nearest element that actually scrolls: on tall, wide counter screens the
-  // bill-lines table is its own scroll box; on laptops / shorter windows the whole
-  // page scrolls instead. Walk up and find whichever one it is.
-  function scrollParent(el: HTMLElement | null): HTMLElement | null {
-    for (let node = el?.parentElement || null; node; node = node.parentElement) {
-      const o = getComputedStyle(node).overflowY;
-      if ((o === "auto" || o === "scroll") && node.scrollHeight > node.clientHeight + 1) return node;
-    }
-    return null;
-  }
   function flashRow(row: HTMLElement, id: string) {
     row.classList.remove("flash");
     void row.offsetWidth; // restart the highlight when the same item is scanned again
@@ -82,41 +72,26 @@ export default function Billing({ args }: { args: string[] }) {
     const row = rowRefs.current.get(id);
     if (!row) return;
     flashRow(row, id);
-    // Scroll after layout settles so a row that was just inserted can be measured,
-    // and bring it into view in whichever element is the real scroll container.
-    requestAnimationFrame(() => {
+    // Scroll AFTER layout has actually happened. A single rAF can fire before the
+    // browser lays out a just-inserted <tr>, so the new row still measures as 0 /
+    // in-view and nothing scrolls. Two frames guarantees layout is done.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
       const target = rowRefs.current.get(id);
       if (!target) return;
       const pane = linesPane.current;
-      // Space taken by the sticky top bar + table header, so the row never lands hidden behind them.
-      const headPad = (pane?.querySelector("thead")?.getBoundingClientRect().height || 0) + 8;
+      // On big counter screens the bill-lines table is its own scroll box — scroll that.
       if (pane && pane.scrollHeight > pane.clientHeight + 1) {
+        const headH = pane.querySelector("thead")?.getBoundingClientRect().height || 0;
         const r = target.getBoundingClientRect(), p = pane.getBoundingClientRect();
         if (r.bottom > p.bottom) pane.scrollTop += r.bottom - p.bottom + 8;
-        else if (r.top < p.top + headPad) pane.scrollTop -= p.top + headPad - r.top;
+        else if (r.top < p.top + headH + 8) pane.scrollTop -= p.top + headH + 8 - r.top;
         return;
       }
-      // Page (or some other ancestor) scrolls: nudge that container so the row shows.
-      const scroller = scrollParent(target);
-      const scrollerTop = scroller ? scroller.getBoundingClientRect().top : 0;
-      // How far the visible sticky bars (.top on mobile, .subnav always) reach down
-      // from the top of the scroll area — the row must clear them to be seen.
-      let stickyStop = scrollerTop;
-      for (const sel of [".top", ".subnav"]) {
-        const bar = document.querySelector(sel) as HTMLElement | null;
-        if (bar && getComputedStyle(bar).display !== "none" && getComputedStyle(bar).position === "sticky")
-          stickyStop = Math.max(stickyStop, bar.getBoundingClientRect().bottom);
-      }
-      const r = target.getBoundingClientRect();
-      const viewBottom = scroller ? scroller.getBoundingClientRect().bottom : (window.innerHeight || document.documentElement.clientHeight);
-      const viewTop = stickyStop + headPad;
-      let delta = 0;
-      if (r.bottom > viewBottom) delta = r.bottom - viewBottom + 8;
-      else if (r.top < viewTop) delta = r.top - viewTop;
-      if (!delta) return;
-      if (scroller) scroller.scrollBy({ top: delta, behavior: "smooth" });
-      else window.scrollBy({ top: delta, behavior: "smooth" });
-    });
+      // Everywhere else the page scrolls: just bring the row into view. The browser
+      // resolves the correct scroll container itself. scroll-margin-top (set in CSS)
+      // keeps it clear of the sticky top/subnav bars.
+      target.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+    }));
   }
   useEffect(() => {
     if (!pendingScan.current) return;

@@ -664,6 +664,8 @@ html{scrollbar-gutter:stable}
 .pos-lines .pos-t th:nth-child(9){width:32px}
 .pos-lines .pos-t td:nth-child(3){overflow-wrap:anywhere}
 .pos-lines .pos-t thead th{position:sticky;top:0;z-index:1;background:#F1F3F4;color:#3C4043}
+/* keep a scanned row clear of the sticky top/subnav bars when it is scrolled into view */
+.pos-lines .pos-t tr.ln{scroll-margin-top:120px;scroll-margin-bottom:80px}
 .pos-lines .pos-t tr.ln:nth-child(even){background:#FAFBFC}
 .pos-lines .pos-t tr.ln.scanned td{background:#FFF3B0}
 .pos-lines .pos-t tr.ln.scanned td:first-child{box-shadow:inset 3px 0 #B77900}
