@@ -71,22 +71,26 @@ export default function Billing({ args }: { args: string[] }) {
 
   /* Keyboard-only navigation across the bill-lines grid, so the counter can be
      worked without a mouse:
-       ↑ / ↓        move to the cell above / below (same column)
-       ← / →        move to the field left / right in the same row
+       ↑ / ↓        jump to the SAME field one row up / down (next box line)
+       ← / →        jump to the field left / right in the same row
        Space        tick / untick the current row (select many lines)
        Shift+↑/↓    extend the selection over a range of rows
        Enter        step down to the next row (fast data entry)
-     Arrow keys inside a text field only jump cells when the caret is already at
-     the field's edge, so normal typing/editing still works. */
+     The arrows always move between cells (they never just move the text caret
+     inside a field), so moving from box to box is immediate. */
   const selectAnchor = useRef<string | null>(null);
   function cellsOf(row: HTMLTableRowElement): HTMLElement[] {
     return Array.from(row.querySelectorAll<HTMLElement>('input:not([type="checkbox"]):not([disabled]), select:not([disabled])'));
+  }
+  function focusCell(el: HTMLElement | null) {
+    if (!el) return;
+    el.focus();
+    if (el instanceof HTMLInputElement && el.type !== "checkbox") el.select?.();
   }
   function onGridKey(e: React.KeyboardEvent<HTMLDivElement>) {
     const key = e.key;
     if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Enter"].includes(key)) return;
     const el = document.activeElement as HTMLElement | null;
-    const cell = el?.closest("td");
     const row = el?.closest<HTMLTableRowElement>("tr.ln");
     if (!row) return;
     const ids = t ? t.items.map(l => l.id) : [];
@@ -95,18 +99,17 @@ export default function Billing({ args }: { args: string[] }) {
     if (idx < 0) return;
     const isText = el && (el.tagName === "INPUT" || el.tagName === "SELECT");
     const input = el as HTMLInputElement;
-    const atStart = !isText || input.selectionStart === 0;
-    const atEnd = !isText || input.selectionStart === (input.value?.length ?? 0);
+
+    // which field (column) is focused within this row, so up/down land on the same one
+    const rowCells = cellsOf(row);
+    const colInRow = rowCells.indexOf(el as HTMLElement);
 
     const focusRow = (nextIdx: number) => {
       const nextRow = rowRefs.current.get(ids[nextIdx]);
       if (!nextRow) return;
       const cells = cellsOf(nextRow);
-      const col = cell ? Array.from(row.children).indexOf(cell) : 0;
-      // land on the same column if possible, else the nearest field
-      const target = nextRow.querySelector<HTMLElement>(`td:nth-child(${col + 1}) input, td:nth-child(${col + 1}) select`) || cells[0];
-      target?.focus();
-      if (target instanceof HTMLInputElement) target.select?.();
+      // keep the same field index when it exists, else the last field in that row
+      focusCell(cells[Math.min(colInRow < 0 ? 0 : colInRow, cells.length - 1)] || cells[0]);
       showLine(ids[nextIdx]);
     };
 
@@ -116,12 +119,10 @@ export default function Billing({ args }: { args: string[] }) {
     } else if (key === "ArrowUp") {
       if (idx > 0) { e.preventDefault(); focusRow(idx - 1); }
       if (e.shiftKey) toggleRange(ids, idx - 1);
-    } else if (key === "ArrowRight" && atEnd) {
-      const cells = cellsOf(row); const here = cells.indexOf(el as HTMLElement);
-      if (here > -1 && here < cells.length - 1) { e.preventDefault(); cells[here + 1].focus(); (cells[here + 1] as HTMLInputElement).select?.(); }
-    } else if (key === "ArrowLeft" && atStart) {
-      const cells = cellsOf(row); const here = cells.indexOf(el as HTMLElement);
-      if (here > 0) { e.preventDefault(); cells[here - 1].focus(); (cells[here - 1] as HTMLInputElement).select?.(); }
+    } else if (key === "ArrowRight") {
+      if (colInRow > -1 && colInRow < rowCells.length - 1) { e.preventDefault(); focusCell(rowCells[colInRow + 1]); }
+    } else if (key === "ArrowLeft") {
+      if (colInRow > 0) { e.preventDefault(); focusCell(rowCells[colInRow - 1]); }
     } else if (key === " " && (!isText || input.type === "checkbox")) {
       e.preventDefault();
       setSelectedLines(old => { const next = new Set(old); next.has(ids[idx]) ? next.delete(ids[idx]) : next.add(ids[idx]); return next; });
