@@ -700,6 +700,10 @@ html{scrollbar-gutter:stable}
 .pos-lines .pos-t tr.ln.scanned .cell{background:#FFF7CC;font-weight:700}
 .pos-lines .pos-t tr.ln.flash td{animation:none;background:#FFD60A}
 .pos-lines .pos-t tr.ln.flash td:first-child{box-shadow:inset 6px 0 #8A5A00}
+.pos-lines .pos-t tr.ln.noqty td:nth-child(5) .cell{border-color:var(--bad);background:var(--bad-l)}
+.pos-lines .pos-t tr.ln.noqty.stop td{background:#FBD5DD}
+.pos-lines .pos-t tr.ln.noqty.stop td:first-child{box-shadow:inset 6px 0 var(--bad)}
+.pos-qty-problem{font-size:14px;display:flex;flex-direction:column}
 .lastscan{min-height:54px;border-radius:0;background:#F8F9FA;border-left:3px solid #DADCE0;padding:5px 8px;flex-wrap:nowrap}
 .lastscan.has-item{background:#FFD60A;border-left:6px solid #8A5A00;color:#2B2100}
 .lastscan.has-item b{font-size:17px}
