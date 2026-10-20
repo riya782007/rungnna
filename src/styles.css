@@ -892,7 +892,11 @@ html{scrollbar-gutter:stable}
 /* The bill header, including box selection, travels with the pinned scan bar. */
 .pos-counter-dock{flex:none;background:#fff;border-bottom:1px solid var(--line)}
 .pos-counter-dock .pos-scanhead{position:static;padding:8px 12px}
-.pos-box-summary{position:sticky;top:-12px;z-index:2;background:#fff;padding:8px 0;border-bottom:1px solid var(--line)}
+/* Box summary owns the top of the totals panel: solid edge to edge (it covers the panel's own
+   padding), so Pieces / Gross / Discount scrolling up behind it never show through or beside it. */
+.pos-box-summary{position:sticky;top:-12px;z-index:3;background:#fff;margin:-12px -12px 4px;padding:12px 12px 10px;border-bottom:2px solid var(--line);box-shadow:0 6px 8px -6px rgba(0,0,0,.18)}
+.pos-box-summary>b{display:block;font-size:15px}
+.pos-box-totals .chip{font-size:14px;height:32px}
 .pos-box-totals{display:flex;flex-wrap:wrap;gap:5px;max-height:110px;overflow:auto;margin-top:6px}
 .pos-box-totals .chip{display:flex;gap:8px;align-items:center}
 .pos-box-totals .chip[aria-pressed="true"]{background:#FFF3B0;border-color:#B77900;color:#422006}
