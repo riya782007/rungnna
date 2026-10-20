@@ -1,7 +1,9 @@
 import { printedCostCode } from "../src/lib/label-cost-code";
 import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { DEFAULT_CFG, PRESETS, LabelView, type LabelCfg } from "../src/pages/Labels";
+import { DEFAULT_CFG as NAME_ONLY_CFG, PRESETS, LabelView, type LabelCfg } from "../src/pages/Labels";
+// These cases exercise the optional detailed-label settings.
+const DEFAULT_CFG = { ...NAME_ONLY_CFG, show: { shop: true, item: true, style: true, color: true, rate: true, tk: false, code: false, qty: true, cost_code: true, line: true } };
 import { labelTSPL, labelLines, labelRate } from "../src/lib/label-tspl";
 import { blankProduct } from "../src/lib/products";
 import { productForLabel } from "../src/lib/purchase-labels";

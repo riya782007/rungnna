@@ -33,6 +33,7 @@ import { fakeLetterPool, printedCostCode } from "../lib/label-cost-code";
 
 /* Label settings — every number is in millimetres so what you see is what the printer gets. */
 export type LabelCfg = {
+  textVersion?: 1; // Item-name-only defaults, including existing saved printer setups.
   output?: "browser" | "tspl" | "qz";
   qzPrinter?: string;
   density?: number; speed?: number;
@@ -90,12 +91,13 @@ export const PRESETS: { key: string; name: string; cfg: Partial<LabelCfg> }[] = 
 ];
 
 export const DEFAULT_CFG: LabelCfg = {
+  textVersion: 1,
   output: "browser",
   compactCostCode: true, fakeLetters: "Z",
   density: DEFAULT_LABEL_DENSITY, speed: DEFAULT_LABEL_SPEED,
   preset: "rjrow", mode: "roll", driverPaper: true, w: 33, h: 15, cols: 3, gapX: 1.3, gapY: 0, sheetW: 101.6, sheetH: 152.4, top: 0, left: 0, edgeR: 104, rows: 9,
   qr: 8, font: 6, rateScale: 1.8, pad: 1.4, offX: 2.5, offY: 0, shop: "RUNGNNA", format: "shop", layout: "shop",
-  show: { shop: true, item: true, style: true, color: true, rate: true, tk: false, code: false, qty: true, cost_code: true, line: true },
+  show: { shop: false, item: true, style: false, color: false, rate: false, tk: false, code: false, qty: false, cost_code: false, line: false },
   cur: "9",
 };
 
@@ -113,15 +115,19 @@ export function upgradeLabelCfg(saved: Partial<LabelCfg> | null | undefined): La
   const oldRow = c.preset === "rj3" && c.mode === "roll" && c.w === 33 && c.h === 15 && c.cols === 3;
   // the 4 × 6 in page layouts (any of its three versions) as set by the app, never nudged by hand
   const page = c.preset === "rjpage" && c.offX === 0 && c.offY === 0 && c.sheetH === 152.4 && c.rows === 9;
-  const upgraded = old50 || oldRow || page ? { ...c, ...PRESETS.find(x => x.key === "rjrow")!.cfg, preset: "rjrow", show: { ...c.show, cost_code: true } } : c;
+  const upgraded = old50 || oldRow || page ? { ...c, ...PRESETS.find(x => x.key === "rjrow")!.cfg, preset: "rjrow" } : c;
+  if (saved?.textVersion !== 1) {
+    upgraded.show = { ...DEFAULT_CFG.show };
+    upgraded.textVersion = 1;
+  }
   // Earlier single-column USB settings can survive a move to the shop's roll.
   // That transport cannot print multiple columns; normal browser printing can.
   return upgraded.output === "tspl" && (upgraded.mode !== "roll" || upgraded.cols !== 1) ? { ...upgraded, output: "browser" } : upgraded;
 }
 export const loadLabelCfg = () => getSetting<Partial<LabelCfg> | null>("label_cfg", null).then(async saved => {
   const config = upgradeLabelCfg(saved);
+  if (saved?.textVersion !== 1 || (saved?.output === "tspl" && config.output === "browser")) await setSetting("label_cfg", config);
   if (saved?.output === "tspl" && config.output === "browser") {
-    await setSetting("label_cfg", config);
     toast("Your saved USB / serial setting cannot print this roll. Switched to Browser / Windows printer driver. Choose QZ Tray for direct three-across printing.");
   }
   return config;
