@@ -648,11 +648,7 @@ html{scrollbar-gutter:stable}
 /* Pin ONLY the scan bar + "what's scanning" strip at the top, so the scan box
    stays put after a scan. The camera and the manual item editor stay below and
    are NOT pinned, so they never cover the bill lines list. */
-.pos-scanhead{position:sticky;top:64px;z-index:15;background:#fff}
-/* Cap the entry tools (scan + camera + manual editor) so they can't eat the whole
-   screen and hide the bill lines. If they are taller than this they scroll inside
-   their own block, keeping the bill items list visible underneath. */
-.pos-entry{max-height:52vh;overflow:auto}
+.pos-scanhead{position:sticky;top:64px;z-index:15;background:#fff;padding:4px 0}
 /* Compact in-bill camera: keep the scanner small so the added bill lines stay
    visible underneath instead of being pushed off-screen by a full-size preview. */
 .pos-cam{max-width:300px}
@@ -706,7 +702,7 @@ html{scrollbar-gutter:stable}
   .billing-shell .pos{gap:8px;padding-bottom:0}
   .billing-shell .pos-main{flex:1;min-height:0;align-items:stretch}
   .billing-shell .pos-workspace{height:100%;overflow:hidden;gap:8px}
-  .billing-shell .pos-entry{flex:none;position:static;max-height:none;overflow:visible}
+  .billing-shell .pos-entry{flex:none}
   .billing-shell .pos-entry:has(video){max-height:55%;overflow-y:auto}
   .billing-shell .pos-lines{flex:1;min-height:130px;overflow:auto}
   .billing-shell .pos-sum{overflow:auto;overscroll-behavior:contain}
