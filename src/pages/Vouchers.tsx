@@ -1,10 +1,10 @@
 import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db, type ExpenseCategory, type MoneyMode, type VoucherType } from "../lib/db";
+import { db, setSetting, type ExpenseCategory, type MoneyMode, type VoucherType } from "../lib/db";
 import { EXPENSES, saveVoucher } from "../lib/vouchers";
 import { useApp, toast } from "../lib/app";
-import { rupees, toPaise, when } from "../lib/format";
+import { rupees, billAmount, toPaise, when } from "../lib/format";
 import { Head } from "../components/common";
 import { Icon } from "../components/Icon";
 
@@ -18,6 +18,9 @@ export default function Vouchers() {
   const [note, setNote] = useState("");
   const parties = useLiveQuery(() => db.parties.filter(p => !p.deleted).toArray(), [], []);
   const vouchers = useLiveQuery(() => db.vouchers.orderBy("at").filter(inStore).reverse().limit(80).toArray(), [], []);
+  /* ₹ in the voucher / journal list is optional (counter request 21/10/2026); remembered on this device */
+  const showRupee = useLiveQuery(async () => (await db.settings.get("voucher_rupee"))?.value !== false, [], true);
+  const money = showRupee ? rupees : billAmount;
   const picked = parties.find(p => p.id === party);
   const save = async () => {
     const a = toPaise(amount);
@@ -40,8 +43,12 @@ export default function Vouchers() {
         <input className="in" placeholder="Note" value={note} onChange={e => setNote(e.target.value)} />
         <button className="btn p big" onClick={save}><Icon n="plus" size={18} />Save voucher</button>
       </div>
-      <div className="list">{vouchers.map(v => <div key={v.id} className="li"><span className="grow"><b className="mono sm">{v.no}</b><div className="xs mut">{when(v.at)} · {v.type} · {v.party_name || v.category || ""}</div></span><b className="mono">{rupees(v.amount)}</b></div>)}
+      <div className="stack" style={{ gap: 8 }}>
+      <div className="row between"><b className="sm">Entries</b>
+        <button className="chip" aria-pressed={showRupee} title="Show or hide the ₹ sign on amounts" onClick={() => setSetting("voucher_rupee", !showRupee)}>₹ {showRupee ? "On" : "Off"}</button></div>
+      <div className="list">{vouchers.map(v => <div key={v.id} className="li"><span className="grow"><b className="mono sm">{v.no}</b><div className="xs mut">{when(v.at)} · {v.type} · {v.party_name || v.category || ""}</div></span><b className="mono">{money(v.amount)}</b></div>)}
         {!vouchers.length && <div className="empty"><b>No vouchers yet</b></div>}</div>
+      </div>
     </div>
   </div>;
 }
