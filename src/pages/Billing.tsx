@@ -62,31 +62,61 @@ export default function Billing({ args }: { args: string[] }) {
   const dismissScanFeedback = useCallback(() => setScanFeedback(null), []);
   const [lastScanId, setLastScanId] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
-  function showLine(id: string, _revealPage = false) {
-    const row = rowRefs.current.get(id);
-    if (!row) return;
-    const pane = linesPane.current;
-    // The lines table is its own scroll area only on tall, wide counter screens; on
-    // laptops and shorter windows the whole page scrolls instead. So: if the inner
-    // pane scrolls, nudge the row into view there; otherwise (and whenever the row
-    // is still outside the viewport) scroll the page so the just-scanned / merged
-    // line is always visible. This keeps "where am I putting this?" on screen.
-    let handled = false;
-    if (pane && pane.scrollHeight > pane.clientHeight + 1) {
-      const r = row.getBoundingClientRect(), p = pane.getBoundingClientRect();
-      if (r.bottom > p.bottom) { pane.scrollTop += r.bottom - p.bottom; handled = true; }
-      else if (r.top < p.top + 40) { pane.scrollTop -= p.top + 40 - r.top; handled = true; }
-      else handled = true; // already visible inside the scrollable pane
+  // The nearest element that actually scrolls: on tall, wide counter screens the
+  // bill-lines table is its own scroll box; on laptops / shorter windows the whole
+  // page scrolls instead. Walk up and find whichever one it is.
+  function scrollParent(el: HTMLElement | null): HTMLElement | null {
+    for (let node = el?.parentElement || null; node; node = node.parentElement) {
+      const o = getComputedStyle(node).overflowY;
+      if ((o === "auto" || o === "scroll") && node.scrollHeight > node.clientHeight + 1) return node;
     }
-    if (!handled) {
-      const r = row.getBoundingClientRect();
-      const offTop = r.top < 60, offBottom = r.bottom > (window.innerHeight || document.documentElement.clientHeight);
-      if (offTop || offBottom) row.scrollIntoView({ block: offTop ? "start" : "nearest", inline: "nearest", behavior: "smooth" });
-    }
+    return null;
+  }
+  function flashRow(row: HTMLElement, id: string) {
     row.classList.remove("flash");
     void row.offsetWidth; // restart the highlight when the same item is scanned again
     row.classList.add("flash");
     setFlashId(id);
+  }
+  function showLine(id: string, _revealPage = false) {
+    const row = rowRefs.current.get(id);
+    if (!row) return;
+    flashRow(row, id);
+    // Scroll after layout settles so a row that was just inserted can be measured,
+    // and bring it into view in whichever element is the real scroll container.
+    requestAnimationFrame(() => {
+      const target = rowRefs.current.get(id);
+      if (!target) return;
+      const pane = linesPane.current;
+      // Space taken by the sticky top bar + table header, so the row never lands hidden behind them.
+      const headPad = (pane?.querySelector("thead")?.getBoundingClientRect().height || 0) + 8;
+      if (pane && pane.scrollHeight > pane.clientHeight + 1) {
+        const r = target.getBoundingClientRect(), p = pane.getBoundingClientRect();
+        if (r.bottom > p.bottom) pane.scrollTop += r.bottom - p.bottom + 8;
+        else if (r.top < p.top + headPad) pane.scrollTop -= p.top + headPad - r.top;
+        return;
+      }
+      // Page (or some other ancestor) scrolls: nudge that container so the row shows.
+      const scroller = scrollParent(target);
+      const scrollerTop = scroller ? scroller.getBoundingClientRect().top : 0;
+      // How far the visible sticky bars (.top on mobile, .subnav always) reach down
+      // from the top of the scroll area — the row must clear them to be seen.
+      let stickyStop = scrollerTop;
+      for (const sel of [".top", ".subnav"]) {
+        const bar = document.querySelector(sel) as HTMLElement | null;
+        if (bar && getComputedStyle(bar).display !== "none" && getComputedStyle(bar).position === "sticky")
+          stickyStop = Math.max(stickyStop, bar.getBoundingClientRect().bottom);
+      }
+      const r = target.getBoundingClientRect();
+      const viewBottom = scroller ? scroller.getBoundingClientRect().bottom : (window.innerHeight || document.documentElement.clientHeight);
+      const viewTop = stickyStop + headPad;
+      let delta = 0;
+      if (r.bottom > viewBottom) delta = r.bottom - viewBottom + 8;
+      else if (r.top < viewTop) delta = r.top - viewTop;
+      if (!delta) return;
+      if (scroller) scroller.scrollBy({ top: delta, behavior: "smooth" });
+      else window.scrollBy({ top: delta, behavior: "smooth" });
+    });
   }
   useEffect(() => {
     if (!pendingScan.current) return;
