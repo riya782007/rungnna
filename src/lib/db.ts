@@ -123,7 +123,7 @@ export interface Bill extends Row {
   party_id?: string; party_name: string; party_phone: string; party_gstin: string; party_state: string;
   party_address?: string;  // snapshot of the buyer address at billing time (printed on tax invoices)
   price_level?: "wholesale" | "retail" | "dealer";
-  salesman: string; helper?: string; box_count: number; total_qty: number;
+  salesman: string; helper?: string; packed_by?: string; checked_by?: string; box_count: number; total_qty: number;
   gross: number; discount: number; discount_pct: number; packing: number; adjust: number;
   gst_mode: "exclusive" | "inclusive"; gst_rate: number; gst: number; cgst: number; sgst: number; igst: number;
   net: number; advance: number; paid: number;

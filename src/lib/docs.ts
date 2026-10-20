@@ -60,7 +60,7 @@ export function buildMerged(sources: Bill[], type: BillType, shop: Shop, by: str
   return {
     ...b,
     party_id: first.party_id, party_name: first.party_name, party_phone: first.party_phone, party_gstin: first.party_gstin, party_state: first.party_state, party_address: first.party_address,
-    salesman: first.salesman, helper: first.helper, items: mergeLines(sources),
+    salesman: first.salesman, helper: first.helper, packed_by: first.packed_by, checked_by: first.checked_by, items: mergeLines(sources),
     discount: tot.reduce((a, t) => a + t.discount, 0), discount_pct: 0,
     packing: tot.reduce((a, t) => a + t.packing, 0),
     // each source's advance becomes a dated cash payment, so the day it was taken keeps it (end-of-day never counts it twice)
@@ -106,7 +106,7 @@ export async function splitBill(b0: Bill, lineIds: string[], shop: Shop, by: str
   const fresh = newBill(by, shop, b.bill_type);
   const base: Bill = { ...fresh, party_id: b.party_id, party_name: b.party_name, party_phone: b.party_phone, party_gstin: b.party_gstin,
  party_address: b.party_address,
-    party_state: b.party_state, salesman: b.salesman, helper: b.helper, gst_rate: b.gst_rate, gst_mode: b.gst_mode, price_level: b.price_level, remarks: "Split from " + (b.no || "held bill") };
+    party_state: b.party_state, salesman: b.salesman, helper: b.helper, packed_by: b.packed_by, checked_by: b.checked_by, gst_rate: b.gst_rate, gst_mode: b.gst_mode, price_level: b.price_level, remarks: "Split from " + (b.no || "held bill") };
   const movingProducts = new Set(moving.map(l => l.product_id).filter(Boolean) as string[]);
   const pieces = await db.products.bulkGet([...movingProducts]);
   const tagSet = new Set(pieces.flatMap(p => p?.barcodes || []));
@@ -165,7 +165,7 @@ export function buildReturn(bill: Bill, picks: { line_id: string; qty: number }[
   const cn0: Bill = {
     ...newBill(by, shop, "return"),
     party_id: bill.party_id, party_name: bill.party_name, party_phone: bill.party_phone, party_gstin: bill.party_gstin, party_state: bill.party_state, party_address: bill.party_address,
-    salesman: bill.salesman, helper: bill.helper, gst_rate: bill.gst_rate, gst_mode: bill.gst_mode, items,
+    salesman: bill.salesman, helper: bill.helper, packed_by: bill.packed_by, checked_by: bill.checked_by, gst_rate: bill.gst_rate, gst_mode: bill.gst_mode, items,
     return_of: bill.id, return_of_no: bill.no, src_type: bill.bill_type, remarks: "Return against " + bill.no,
   };
   const gross = items.reduce((a, l) => a + l.amount, 0);

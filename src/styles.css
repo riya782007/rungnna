@@ -994,3 +994,13 @@ html{scrollbar-gutter:stable}
 .pos-lines .pos-t td[data-l="Box"] .cell{width:100%!important;min-width:0;font-size:18px;font-weight:800;color:#111;text-align:center;padding:0 2px}
 .billing-shell .pos-lines .pos-t .line-no,.billing-shell .pos-lines .pos-t td[data-l="Box"] .cell{font-size:20px}
 @media(max-width:860px){.pos-lines .pos-t .line-no{font-size:17px}}
+
+/* Under the bill lines: Total · Discount · Net amount (replaces the parcel photo box) */
+.pos-bill-total{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;align-items:stretch}
+.pos-bill-total>div{display:flex;flex-direction:column;justify-content:center;gap:2px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:#F8F9FA;min-width:0}
+.pos-bill-total span{font-size:12px;font-weight:700;color:#3C4043;text-transform:uppercase;letter-spacing:.02em}
+.pos-bill-total b{font-size:20px;color:#111;overflow-wrap:anywhere}
+.pos-bill-total small{font-size:12px;color:#5F6368}
+.pos-bill-total .net{background:#FFF3B0;border-color:#B77900}
+.pos-bill-total .net b{font-size:24px}
+@media(max-width:860px){.pos-bill-total{grid-template-columns:1fr 1fr}.pos-bill-total .net{grid-column:1/-1}}
