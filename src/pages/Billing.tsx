@@ -21,7 +21,7 @@ import { can } from "../lib/roles";
 import { usePrivate, unlock, lockNow, getPrivate, isOpen, isEstimate } from "../lib/privacy";
 import { Icon } from "../components/Icon";
 import { billAmount, toPaise } from "../lib/format";
-import { CameraScanner, useScannerGun } from "../components/Scanner";
+import { CameraScanner, useScanOnlyIn } from "../components/Scanner";
 import { hostRemote } from "../lib/remote";
 import { qrSvg } from "../lib/qr";
 import { createPortal } from "react-dom";
@@ -344,11 +344,16 @@ export default function Billing({ args }: { args: string[] }) {
     return true;
   }
 
-  /* Hardware scanner gun works anywhere on the bill screen — even if the focus
-     isn't in the scan box (e.g. the operator tapped Remarks). The hook ignores
-     keystrokes while a real field is focused, so it never double-reads what the
-     scan box already handles. */
-  useScannerGun((code) => onCode(code));
+  /* The scanner gun works ONLY in the scan box (counter request 21/10/2026). A scan
+     while the cursor is in a Box / Qty / Rate cell, a dropdown, a button or anywhere
+     else is thrown away — the field is put back as it was — and the error sound
+     plays, because the biller listens rather than watches the screen. The scan box
+     then takes the cursor so the next scan of the same label goes in. */
+  useScanOnlyIn(scanRef, () => {
+    beep(false);
+    toast("Not added — scan only in the scan box. Scan this label again.", true);
+    if (!document.querySelector(".modal,dialog[open]")) scanRef.current?.focus({ preventScroll: true });
+  });
 
   /* a scan or Enter in the box: find the product; unknown shop labels create the product on the spot */
   /* the same new sticker read twice in a split second must not create two products */
