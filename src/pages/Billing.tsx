@@ -79,50 +79,68 @@ export default function Billing({ args }: { args: string[] }) {
      The arrows always move between cells (they never just move the text caret
      inside a field), so moving from box to box is immediate. */
   const selectAnchor = useRef<string | null>(null);
-  function cellsOf(row: HTMLTableRowElement): HTMLElement[] {
-    return Array.from(row.querySelectorAll<HTMLElement>('input:not([type="checkbox"]):not([disabled]), select:not([disabled])'));
-  }
   function focusCell(el: HTMLElement | null) {
     if (!el) return;
     el.focus();
     if (el instanceof HTMLInputElement && el.type !== "checkbox") el.select?.();
   }
+  // All editable fields in a row, in left-to-right order, each tagged with the
+  // index of the <td> column it sits in. Columns are mapped by <td> position
+  // (stable across rows) so Up/Down always lands in the same column even though
+  // some rows hide the Pkt input or disable Qty.
+  function fieldsOf(row: HTMLTableRowElement): { el: HTMLElement; col: number }[] {
+    const out: { el: HTMLElement; col: number }[] = [];
+    Array.from(row.children).forEach((td, col) => {
+      const f = td.querySelector<HTMLElement>('input:not([type="checkbox"]):not([disabled]), select:not([disabled])');
+      if (f) out.push({ el: f, col });
+    });
+    return out;
+  }
   function onGridKey(e: React.KeyboardEvent<HTMLDivElement>) {
     const key = e.key;
     if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Enter"].includes(key)) return;
     const el = document.activeElement as HTMLElement | null;
+    const td = el?.closest("td");
     const row = el?.closest<HTMLTableRowElement>("tr.ln");
-    if (!row) return;
+    if (!row || !el) return;
     const ids = t ? t.items.map(l => l.id) : [];
     const rowId = [...rowRefs.current.entries()].find(([, r]) => r === row)?.[0];
     const idx = rowId ? ids.indexOf(rowId) : -1;
     if (idx < 0) return;
-    const isText = el && (el.tagName === "INPUT" || el.tagName === "SELECT");
+    const isText = el.tagName === "INPUT" || el.tagName === "SELECT";
     const input = el as HTMLInputElement;
+    const curCol = td ? Array.from(row.children).indexOf(td) : 0;
 
-    // which field (column) is focused within this row, so up/down land on the same one
-    const rowCells = cellsOf(row);
-    const colInRow = rowCells.indexOf(el as HTMLElement);
-
-    const focusRow = (nextIdx: number) => {
+    // land on the field in the nearest column >= the current one (or the last field)
+    const focusSameCol = (targetRow: HTMLTableRowElement) => {
+      const fields = fieldsOf(targetRow);
+      if (!fields.length) return;
+      const same = fields.find(f => f.col === curCol)
+        || fields.filter(f => f.col >= curCol)[0]
+        || fields[fields.length - 1];
+      focusCell(same.el);
+    };
+    const moveRow = (nextIdx: number) => {
       const nextRow = rowRefs.current.get(ids[nextIdx]);
       if (!nextRow) return;
-      const cells = cellsOf(nextRow);
-      // keep the same field index when it exists, else the last field in that row
-      focusCell(cells[Math.min(colInRow < 0 ? 0 : colInRow, cells.length - 1)] || cells[0]);
+      focusSameCol(nextRow);
       showLine(ids[nextIdx]);
     };
 
     if (key === "ArrowDown" || (key === "Enter" && !e.shiftKey)) {
-      if (idx < ids.length - 1) { e.preventDefault(); focusRow(idx + 1); }
+      e.preventDefault();
+      if (idx < ids.length - 1) moveRow(idx + 1);
       if (e.shiftKey && key === "ArrowDown") toggleRange(ids, idx + 1);
     } else if (key === "ArrowUp") {
-      if (idx > 0) { e.preventDefault(); focusRow(idx - 1); }
+      e.preventDefault();
+      if (idx > 0) moveRow(idx - 1);
       if (e.shiftKey) toggleRange(ids, idx - 1);
     } else if (key === "ArrowRight") {
-      if (colInRow > -1 && colInRow < rowCells.length - 1) { e.preventDefault(); focusCell(rowCells[colInRow + 1]); }
+      const fields = fieldsOf(row); const here = fields.findIndex(f => f.el === el);
+      if (here > -1 && here < fields.length - 1) { e.preventDefault(); focusCell(fields[here + 1].el); }
     } else if (key === "ArrowLeft") {
-      if (colInRow > 0) { e.preventDefault(); focusCell(rowCells[colInRow - 1]); }
+      const fields = fieldsOf(row); const here = fields.findIndex(f => f.el === el);
+      if (here > 0) { e.preventDefault(); focusCell(fields[here - 1].el); }
     } else if (key === " " && (!isText || input.type === "checkbox")) {
       e.preventDefault();
       setSelectedLines(old => { const next = new Set(old); next.has(ids[idx]) ? next.delete(ids[idx]) : next.add(ids[idx]); return next; });
