@@ -8,26 +8,62 @@ import { requirePerm } from "./scope";
 export async function patterns(): Promise<Pattern[]> { return getSetting<Pattern[]>("patterns", []); }
 
 /* Find the product a scanned label belongs to. Exact raw match first, then our code,
-   then the decoded style+colour (so a re-printed old label still finds the same product). */
+   then the decoded style+colour (so a re-printed old label still finds the same product).
+
+   Accuracy rule: a detailed label (old-software or Rungnna QR) says what the item IS.
+   The shop's styles are NOT unique — "K5210/2T" is printed on earrings, balis and
+   rings alike — so a product is only accepted when nothing on the label contradicts
+   it (item code, item name, style, colour). A stored product that contradicts the
+   label is never used, and a label string wrongly attached to it is detached, so the
+   next scan can't repeat the mistake. */
+const up = (v?: string) => (v || "").trim().toUpperCase();
+const DETAILED = ["shop label", "rungnna"];
+function contradicts(q: Product, x: Parsed, labelName: string): boolean {
+  if (!DETAILED.includes(x.how)) return false;
+  if (x.how === "rungnna" && x.code && q.code === x.code) return false;   // our own label: its product code is exact
+  if (x.icode && q.item_code && q.item_code !== x.icode) return true;
+  // same item code: the owner's own name for it wins; no code on file: names must agree
+  const name = up(x.item) || labelName;
+  if (name && !(x.icode && q.item_code === x.icode) && hasProductName(q.item) && up(q.item) !== name) return true;
+  if (up(x.style) && up(q.style) && up(q.style) !== up(x.style)) return true;
+  if (up(x.color) && up(q.color) && up(q.color) !== up(x.color)) return true;
+  return false;
+}
 async function findStoredScan(raw: string, x: Parsed): Promise<Product | undefined> {
   const r = isRfidTag(raw) ? normTag(raw) : raw.trim();   // RFID tags are stored in one canonical form
-  let p = await db.products.where("barcodes").equals(r).filter(q => !q.deleted).first();
-  if (p && !p.deleted) return p;
-  p = await db.products.where("code").equals(r).first();
+  const labelName = x.icode ? up((await itemInfoFor(x.icode))?.name) : "";
+  const byRaw = await db.products.where("barcodes").equals(r).filter(q => !q.deleted).toArray();
+  for (const q of byRaw) if (!contradicts(q, x, labelName)) return q;
+  // repair: this exact label was linked to the wrong product by an earlier loose match
+  for (const q of byRaw) await put("products", { ...q, barcodes: (q.barcodes || []).filter(b => b !== r) });
+  let p = await db.products.where("code").equals(r).first();
   if (p && !p.deleted) return p;
   if (x.code) {
     p = await db.products.where("code").equals(x.code).first();
     if (p && !p.deleted) return p;
   }
   if (x.style) {
-    const same = await db.products.where("style").equals(x.style.trim().toUpperCase()).toArray();
-    const hit = same.find(q => !q.deleted && (!x.color || q.color === x.color.trim().toUpperCase()) && (!x.item || q.item === x.item.trim().toUpperCase() || !q.item?.trim() || needsName(q)) && (!x.icode || !q.item_code || q.item_code === x.icode));
+    const same = (await db.products.where("style").equals(up(x.style)).toArray())
+      .filter(q => !q.deleted && (!x.color || up(q.color) === up(x.color)) && !contradicts(q, x, labelName));
+    const fits = same.filter(q => {
+      if (x.how !== "shop label") return !x.item || up(q.item) === up(x.item) || needsName(q) || !q.item?.trim();
+      if (x.icode && q.item_code === x.icode) return true;
+      if (q.item_code) return false;
+      // no code on file: accept only when its name is the label's name, or it has no name yet
+      return labelName ? up(q.item) === labelName || !hasProductName(q.item) : !hasProductName(q.item);
+    });
+    // same article at the printed rate first (one style is often sold at several rates)
+    const rate = x.rate ? toPaise(x.rate) : 0;
+    const hit = fits.find(q => rate && q.rate === rate) || fits[0];
     if (hit) return hit;
   }
   return undefined;
 }
 
-export const hasProductName = (name?: string) => !!name?.trim() && !/^ITEM\s+\d+$/i.test(name.trim());
+/* A scanner set to the wrong keyboard layout can type an old QR as raw text
+   ("255-224-1-183--K5208/2T-KXZ"); that is the label, not a name. */
+export const looksLikeRawLabel = (name?: string) => /^\d+[~\-`^]\d+(\.\d+)?[~\-`^]\d+[~\-`^]/.test((name || "").trim());
+export const hasProductName = (name?: string) => !!name?.trim() && !/^ITEM\s+\d+$/i.test(name.trim()) && !looksLikeRawLabel(name);
 
 // An opaque barcode/RFID can still use the recognized label saved on its product.
 async function scannedDetails(p: Product, parsed: Parsed, rules: Pattern[]): Promise<Product> {
@@ -179,7 +215,7 @@ export async function learnItems(entries: Record<string, Partial<ItemInfo>>, kee
 /* "ITEM 202" is what an unnamed old label shows — treat it as no name at all */
 export const placeholderItem = (icode?: string) => (icode ? "ITEM " + icode : "");
 export const needsName = (p: Pick<Product, "item" | "item_code">) =>
-  !!p.item_code && (!p.item?.trim() || p.item.trim().toUpperCase() === placeholderItem(p.item_code));
+  !!p.item_code && (!p.item?.trim() || p.item.trim().toUpperCase() === placeholderItem(p.item_code) || looksLikeRawLabel(p.item));
 
 /* Pure: the product with the learned name/unit filled in, or null when nothing changes. */
 export function withItemInfo(p: Product, info?: ItemInfo): Product | null {

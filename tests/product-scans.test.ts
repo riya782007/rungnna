@@ -63,7 +63,8 @@ describe("consistent named products across scanners", () => {
     await db.config.put({ id: "item_codes", value: { "5186": { name: "SHOP BALI", unit: "PAIR" } }, updated_at: "" });
     const p = { ...blankProduct("o"), barcodes: [legacy] }; await db.products.put(p);
     expect((await findByScan(legacy))?.item).toBe("SHOP BALI");
-    await db.products.put({ ...p, item: "Original product", type: "SET", rate: 23000 });
+    // the owner renames the scanned product (it now carries the label's item code)
+    await db.products.put({ ...(await db.products.get(p.id))!, item: "Original product", type: "SET", rate: 23000 });
     expect(await findByScan(legacy)).toMatchObject({ item: "ORIGINAL PRODUCT", type: "SET", rate: 23000 });
   });
   it("lets stock-in create a named JSON product without requiring a style", async () => {
@@ -90,5 +91,45 @@ describe("consistent named products across scanners", () => {
     expect((await db.products.get(p.id))?.item).toBe("");
     expect(await db.config.get("item_codes")).toBeUndefined();
     expect(await db.outbox.count()).toBe(0);
+  });
+});
+
+/* Counter reports: an EARING sticker billed as BALI at the BALI's price, and an F-RING
+   billed as JHUMKA. The shop prints one style (K5210/2T) on many different items, so a
+   style + colour match alone must never decide the product. */
+describe("scan accuracy when items share a style", () => {
+  const earing = "203~194~1~212~~K5210/2T~KXZ";
+  it("does not turn an EARING label into a BALI that shares its style and colour", async () => {
+    const bali = { ...blankProduct("o"), item: "BALI", item_code: "5186", type: "PAIR", style: "K5210/2T", color: "KXZ", rate: 26400 };
+    await db.products.put(bali);
+    const p = (await resolveBillingScan(earing, "o"))!;
+    expect(p.id).not.toBe(bali.id);
+    expect(lineFrom(p)).toMatchObject({ item: "EARING", style: "K5210/2T", color: "KXZ", rate: 19400 });
+  });
+  it("detaches a label wrongly linked to another product, so the mistake can't repeat", async () => {
+    const bali = { ...blankProduct("o"), item: "BALI", style: "K5210/2T", color: "KXZ", rate: 26400, barcodes: [earing] };
+    await db.products.put(bali);
+    const p = (await resolveBillingScan(earing, "o"))!;
+    expect(p.id).not.toBe(bali.id);
+    expect(p.item).toBe("EARING");
+    expect((await db.products.get(bali.id))?.barcodes).not.toContain(earing);
+    expect((await resolveBillingScan(earing, "o"))?.id).toBe(p.id);
+  });
+  it("does not turn an F-RING label into an unrelated JHUMKA with the same style", async () => {
+    const jhumka = { ...blankProduct("o"), item: "JHUMKA (HOLD)", style: "K5210/11P", color: "W/XZ", rate: 37000 };
+    await db.products.put(jhumka);
+    const p = (await resolveBillingScan("202~24~1~183~~K5210/11P~W/XZ", "o"))!;
+    expect(p.id).not.toBe(jhumka.id);
+    expect(p.item).toBe("F-RING");
+  });
+  it("picks the product at the printed rate when one item and style sell at several rates", async () => {
+    const a = { ...blankProduct("o"), item: "TOPS", item_code: "949", style: "K5210/1T", color: "K/MBUL", rate: 26800 };
+    const b = { ...blankProduct("o"), item: "TOPS", item_code: "949", style: "K5210/1T", color: "K/MBUL", rate: 19400 };
+    await db.products.bulkPut([a, b]);
+    expect((await resolveBillingScan("949~194~1~183~~K5210/1T~K/MBUL", "o"))?.id).toBe(b.id);
+  });
+  it("reads an old label typed with '-' instead of '~' by a scanner on the wrong keyboard layout", async () => {
+    const p = (await resolveBillingScan("255-224-1-183--K5208/2T-KXZ", "o"))!;
+    expect(lineFrom(p)).toMatchObject({ item: "N-SET", style: "K5208/2T", color: "KXZ", rate: 22400 });
   });
 });

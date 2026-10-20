@@ -13,7 +13,7 @@ import { db, put, getSetting, setSetting, type Bill, type BillLine, type Party, 
 import { findByScan, fillFromItemCode, label, readItemMap } from "../lib/products";
 import { NameItemCodes, unnamedCodes } from "../components/NameItemCodes";
 import { isRfidTag, normTag, soldBill, TagSet, Recent } from "../lib/rfid";
-import { discError, newBill, lineFrom, totals, gstLabel, fixLine, finalize, holdBill, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
+import { discError, newBill, lineFrom, priceFor, totals, gstLabel, fixLine, finalize, holdBill, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
 import { voiceBill } from "../lib/ai";
 import { useApp, toast, beep, go } from "../lib/app";
 import { can } from "../lib/roles";
@@ -28,6 +28,7 @@ import { MicButton } from "../components/Voice";
 import { Modal, PhotoButton, Thumb, MoneyInput } from "../components/common";
 import { PrintBill, type PrintFormat } from "../components/Invoice";
 import { resolveBillingScan, withBillNames } from "../lib/billing-products";
+import { parseLabel } from "../lib/parse";
 import { BagLabels } from "../components/BagLabels";
 import { BAG_PREFIX, parseBagPayload } from "../lib/bag-labels";
 import { BillScanNotice, type BillScanFeedback } from "../components/BillScanNotice";
@@ -182,9 +183,9 @@ export default function Billing({ args }: { args: string[] }) {
      scan box, so it is visible without scrolling. Display only — the bill, its line
      numbers and the printed order stay as added. */
   const [touched, setTouched] = useState<string[]>([]);
-  function displayOrder<L extends { id: string }>(items: L[]): L[] {
+  function displayOrder(items: BillLine[]): BillLine[] {
     const byId = new Map(items.map(l => [l.id, l]));
-    const first = touched.map(id => byId.get(id)).filter((l): l is L => !!l);
+    const first = touched.map(id => byId.get(id)).filter((l): l is BillLine => !!l);
     const seen = new Set(first.map(l => l.id));
     return [...first, ...items.filter(l => !seen.has(l.id)).reverse()];
   }
@@ -359,12 +360,21 @@ export default function Billing({ args }: { args: string[] }) {
     // Release the scanner input immediately; earlier lookups must never erase a later burst.
     setQ("");
     let p = await resolve(r);
-    if (!p) {
+    const parsed = parseLabel(r);
+    // Typed text may pick the one product it matches. A scanned label never does: a
+    // label we couldn't read must not be swapped for some product that merely shares
+    // part of its text (that is how an earring became a bali).
+    const scannedLabel = parsed.how !== "code" || r.length > 20 || /[~|`^]/.test(r);
+    if (!p && !scannedLabel) {
       const hits = products.filter(x => (x.style + " " + x.code + " " + x.item).toUpperCase().includes(r.toUpperCase()));
       if (hits.length === 1) p = await fillFromItemCode(hits[0]);
     }
-    if (!p) { beep(false); toast("Not found — scan the label or record it in Scan & record", true); return "Not found"; }
+    if (!p) { beep(false); toast(scannedLabel ? "Couldn't read this label — nothing added. Scan it again, or add it by hand (F8)." : "Not found — scan the label or record it in Scan & record", true); return "Not found"; }
     if (!addProduct(p, 1, 0, 0, destination)) { beep(false); toast("Bill changed or saving — scan this label again", true); return "Bill changed or saving — scan again"; }
+    // The sticker's printed rate is the operator's check: say so when the bill differs.
+    const printed = parsed.rate && ["shop label", "rungnna"].includes(parsed.how) ? toPaise(parsed.rate) : 0;
+    const billed = priceFor(p, billRef.current?.price_level || "wholesale");
+    if (printed && billed && printed !== billed) toast(`Check rate: sticker says ${rupees(printed)}, bill uses ${rupees(billed)} for ${label(p)}`, true);
     return "Added · " + label(p);
   }
   const onCodeRef = useRef(onCode); onCodeRef.current = onCode;
