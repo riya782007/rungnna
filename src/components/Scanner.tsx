@@ -1,5 +1,5 @@
 import { Icon } from "./Icon";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { findByScan, label } from "../lib/products";
 import { getSetting, setSetting } from "../lib/db";
 import { isRfidTag } from "../lib/rfid";
@@ -416,6 +416,84 @@ export function useScannerGun(
     document.addEventListener("keydown", onKey, true);
     return () => { document.removeEventListener("keydown", onKey, true); clearTimeout(timer); };
   }, [enabled, minLength, maxGapMs]);
+}
+
+/* Scans count only in one box. A scanner-gun burst (keys a few ms apart) aimed anywhere
+   else — a Box/Qty/Rate cell, a dropdown, a button, the page — is swallowed: the first
+   character it already typed is put back, the rest never reach the page (so no Enter
+   clicks a button), and onReject fires once so the counter hears the error sound.
+   Real typing is slower than maxGapMs and is never touched. */
+export function useScanOnlyIn(
+  target: RefObject<HTMLElement | null>,
+  onReject: (code: string) => void,
+  opts: { enabled?: boolean; minLength?: number; maxGapMs?: number } = {},
+) {
+  const cb = useRef(onReject); cb.current = onReject;
+  const enabled = opts.enabled !== false;
+  const minLength = opts.minLength ?? 3;
+  const maxGapMs = opts.maxGapMs ?? 35;
+
+  useEffect(() => {
+    if (!enabled) return;
+    type Snap = { el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement; value: string; start: number | null; end: number | null };
+    let lastAt = 0, first = "", burst = "", timer: any = 0;
+    let snap: Snap | null = null;
+
+    const snapshot = (el: EventTarget | null): Snap | null => {
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        let start: number | null = null, end: number | null = null;
+        try { start = el.selectionStart; end = el.selectionEnd; } catch { /* number inputs */ }
+        return { el, value: el.value, start, end };
+      }
+      if (el instanceof HTMLSelectElement) return { el, value: el.value, start: null, end: null };
+      return null;
+    };
+    // Put the field back exactly as it was, and tell React so its state follows.
+    const restore = (s: Snap | null) => {
+      if (!s || s.el.value === s.value) return;
+      const proto = s.el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : s.el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, "value")?.set?.call(s.el, s.value);
+      s.el.dispatchEvent(new Event(s.el instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
+      if (!(s.el instanceof HTMLSelectElement) && s.start !== null) { try { s.el.setSelectionRange(s.start, s.end); } catch { /* ignore */ } }
+    };
+    const finish = () => {
+      clearTimeout(timer);
+      const code = burst; burst = ""; first = ""; snap = null;
+      if (code.length >= minLength) cb.current(code);
+    };
+    const block = (e: KeyboardEvent) => { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); };
+
+    const onKey = (e: KeyboardEvent) => {
+      const box = target.current;
+      if (box && e.target === box && !burst) { first = ""; snap = null; lastAt = performance.now(); return; }
+      if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+      const now = performance.now(), gap = now - lastAt; lastAt = now;
+      const end = e.key === "Enter" || e.key === "Tab";
+      const printable = e.key.length === 1;
+
+      if (burst) {                                  // already inside a stray scan: eat it all
+        if (!printable && !end) return;
+        block(e);
+        if (end) { finish(); return; }
+        burst += e.key;
+        clearTimeout(timer); timer = setTimeout(finish, 80);
+        return;
+      }
+      if (!printable) { first = ""; snap = null; return; }
+      if (!first || gap > maxGapMs) {               // could be a person typing — let it through, remember the field
+        first = e.key; snap = snapshot(e.target);
+        return;
+      }
+      // Second key within a few ms: this is a scanner, not a person.
+      block(e);
+      restore(snap);
+      burst = first + e.key; first = "";
+      clearTimeout(timer); timer = setTimeout(finish, 80);
+    };
+
+    document.addEventListener("keydown", onKey, true);
+    return () => { document.removeEventListener("keydown", onKey, true); clearTimeout(timer); };
+  }, [enabled, minLength, maxGapMs, target]);
 }
 
 /* Scanner-gun box: keeps focus, submits on Enter, also accepts typed or pasted codes. */
