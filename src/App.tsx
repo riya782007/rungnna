@@ -90,7 +90,12 @@ function Shell() {
   const [, setLangTick] = useState("");
   const [scrolled, setScrolled] = useState(false);
   const sec = sectionOf(route);
-  useEffect(() => { startSync(); warmScanner(); }, []);
+  useEffect(() => {
+    startSync(); warmScanner();
+    // name products saved from old QRs as "ITEM 202" (after the first sync has had a moment)
+    const timer = setTimeout(() => { void import("./lib/products").then(m => m.nameKnownItemCodes()).catch(() => {}); }, 4000);
+    return () => clearTimeout(timer);
+  }, []);
   useEffect(() => { initLang().then(setLangTick); return onLang(setLangTick) as any; }, []);
   useEffect(() => {
     const f = (e: PromiseRejectionEvent) => { const m = String(e.reason?.message || e.reason || ""); if (m && !/abort/i.test(m)) toast(m.slice(0, 120), true); };

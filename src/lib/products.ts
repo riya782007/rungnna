@@ -2,7 +2,7 @@ import { db, put, uid, now, deviceId, getSetting, type Product } from "./db";
 import { parseLabel, newCode, type Parsed, type Pattern } from "./parse";
 import { toPaise } from "./format";
 import { isRfidTag, normTag } from "./rfid";
-import { VERIFIED_ITEM_CODES } from "./verified-labels";
+import { VERIFIED_ITEM_CODES, verifiedCodeFor } from "./verified-labels";
 import { requirePerm } from "./scope";
 
 export async function patterns(): Promise<Pattern[]> { return getSetting<Pattern[]>("patterns", []); }
@@ -207,6 +207,20 @@ export async function fillFromItemCode(p: Product): Promise<Product> {
   return x ? put("products", x) : p;
 }
 
+/* Startup: products already saved as "ITEM 202" / blank pick up their name from the
+   shop's learned list or the old software's item list, without waiting for a re-scan. */
+export async function nameKnownItemCodes(): Promise<number> {
+  const learned = await itemMap();
+  const unnamed = await db.products.filter(p => !p.deleted && needsName(p)).toArray();
+  let n = 0;
+  for (const p of unnamed) {
+    const code = p.item_code!, info = learned[code]?.name ? learned[code] : VERIFIED_ITEM_CODES[code];
+    const x = withItemInfo(p, info);
+    if (x) { await put("products", x); n++; }
+  }
+  return n;
+}
+
 /* The owner names a number: remember it, and fix every product that still carries no name. */
 export async function nameItemCode(code: string, name: string, unit: string) {
   const info = { name: name.trim().toUpperCase(), unit: normUnit(unit) || "PCS" };
@@ -219,7 +233,12 @@ export async function nameItemCode(code: string, name: string, unit: string) {
 export async function itemCodeFor(item: string) {
   if (!item) return "";
   const hit = await db.products.where("item").equals(item).filter(p => !!p.item_code && !p.deleted).first();
-  return hit?.item_code || "";
+  if (hit?.item_code) return hit.item_code;
+  // no product yet: use the shop's learned list, then the old software's item list
+  const want = item.trim().toUpperCase();
+  const learned = Object.entries(await itemMap()).filter(([, v]) => v.name === want).map(([code]) => code);
+  if (learned.length === 1) return learned[0];
+  return learned.length ? "" : verifiedCodeFor(want);
 }
 
 export async function hideProducts(ids: string[]) {
