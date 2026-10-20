@@ -68,6 +68,22 @@ export default function Billing({ args }: { args: string[] }) {
   const dismissScanFeedback = useCallback(() => setScanFeedback(null), []);
   const [lastScanId, setLastScanId] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
+  /* Save/Print stopped by lines with no quantity: those lines go red, a banner says which,
+     and offers to remove them (counter request 21/10/2026 — the corner toast was missed). */
+  const [qtyProblem, setQtyProblem] = useState<string[]>([]);
+  const noQty = (l: BillLine) => !Number.isSafeInteger(l.qty) || l.qty <= 0;
+  function stopForQty(lines: BillLine[]) {
+    setQtyProblem(lines.map(l => l.id));
+    beep(false);
+    toast(lines.length === 1 ? `Not saved — quantity missing for ${lines[0].item || lines[0].style}` : `Not saved — quantity missing on ${lines.length} lines`, true);
+    requestAnimationFrame(() => {
+      const row = rowRefs.current.get(lines[0].id);
+      if (!row) return;
+      row.scrollIntoView({ block: "center" });
+      const field = [row.cells[4], row.cells[3]].map(c => c?.querySelector<HTMLInputElement>("input:not([disabled])")).find(Boolean);
+      field?.focus({ preventScroll: true }); field?.select();
+    });
+  }
   function flashRow(row: HTMLElement, id: string) {
     row.classList.remove("flash");
     void row.offsetWidth; // restart the highlight when the same item is scanned again
@@ -472,6 +488,9 @@ export default function Billing({ args }: { args: string[] }) {
     savingRef.current = true; setSaving(true);
     try {
     if (!t.items.length) return toast("No items on the bill", true);
+    const empty = t.items.filter(noQty);
+    if (empty.length) return stopForQty(empty);
+    setQtyProblem([]);
     validatePosLines(t.items);
     /* discount above the shop's limit needs an owner/manager PIN */
     const list = t.items.reduce((a, l) => a + l.qty * l.rate, 0);
@@ -644,12 +663,19 @@ export default function Billing({ args }: { args: string[] }) {
           <NameItemCodes codes={unnamed} onNamed={(code, name, unit) => setB(x => x && { ...x, items: x.items.map(l =>
             (l.item === "ITEM " + code || (!l.item && l.product_id && pmap.get(l.product_id)?.item_code === code)) ? { ...l, item: name, type: unit } : l) })} />
           <div className="selection-bar"><SelectAll ids={t.items.map(l => l.id)} selected={selectedLines} onChange={setSelectedLines} label="Select all bill lines" /><span className="sm">{t.items.filter(l => selectedLines.has(l.id)).length} selected</span><DeleteButton className="btn sm bad" disabled={saving || !t.items.some(l => selectedLines.has(l.id))} onDelete={() => dropLines(t.items.filter(l => selectedLines.has(l.id)).map(l => l.id))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }}>Keys: ↑↓ rows · ←→ fields · Space select · Shift+↑↓ range</span></div>
+          {(() => { const stuck = t.items.filter(l => qtyProblem.includes(l.id) && noQty(l)); return stuck.length ? (
+            <div className="note bad pos-qty-problem" role="alert">
+              <b>Not saved — quantity missing on {stuck.length === 1 ? "this line" : stuck.length + " lines"}:</b> {stuck.slice(0, 3).map(l => [l.item, l.style].filter(Boolean).join(" ")).join(", ")}{stuck.length > 3 ? "…" : ""}. Enter the quantity, or remove the line, then save / print again.
+              <span className="row" style={{ gap: 6, marginTop: 6 }}>
+                <button className="btn sm bad" disabled={saving} onClick={() => dropLines(stuck.map(l => l.id))}>Remove {stuck.length === 1 ? "this line" : "these lines"}</button>
+                <button className="btn sm" onClick={() => setQtyProblem([])}>Close</button></span>
+            </div>) : null; })()}
           <div className="tw pos-lines" ref={linesPane} role="region" aria-label="Bill items" tabIndex={0} onKeyDown={onGridKey}>
             <table className="pos-t" aria-label="Bill items">
               <thead><tr><th>#</th><th>Box</th><th>Item · Style · Colour</th><th className="r">Pkt</th><th className="r">Qty</th><th className="r">Rate</th><th className="r">Disc</th><th className="r">Amount</th><th /></tr></thead>
               <tbody>
                 {displayOrder(t.items).map(l => [l, t.items.indexOf(l)] as const).map(([l, i]) => (
-                  <tr key={l.id} className={"ln" + (lastScanId === l.id ? " scanned" : "") + (flashId === l.id ? " flash" : "")} aria-current={lastScanId === l.id ? "true" : undefined} ref={row => { if (row) rowRefs.current.set(l.id, row); else rowRefs.current.delete(l.id); }}>
+                  <tr key={l.id} className={"ln" + (lastScanId === l.id ? " scanned" : "") + (flashId === l.id ? " flash" : "") + (noQty(l) ? (qtyProblem.includes(l.id) ? " noqty stop" : " noqty") : "")} aria-current={lastScanId === l.id ? "true" : undefined} ref={row => { if (row) rowRefs.current.set(l.id, row); else rowRefs.current.delete(l.id); }}>
                     <td className="mut" data-l="#"><input type="checkbox" aria-label={"Select bill line " + (i + 1)} checked={selectedLines.has(l.id)} onChange={event => setSelectedLines(old => { const next = new Set(old); event.target.checked ? next.add(l.id) : next.delete(l.id); return next; })} /><span className="line-no">{i + 1}</span></td>
                     <td data-l="Box"><input className="cell" style={{ width: 38 }} inputMode="numeric" value={l.box_no} onChange={e => setLine(l.id, { box_no: Math.max(1, parseInt(e.target.value) || 1) })}
                       onBlur={() => setB(x => x ? { ...x, items: mergeBoxLine(x.items, l.id) } : x)} /></td>
