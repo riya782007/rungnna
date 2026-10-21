@@ -1,4 +1,5 @@
 import { parkBillingDraft, resumeBillingDraft } from "../lib/billing-drafts";
+import { publicOrigin } from "../lib/platform";
 import { DeleteButton } from "../components/DeleteButton";
 import { confirmDelete } from "../lib/confirm-delete";
 import { SelectAll } from "../components/SelectAll";
@@ -876,7 +877,7 @@ function ScanSheet({ onCode, onClose, lines, pcs, net }: { onCode: (t: string) =
 /* Laptop / counter PC: pair a phone as the camera. */
 function PairPhone({ id, peers, onNew, onClose }: { id: string; peers: number; onNew: () => void; onClose: () => void }) {
   useEffect(() => { if (!id) onNew(); }, [id]);
-  const url = id ? `${location.origin}/#/remote/${id}` : "";
+  const url = id ? `${publicOrigin()}/#/remote/${id}` : "";
   return (
     <Modal title="Use a phone as the scanner" onClose={onClose}>
       <div className="stack" style={{ alignItems: "center", textAlign: "center" }}>

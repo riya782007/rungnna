@@ -1,4 +1,5 @@
 import { db, put, type Bill } from "./db";
+import { apiUrl } from "./platform";
 import { sb, syncNow } from "./sync";
 import { assertStoreRow } from "./stores";
 import { assertUnlocked } from "./finance";
@@ -10,7 +11,7 @@ export async function gstRequest(body?: unknown) {
   await assertCloudSyncEnabled();
   const c = await sb(); const token = (await c?.auth.getSession())?.data.session?.access_token;
   if (!token) throw new Error("Connect the owner account in Settings");
-  const r = await fetch("/api/gst", { method: body ? "POST" : "GET", headers: { "content-type": "application/json", authorization: "Bearer " + token }, ...(body ? { body: JSON.stringify(body) } : {}) });
+  const r = await fetch(apiUrl("gst"), { method: body ? "POST" : "GET", headers: { "content-type": "application/json", authorization: "Bearer " + token }, ...(body ? { body: JSON.stringify(body) } : {}) });
   const j = await r.json(); if (!r.ok) throw new Error(j.error || "Government service unavailable"); return j;
 }
 export async function submitGst(b: Bill, kind: GstKind, action: "generate" | "cancel", reason?: string, onlineApproved = false) {

@@ -6,3 +6,15 @@ public/zxing_reader.wasm
 .vercel
 # Generated long-estimate browser/PDF verification
 tmp/pdfs/estimate-print-check/
+
+# Windows desktop app build outputs
+desktop/node_modules
+desktop/web
+desktop/release
+desktop/build
+# Android app build outputs (generated in CI)
+mobile/node_modules
+mobile/web
+mobile/android
+mobile/release
+mobile/release.jks

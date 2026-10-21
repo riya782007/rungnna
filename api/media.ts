@@ -36,3 +36,6 @@ export async function POST(req: Request) {
     return json({ error: e?.message || "Upload failed" }, e?.status || 502);
   }
 }
+
+/* CORS pre-check from the Android app (https://localhost); headers come from vercel.json. */
+export function OPTIONS() { return new Response(null, { status: 204 }); }

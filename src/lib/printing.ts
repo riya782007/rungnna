@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { nativePrinter } from "./platform";
 
 export const RECEIPT_CUTS = {
   partial: "Automatic half cut (partial)",
@@ -51,6 +52,16 @@ export async function printDocument(source: Document, frame: () => Promise<void>
     doc.head.appendChild(reset);
     await preparePrint(doc, frame);
     if (cancelled()) { remove(); return remove; }
+    // Android app: its web view cannot print, so the page goes to Android's print service
+    // (any installed printer app, or "Save as PDF"). Styles are inlined: the print view
+    // can't fetch the app's own files.
+    const native = nativePrinter();
+    if (native) {
+      const css = Array.from(source.styleSheets).map(sheet => { try { return Array.from(sheet.cssRules).map(r => r.cssText).join("\n"); } catch { return ""; } }).join("\n");
+      const html = "<!doctype html><html><head><meta charset=\"utf-8\"><style>" + css + "</style><style>" + reset.textContent + "</style></head><body>" + root.outerHTML + "</body></html>";
+      try { await native.printHtml({ html, name: source.title || "Rungnna bill" }); } finally { remove(); onDone(); }
+      return remove;
+    }
     win.addEventListener("afterprint", () => { remove(); onDone(); }, { once: true });
     win.focus(); win.print();
     return remove;

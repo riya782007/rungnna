@@ -13,3 +13,6 @@ export async function GET() {
     supabase: !!(env("SUPABASE_URL") && env("SUPABASE_ANON_KEY")),
   });
 }
+
+/* CORS pre-check from the Android app (https://localhost); headers come from vercel.json. */
+export function OPTIONS() { return new Response(null, { status: 204 }); }

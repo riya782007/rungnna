@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { apiUrl } from "./platform";
 import { db, getSetting, setSetting, rebuildStock, now } from "./db";
 import { rfidDefaults } from "./rfid";
 import { ownerOnly } from "./scope";
@@ -101,7 +102,7 @@ async function uploadPhotos(c: SupabaseClient) {
     await assertCloudSyncEnabled();
     let url = "";
     try {
-      const r = await fetch("/api/media", {
+      const r = await fetch(apiUrl("media"), {
         method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + token },
         body: JSON.stringify({ data: await blobB64(p.blob), mime: p.blob.type || "image/jpeg", key: `photos/${p.created_at.slice(0, 7)}/${p.id}` }),
       });

@@ -1,4 +1,5 @@
 import { db, put, now, type Product, type Config } from "./db";
+import { publicOrigin } from "./platform";
 import { api, blobToB64 } from "./ai";
 import { slugify } from "../../api/_listing";
 import type { ListingContent } from "../../api/_listing";
@@ -83,7 +84,7 @@ export async function deleteCatalogue(slug: string) {
 }
 
 /* Public links. Pages live on the same site as the app. */
-export const siteBase = () => location.origin;
+export const siteBase = () => publicOrigin();
 export const productUrl = (slug: string) => `${siteBase()}/p/${slug}`;
 export const shopUrl = () => `${siteBase()}/shop`;
 export const tradeUrl = (t: TradePortal) => `${siteBase()}/trade?k=${t.token}`;
