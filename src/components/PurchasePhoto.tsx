@@ -178,6 +178,16 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
     setReady(true);
   }).catch(e => { setError(e.message || "Could not restore the purchase draft"); setReady(true); }); }, []);
   useEffect(() => { if (ready) setSetting("purchase_photo_draft", d); }, [d, ready]);
+  /* The purchase just approved stays here — with its labels ready to print — when you go to
+     QR labels or another screen and come back, so the bill never has to be read again. */
+  const LAST = "purchase_photo_last";
+  const restoreSaved = async (id: string) => {
+    const p = await db.purchases.get(id);
+    if (!p || p.deleted || (p.store_id || currentStore()) !== currentStore()) return false;
+    setSaved(p); setJobs(await jobsFor(p)); return true;
+  };
+  useEffect(() => { void getSetting<{ id: string } | null>(LAST, null).then(async last => { if (last?.id && !await restoreSaved(last.id)) await setSetting(LAST, null); }).catch(() => {}); }, []);
+  const recent = useLiveQuery(() => db.purchases.orderBy("at").reverse().filter(p => !p.deleted && p.status === "final" && (p.store_id || currentStore()) === currentStore()).limit(6).toArray(), [saved?.id], []);
   // the same printer settings the Labels page uses, so a sticker printed here is that sticker
   const deviceCfg = useLiveQuery(() => loadLabelCfg(), []);
   useEffect(() => { if (deviceCfg) setCfg(deviceCfg); }, [deviceCfg]);
@@ -307,6 +317,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       const p = await savePhotoPurchase(rows, { by, rack: d.rack, supplierId: d.supplier, billNo: d.billNo, photoId: d.photoId, invoiceTotal: d.total, note: [d.warnings, d.total ? "Supplier invoice total (as printed): " + d.total : ""].filter(Boolean).join("\n") });
       savedPurchase = p;
       setSaved(p); setBulkQty(""); setBulkRef(""); setQuantityNote("");
+      await setSetting(LAST, { id: p.id });
       // Financial saving succeeded. Any subsequent print failure is recovered
       // by printing this saved purchase, never by approving it a second time.
       set({ rows: [], supplier: d.supplier, billNo: "", total: "", warnings: "", photoId: undefined });
@@ -395,7 +406,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       <button type="button" className="linkbtn" disabled={busy} onClick={async () => {
         if (busy || lock.current || !await confirmDelete("Clear this bill and start again? Nothing has been saved.")) return;
         set({ rows: [], supplier: "", billNo: "", total: "", warnings: "", check: undefined, supplierName: "", photoId: undefined, autoBillNo: undefined });
-        setDone({}); setSelection(new Set()); setError(""); setJobs([]); setSaved(null);
+        setDone({}); setSelection(new Set()); setError("");
         setBulkQty(""); setBulkPack(packetDefault); setBulkRef(""); setQuantityNote("");
       }}>Start over</button></div>}
     <input ref={file} type="file" hidden accept="image/jpeg,image/png,image/webp" multiple onChange={e => { void read(Array.from(e.target.files || [])); e.target.value = ""; }} />
@@ -405,11 +416,26 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         onBlob={b => void read([new File([b], `bill-${Date.now()}.jpg`, { type: "image/jpeg" })])} />
     </Suspense>}
 
-    {saved && !d.rows.length && <div className="note" role="status">
-      <b>Purchase {saved.no} saved.</b> {expandJobs(jobs).length} label{expandJobs(jobs).length === 1 ? "" : "s"} prepared.
-      {!!jobs.length && <> <button className="btn" disabled={printer.busy} onClick={reprint}>Print saved labels</button></>}
-      {" "}<a className="linkbtn" href={"#/labels/purchase/" + saved.id}>Open saved labels &amp; printer settings</a>
+    {saved && !d.rows.length && <div className="note stack saved-purchase" role="status" style={{ gap: 8 }}>
+      <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+        <b className="grow">Purchase {saved.no} saved{saved.supplier_name ? " · " + saved.supplier_name : ""} · {expandJobs(jobs).length} label{expandJobs(jobs).length === 1 ? "" : "s"} ready</b>
+        {!!jobs.length && <button className="btn p" disabled={printer.busy} onClick={reprint}>Print saved labels</button>}
+        <a className="btn" href={"#/labels/purchase/" + saved.id}>Open in QR labels</a>
+        <button type="button" className="linkbtn" onClick={() => { setSaved(null); setJobs([]); void setSetting(LAST, null); }}>Close</button>
+      </div>
+      <div className="xs mut">This stays here until you close it or approve the next bill — no need to read the bill photo again.</div>
+      <div className="tw"><table className="pos-t"><thead><tr><th>Item</th><th>Style</th><th>Colour</th><th className="r">Qty</th><th className="r">Rate</th></tr></thead><tbody>
+        {saved.items.map((l, i) => <tr key={i}><td>{l.item}</td><td className="mono">{l.style}</td><td>{l.color}</td><td className="r">{l.pack > 1 ? l.pkts * l.pack : l.qty}</td><td className="r">{l.rate ? (l.rate / 100).toFixed(2) : "—"}</td></tr>)}
+      </tbody></table></div>
     </div>}
+    {!d.rows.length && recent.filter(p => p.id !== saved?.id).length > 0 && <details className="note">
+      <summary><b>Recent purchases</b> <span className="xs mut">— print their labels again without re-reading the bill</span></summary>
+      <div className="stack" style={{ gap: 6, marginTop: 6 }}>{recent.filter(p => p.id !== saved?.id).map(p => <div key={p.id} className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+        <span className="grow sm"><b>{p.no}</b> · {p.supplier_name || "Supplier"} · {p.total_qty} pcs · {new Date(p.at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</span>
+        <button className="btn sm" onClick={async () => { if (await restoreSaved(p.id)) await setSetting(LAST, { id: p.id }); }}>Show &amp; print labels</button>
+        <a className="btn sm" href={"#/labels/purchase/" + p.id}>Open in QR labels</a>
+      </div>)}</div>
+    </details>}
 
     {!!d.rows.length && <>
       {d.check && <div className={"note " + (d.check.ok ? "ok" : "warn")} role="status">
