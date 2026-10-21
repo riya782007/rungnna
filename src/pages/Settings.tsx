@@ -75,9 +75,10 @@ export default function Settings() {
           {boss && <div className="card"><header><h3>People</h3><span className="grow" /><a className="btn sm" href="#/roles">Roles &amp; permissions</a></header>
             <div className="list" style={{ border: 0, borderRadius: 0, boxShadow: "none" }}>
               {staff.filter(s => !s.deleted && !isRoleLogin(s)).map(s => (
-                <div key={s.id} className="li">
-                  <span className="grow"><b className="sm">{s.name}</b>{me?.id === s.id && <span className="pill ok" style={{ marginLeft: 6 }}>you</span>}
-                    <div className="xs mut">{roleName(s)}{s.role_id ? "" : " · " + ROLE_NOTE[s.role]}{s.pin ? " · PIN set" : ""}{!s.active ? " · disabled" : ""}</div></span>
+                <div key={s.id} className="li person-row">
+                  <div className="person-info"><div className="person-name"><b>{s.name}</b>{me?.id === s.id && <span className="pill ok">you</span>}{!s.active && <span className="pill warn">disabled</span>}</div>
+                    <div className="xs mut">{roleName(s)}{s.role_id ? "" : " · " + ROLE_NOTE[s.role]}{s.pin ? " · PIN set" : ""}</div></div>
+                  <div className="person-actions">
                   <RoleSelect value={s} allowOwner={me?.role === "owner"} disabled={s.id === me?.id || (s.role === "owner" && me?.role !== "owner")}
                     onChange={async v => { await put("staff", { ...s, ...v }); toast("Role changed"); }} />
                   {(s.role !== "owner" || me?.role === "owner") && <button className="btn sm" onClick={async () => {
@@ -87,6 +88,7 @@ export default function Settings() {
                   }}>Set PIN</button>}
                   <button className="btn sm" onClick={async () => { const n = prompt("Name", s.name); if (n) await put("staff", { ...s, name: n }); }}>Rename</button>
                   {s.id !== me?.id && <button className="btn sm" onClick={async () => { await put("staff", { ...s, active: s.active ? 0 : 1 }); }}>{s.active ? "Disable" : "Enable"}</button>}
+                  </div>
                 </div>))}
             </div>
             <div className="pad stack" style={{ borderTop: "1px solid var(--line-2)" }}>
