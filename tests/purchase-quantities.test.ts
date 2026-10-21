@@ -59,7 +59,7 @@ describe("purchase quantities without repeated typing",()=>{
     await db.products.bulkPut(["201","202"].map(item_code=>({...blankProduct("o"),item:"UNKNOWN",type:"PCS",item_code})));
     const rows=await preparePhotoRows([{...row,item:"UNKNOWN",unit:"PCS"}],"supplier","12");
     expect(rows[0].item_code).toBeUndefined();
-    expect(()=>ownPayload(draftLabelProducts(rows,"o",DEFAULT_RULE)[0],"shop")).toThrow("numeric ITEM CODE");
+    expect(ownPayload(draftLabelProducts(rows,"o",DEFAULT_RULE)[0],"shop")).toMatch(/^RJ1\|/);
   });
 });
 

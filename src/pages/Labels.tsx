@@ -448,10 +448,10 @@ function LabelSettings({ cfg, upd, sample, qty, onTest }: { cfg: LabelCfg; upd: 
         <div className="grid g2">
           <label className="f">QR content
             <select className="in" value={cfg.format || "shop"} onChange={e => upd({ format: e.target.value as any })}>
-              <option value="shop">Old software format — matching item code required</option>
+              <option value="shop">Old software format when the item has its old code (else Rungnna QR)</option>
               <option value="rungnna">Rungnna only — includes product name</option>
             </select></label>
-          <div className="xs mut">Old-software labels need the item code from that software, not a new code invented here. Copy a working old label to retain its reference. Rungnna-only labels work in this app even with zero stock.</div>
+          <div className="xs mut">Items with their old-software item code (e.g. 202 F-RING) get the old QR, so both systems read them. Items without one still print, with the Rungnna QR that carries the name; only this app reads those. Copy a working old label to keep its reference.</div>
           <label className="f">Arrangement
             <select className="in" value={cfg.layout || "shop"} onChange={e => upd({ layout: e.target.value as any })}>
               <option value="shop">Like current sticker (text · QR · name)</option>
