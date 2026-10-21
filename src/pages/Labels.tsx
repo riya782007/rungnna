@@ -127,6 +127,10 @@ export function upgradeLabelCfg(saved: Partial<LabelCfg> | null | undefined): La
   // That transport cannot print multiple columns; normal browser printing can.
   return upgraded.output === "tspl" && (upgraded.mode !== "roll" || upgraded.cols !== 1) ? { ...upgraded, output: "browser" } : upgraded;
 }
+/** The saved printer settings brought up to date, without saving anything: safe inside a live query
+    (a live query may only read; saving the upgrade there crashed the bill reader on a counter whose settings
+    were older, 21 Oct). loadLabelCfg() below also saves the upgrade. */
+export const readLabelCfg = () => getSetting<Partial<LabelCfg> | null>("label_cfg", null).then(upgradeLabelCfg);
 export const loadLabelCfg = () => getSetting<Partial<LabelCfg> | null>("label_cfg", null).then(async saved => {
   const config = upgradeLabelCfg(saved);
   if (saved?.textVersion !== 1 || (saved?.output === "tspl" && config.output === "browser")) await setSetting("label_cfg", config);

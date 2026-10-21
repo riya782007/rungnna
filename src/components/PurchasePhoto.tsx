@@ -14,9 +14,9 @@ import {
   preparePhotoRows, savePhotoPurchase, validatePhotoRows, pricePhotoRows, applyVendorTerms, repricePhotoRows, suspiciousCosts, restoreBillCosts,
   autoArticle, autoArticleCount, draftLabelProducts, combineRepeatedRows, labelCountFor, type PhotoRow,
 } from "../lib/purchase-photo";
-import { applyPhotoQuantities, readCount, repeatPhotoCount, type RepeatedCountField } from "../lib/purchase-quantities";
+import { applyPhotoQuantities, readCount, repeatPhotoCount, stickersPerPacket, type RepeatedCountField } from "../lib/purchase-quantities";
 import { purchaseLabelJobs } from "../lib/purchase-labels";
-import { DEFAULT_CFG, LabelView, validateLabelPrint, loadLabelCfg, useLabelPrint, tscCommands, expandJobs, type LabelCfg, type Job } from "../pages/Labels";
+import { DEFAULT_CFG, LabelView, validateLabelPrint, loadLabelCfg, readLabelCfg, useLabelPrint, tscCommands, expandJobs, type LabelCfg, type Job } from "../pages/Labels";
 import { directPrintSupported } from "../lib/tsc";
 import { currentStore } from "../lib/scope";
 import { toast } from "../lib/app";
@@ -145,6 +145,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
     catch (e: any) { setConnection(e.message); }
     finally { setProbing(false); }
   };
+  const [perPacket, setPerPacket] = useState("1");
   const [packetDefault, setPacketDefault] = useState("1"), [bulkPack, setBulkPack] = useState("1"), [bulkQty, setBulkQty] = useState(""), [bulkRef, setBulkRef] = useState("");
   const [rememberPack, setRememberPack] = useState(true), [quantityNote, setQuantityNote] = useState("");
   const [pricing, setPricing] = useState<PricingRule | null>(null);
@@ -189,7 +190,8 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
   useEffect(() => { void getSetting<{ id: string } | null>(LAST, null).then(async last => { if (last?.id && !await restoreSaved(last.id)) await setSetting(LAST, null); }).catch(() => {}); }, []);
   const recent = useLiveQuery(() => db.purchases.orderBy("at").reverse().filter(p => !p.deleted && p.status === "final" && (p.store_id || currentStore()) === currentStore()).limit(6).toArray(), [saved?.id], []);
   // the same printer settings the Labels page uses, so a sticker printed here is that sticker
-  const deviceCfg = useLiveQuery(() => loadLabelCfg(), []);
+  useEffect(() => { void loadLabelCfg().catch(() => {}); }, []);   // saves an upgraded copy once, outside the live query
+  const deviceCfg = useLiveQuery(() => readLabelCfg(), []);
   useEffect(() => { if (deviceCfg) setCfg(deviceCfg); }, [deviceCfg]);
 
   /* the two "apply" buttons confirm in green that they did something (owner, 18 Oct) */
@@ -492,6 +494,18 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         </div>
         <label className="row sm"><input type="checkbox" checked={rememberPack} onChange={e => setRememberPack(e.target.checked)} /> Remember this packet size for future bills</label>
         <div className="xs mut">Bill quantities are kept unless you enter a replacement total above. A new bill uses its printed packet size first, then a matching saved article, then the saved default X{packetDefault}. Sticker counts calculate automatically; individual lines stay editable.</div>
+        <div className="row">
+          <label className="f">Stickers on each packet<select className="in" value={perPacket} onChange={e => setPerPacket(e.target.value)}>
+            {["1", "2", "3", "4", "5"].map(n => <option key={n} value={n}>{n === "1" ? "1 (normal)" : n}</option>)}</select></label>
+          <button className="btn" type="button" onClick={() => {
+            try {
+              const only = selection.size ? selection : undefined, n = Number(perPacket);
+              set({ rows: stickersPerPacket(d.rows, n, only) }); setError("");
+              setQuantityNote(`${only ? only.size + " ticked" : "All " + d.rows.length} line${(only ? only.size : d.rows.length) === 1 ? "" : "s"}: ${n === 1 ? "one sticker per packet" : n + " stickers on each packet"}`);
+            } catch (e: any) { setError(e.message); }
+          }}>{selection.size ? `Apply to ${selection.size} ticked line${selection.size === 1 ? "" : "s"}` : `Apply to all ${d.rows.length} lines`}</button>
+        </div>
+        <div className="xs mut">For goods that need more than one sticker (one on the piece, one on its box…). Tick lines in the list to change only those. The Stickers box on any line can still be typed by hand.</div>
         {quantityNote && <div className="sm ok-text" role="status">✓ {quantityNote}</div>}
       </fieldset>
 

@@ -4,7 +4,7 @@ import { db, now } from "../src/lib/db";
 import { newParty } from "../src/lib/billing";
 import { blankProduct } from "../src/lib/products";
 import { MAIN_STORE, setScope } from "../src/lib/scope";
-import { applyPhotoQuantities, readCount, readPacketSize } from "../src/lib/purchase-quantities";
+import { applyPhotoQuantities, readCount, readPacketSize, stickersPerPacket } from "../src/lib/purchase-quantities";
 import { preparePhotoRows, savePhotoPurchase, draftLabelProducts, validatePhotoRows, labelCountFor, type PhotoRow } from "../src/lib/purchase-photo";
 import { purchaseLabelJobs } from "../src/lib/purchase-labels";
 import { DEFAULT_RULE } from "../src/lib/pricing";
@@ -100,4 +100,15 @@ it("saves a purchase-specific reference and keeps it when the same article is pu
   expect(restored!.items[0].entry_code).toBe("K201026");
   const jobs = purchaseLabelJobs(restored!, await db.products.toArray());
   expect((jobs[0].p as typeof jobs[0]["p"] & { entry_code?: string }).entry_code).toBe("K201026");
+});
+
+describe("more stickers on one item, as an option (owner, 21 Oct)", () => {
+  const r = (id: string, qty: string, pack: string, stickers = ""): PhotoRow => ({ review_id: id, item: "CLUTCHER", style: id, color: "", unit: "PCS", hsn: "", qty, pack, stickers, cost: "50", rate: "120" });
+  it("prints that many stickers for every packet, on the ticked lines only", () => {
+    const rows = [r("a", "18", "6"), r("b", "4", "1"), r("c", "", "1")];
+    expect(stickersPerPacket(rows, 2).map(x => x.stickers)).toEqual(["6", "8", ""]);         // no quantity yet: left alone
+    expect(stickersPerPacket(rows, 3, new Set(["b"])).map(x => x.stickers)).toEqual(["", "12", ""]);
+    expect(stickersPerPacket(stickersPerPacket(rows, 2), 1).map(x => x.stickers)).toEqual(["", "", ""]);   // back to normal
+    expect(() => stickersPerPacket(rows, 0)).toThrow("1 to 20");
+  });
 });

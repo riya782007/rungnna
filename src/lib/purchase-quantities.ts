@@ -46,3 +46,17 @@ export function repeatPhotoCount(rows: PhotoRow[], index: number, field: Repeate
     ? { ...row, [field]: value, ...(field === "pack" ? { packSource: "manual" as const } : {}) }
     : row);
 }
+
+/** Owner, 21 Oct: "We do need more stickers on one item, keep it in option." Stickers on each packet:
+    1 = the automatic count (one per packet, the Stickers box left blank); 2, 3… print that many for every
+    packet of the line. Only the given lines change (all lines when none are given); each line stays editable. */
+export function stickersPerPacket(rows: PhotoRow[], per: number, only?: Set<string>): PhotoRow[] {
+  if (!Number.isSafeInteger(per) || per < 1 || per > 20) throw new Error("Stickers on each packet must be 1 to 20");
+  return rows.map(row => {
+    if (only && only.size && !only.has(row.review_id || "")) return row;
+    if (per === 1) return { ...row, stickers: "" };
+    const qty = Number(row.qty), pack = Number(row.pack || "1");
+    if (!(Number.isSafeInteger(qty) && qty > 0 && Number.isSafeInteger(pack) && pack > 0)) return row;   // no quantity yet: left as it is
+    return { ...row, stickers: String(Math.min(5000, Math.ceil(qty / pack) * per)) };
+  });
+}
