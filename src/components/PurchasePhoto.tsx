@@ -358,14 +358,14 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
     () => (pricing && d.rows.length ? draftLabelProducts(d.rows, by, pricing) : []),
     [d.rows, pricing, by]);
 
-  const ready4 = !busy && reviewed && !validation && !!d.supplier && !!d.rack && !!d.billNo.trim() && !legacyMissing;
+  const ready4 = !busy && reviewed && !validation && !!d.supplier && !!d.rack && !!d.billNo.trim();
+  const legacyCount = cfg.format === "shop" ? d.rows.filter(r => r.stickers?.trim() !== "0" && !r.item_code?.trim()).length : 0;
   /* a grey button with no reason sends the owner hunting: say exactly what is still missing */
   const missing = [
     !d.supplier && (d.supplierName ? `type the supplier's roll number, or tap “+ Add ${d.supplierName.trim().toUpperCase()}”` : "type the supplier's roll number"),
     !d.rack && "choose the location",
     !d.billNo.trim() && "enter the supplier bill no.",
     validation && validation.replace(/\.$/, "").replace(/^./, c => c.toLowerCase()),
-    legacyMissing && "set the old-software item code below, or choose Rungnna-only QR in Printer settings",
     !reviewed && "tick the box above",
   ].filter(Boolean) as string[];
 
@@ -442,7 +442,8 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       </fieldset>
 
       {cfg.format === "shop" && <details className="note" open={legacyMissing}>
-        <summary>Old-software QR item codes{legacyMissing ? " — needed before printing" : ""}</summary>
+        <summary>Old-software QR item codes{legacyMissing ? ` — ${legacyCount} line${legacyCount === 1 ? "" : "s"} will print with the Rungnna QR` : ""}</summary>
+        {legacyMissing && <div className="sm">Lines without an old item code still print. Their QR is the Rungnna one: this app scans it with the name, but the old software can't. Enter the old code below if those stickers must scan in the old software too.</div>}
         <div className="xs mut">Use that application's real numeric item code. Set it once per item category here; all matching lines use it. Saved articles retain their original reference. Unknown codes are never invented.</div>
         <button type="button" className="btn sm" disabled={busy} onClick={async () => { try { set({ rows: await preparePhotoRows(d.rows, d.supplier, packetDefault) }); } catch (e: any) { setError(e.message); } }}>Use saved old item codes</button>
         <div className="row">
