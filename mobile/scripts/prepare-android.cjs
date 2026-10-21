@@ -52,7 +52,7 @@ console.log("android prepared", version, code, ks ? "signed" : "unsigned");
 // 3. The print bridge (RjPrintPlugin) and its registration in MainActivity
 const pkgDir = path.join(root, "app", "src", "main", "java", "in", "rungnna", "shopos");
 fs.mkdirSync(pkgDir, { recursive: true });
-fs.copyFileSync(path.join(__dirname, "..", "android-src", "RjPrintPlugin.java"), path.join(pkgDir, "RjPrintPlugin.java"));
+for (const f of ["RjPrintPlugin.java", "RjUpdatePlugin.java"]) fs.copyFileSync(path.join(__dirname, "..", "android-src", f), path.join(pkgDir, f));
 const main = path.join(pkgDir, "MainActivity.java");
 fs.writeFileSync(main, `package in.rungnna.shopos;
 
@@ -62,9 +62,11 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        RjUpdatePlugin.watchdog(getApplicationContext());   // roll back an update that never started
         registerPlugin(RjPrintPlugin.class);
+        registerPlugin(RjUpdatePlugin.class);
         super.onCreate(savedInstanceState);
     }
 }
 `);
-console.log("print bridge added");
+console.log("print + update bridges added");

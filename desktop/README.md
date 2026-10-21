@@ -18,5 +18,8 @@ Cloud sync, AI bill reading, Ask, GST e-invoice / e-way bill, and photo upload. 
 ## Label printer
 USB/serial TSC printers work as in Chrome. Bluetooth (BLE) label printers: Labels → Printer settings → TSC / TSPL → **Connect Bluetooth printer** → pick it from the list.
 
-## Build a new version
+## Updates
+Fixes arrive **automatically**. When a new version of the website goes live, the app downloads it in the background (only the changed files, each checked) and shows **"New version ready → Update"**. One tap applies it, or it is applied when the app is idle on Home. A version that fails to start is rolled back by itself. A new installer is only needed when the app itself changes; the app then says "Update available".
+
+## Build a new installer
 GitHub → Actions → **Apps (Windows + Android)** → Run workflow → enter a version (e.g. `1.0.1`). Or push a tag `apps-v1.0.1`. The release appears with the installer and zip, and open apps offer the update.
