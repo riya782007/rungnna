@@ -12,7 +12,7 @@ import { compress, savePhoto } from "../lib/image";
 import { getRule, type PricingRule } from "../lib/pricing";
 import {
   preparePhotoRows, savePhotoPurchase, validatePhotoRows, pricePhotoRows, applyVendorTerms, repricePhotoRows, suspiciousCosts, restoreBillCosts,
-  autoArticle, autoArticleCount, draftLabelProducts, labelCountFor, type PhotoRow,
+  autoArticle, autoArticleCount, draftLabelProducts, combineRepeatedRows, labelCountFor, type PhotoRow,
 } from "../lib/purchase-photo";
 import { applyPhotoQuantities, readCount, repeatPhotoCount, type RepeatedCountField } from "../lib/purchase-quantities";
 import { purchaseLabelJobs } from "../lib/purchase-labels";
@@ -313,7 +313,11 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
     lock.current = true; setBusy(true); setError("");
     let savedPurchase: Purchase | null = null;
     try {
-      const rows = await preparePhotoRows(d.rows, d.supplier, packetDefault);
+      // a bill listing the same article twice: add identical lines together instead of refusing
+      const merged = combineRepeatedRows(d.rows);
+      if (merged.conflict) throw new Error(merged.conflict);
+      if (merged.combined) { set({ rows: merged.rows }); toast(`${merged.combined} repeated line${merged.combined === 1 ? "" : "s"} added together`); }
+      const rows = await preparePhotoRows(merged.rows, d.supplier, packetDefault);
       const rule = await getRule(), current = await loadLabelCfg();
       const checked = validatePhotoRows(rows), products = draftLabelProducts(rows, by, rule, rows.length);
       const preflight = checked.flatMap((r, i) => {
@@ -473,6 +477,11 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
           onChange={e => set({ billNo: e.target.value, autoBillNo: false })} /></label>
         <RackPicker value={d.rack} onChange={rack => set({ rack })} /></div>
 
+      <BulkEdit rows={d.rows} selection={selection} disabled={busy} onApply={(ids, patch) => {
+        const all = !ids;
+        set({ rows: d.rows.map(r => (all || ids!.has(r.review_id!)) ? { ...r, ...patch, ...(patch.item || patch.unit ? { item_code: undefined } : {}) } : r) });
+        setReviewed(false); setError("");
+      }} />
       <fieldset className="purchase-quantity-tools" disabled={busy}>
         <legend>Set quantities for all {d.rows.length} lines</legend>
         <div className="row">
@@ -574,4 +583,33 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
     {error && <div className="note warn" role="alert" style={{ whiteSpace: "pre-line" }}>{error}</div>}
     {printer.panel}
   </section>;
+}
+
+/* Change one field on every line, or only on the ticked lines, in one go (owner, 21/10):
+   Reference Code, Item name, Colour, Unit. Nobody has to edit line after line. */
+type BulkField = "entry_code" | "item" | "color" | "unit";
+const BULK_FIELDS: [BulkField, string][] = [["entry_code", "Reference Code"], ["item", "Item name"], ["color", "Colour"], ["unit", "Unit"]];
+function BulkEdit({ rows, selection, disabled, onApply }: { rows: PhotoRow[]; selection: Set<string>; disabled: boolean; onApply: (ids: Set<string> | null, patch: Partial<PhotoRow>) => void }) {
+  const [field, setField] = useState<BulkField>("entry_code"), [value, setValue] = useState("");
+  const picked = rows.filter(r => selection.has(r.review_id!)).length;
+  const clean = () => {
+    const v = value.trim().toUpperCase();
+    if (!v && field !== "color" && field !== "entry_code") { toast("Type the new " + (field === "item" ? "item name" : field), true); return null; }
+    if (field === "entry_code" && (v.length > 24 || !/^[A-Z0-9./-]*$/.test(v))) { toast("Reference code: up to 24 letters, numbers, / . or -", true); return null; }
+    if (field === "unit" && !/^(PCS|PAIR|SET)$/.test(v)) { toast("Unit must be PCS, PAIR or SET", true); return null; }
+    return { [field]: v } as Partial<PhotoRow>;
+  };
+  const go = (ids: Set<string> | null, n: number) => { const patch = clean(); if (!patch) return; onApply(ids, patch); toast(`${BULK_FIELDS.find(f => f[0] === field)![1]} changed on ${n} line${n === 1 ? "" : "s"}`); };
+  return <fieldset className="purchase-quantity-tools" disabled={disabled}>
+    <legend>Change many lines at once</legend>
+    <div className="row" style={{ flexWrap: "wrap", alignItems: "flex-end" }}>
+      <label className="f">Field<select className="in" value={field} onChange={e => { setField(e.target.value as BulkField); setValue(""); }}>{BULK_FIELDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+      {field === "unit"
+        ? <label className="f">New value<select className="in" value={value} onChange={e => setValue(e.target.value)}><option value="">—</option>{["PCS", "PAIR", "SET"].map(u => <option key={u}>{u}</option>)}</select></label>
+        : <label className="f grow">New value<input className={"in" + (field === "entry_code" ? " mono" : "")} value={value} maxLength={field === "entry_code" ? 24 : 80} onChange={e => setValue(e.target.value.toUpperCase())} placeholder={field === "entry_code" ? "e.g. K211026" : field === "item" ? "e.g. N SET" : field === "color" ? "e.g. MIX (blank clears)" : ""} /></label>}
+      <button type="button" className="btn" disabled={!picked} onClick={() => go(new Set(rows.filter(r => selection.has(r.review_id!)).map(r => r.review_id!)), picked)}>Apply to {picked || "ticked"} selected</button>
+      <button type="button" className="btn p" disabled={!rows.length} onClick={() => go(null, rows.length)}>Apply to all {rows.length} lines</button>
+    </div>
+    <div className="xs mut">Tick lines in the first column (or Select all, Space / Shift+↑↓) to change only those. Changing the item name or unit clears that line's old-software code so the right one is used.</div>
+  </fieldset>;
 }
