@@ -104,7 +104,7 @@ export const DEFAULT_CFG: LabelCfg = {
   cur: "9",
 };
 
-export type Job = { p: Product; qtyOnLabel: number; copies: number; line?: number; labelIndex?: number; bag?: BagLabel; sourceQr?: string };   // line: see lib/purchase-labels
+export type Job = { p: Product; qtyOnLabel: number; copies: number; line?: number | string; labelIndex?: number; bag?: BagLabel; sourceQr?: string };   // line: see lib/purchase-labels
 export type PrintStartResult = { started: true } | { started: false; message: string; cancelled?: boolean };
 /** One entry per sticker, in queue order (capped at 5000). */
 export const expandJobs = (jobs: Job[]) => jobs.flatMap(j => Array.from({ length: Math.max(0, Math.min(5000, j.copies)) }, () => j)).slice(0, 5000);
@@ -368,7 +368,7 @@ export default function Labels({ args }: { args: string[] }) {
   );
 }
 
-export function LabelView({ cfg, p, qtyOnLabel = 1, line, labelIndex = 0, bag, sourceQr }: { cfg: LabelCfg; p: Product; qtyOnLabel?: number; line?: number; labelIndex?: number; bag?: BagLabel; sourceQr?: string }) {
+export function LabelView({ cfg, p, qtyOnLabel = 1, line, labelIndex = 0, bag, sourceQr }: { cfg: LabelCfg; p: Product; qtyOnLabel?: number; line?: number | string; labelIndex?: number; bag?: BagLabel; sourceQr?: string }) {
   let artwork: string;
   try { artwork = renderLabelSvg(bag ? bagLabelCfg(cfg) : cfg, p, qtyOnLabel, line, labelIndex, bag ? bagPayload(bag) : sourceQr); }
   catch (e: any) { return <div className="sm mut" role="status">{e.message || "Review the sticker settings"}</div>; }

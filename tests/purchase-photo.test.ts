@@ -104,7 +104,7 @@ describe("reviewed photo purchases", () => {
     expect((await db.settings.toArray()).filter(s => s.key.startsWith("seq_PI"))).toHaveLength(0);
   });
   it("rolls back the first article when a later article is duplicated", async () => {
-    await expect(savePhotoPurchase([row, row], input)).rejects.toThrow("Repeated article");
+    await expect(savePhotoPurchase([row, row], input)).rejects.toThrow("is on two lines");
     expect(await db.products.count()).toBe(0); expect(await db.outbox.count()).toBe(0);
   });
   it("does not guess missing prices or convert packaging quantities", () => {

@@ -435,7 +435,7 @@ export default function Billing({ args }: { args: string[] }) {
       const hits = products.filter(x => (x.style + " " + x.code + " " + x.item).toUpperCase().includes(r.toUpperCase()));
       if (hits.length === 1) p = await fillFromItemCode(hits[0]);
     }
-    if (!p) { beep(false); toast(scannedLabel ? "Couldn't read this label — nothing added. Scan it again, or add it by hand (F8)." : "Not found — scan the label or record it in Scan & record", true); return "Not found"; }
+    if (!p) { beep(false); toast(scannedLabel ? `Couldn't read this label — nothing added. Scan it again, or add it by hand (F8). The scanner sent: ${r.length > 48 ? r.slice(0, 48) + "…" : r}` : "Not found — scan the label or record it in Scan & record", true); return "Not found"; }
     if (!addProduct(p, 1, 0, 0, destination)) { beep(false); toast("Bill changed or saving — scan this label again", true); return "Bill changed or saving — scan again"; }
     // The sticker's printed rate is the operator's check: say so when the bill differs.
     const printed = parsed.rate && ["shop label", "rungnna"].includes(parsed.how) ? toPaise(parsed.rate) : 0;

@@ -11,6 +11,8 @@ import { getRule, priceFromCost, evenRate, type PricingRule } from "./pricing";
 export type PhotoRow = { item: string; style: string; color: string; unit: string; hsn: string; qty: string; cost: string; rate: string;
   /** set when autoArticle() invented the article because the bill printed none */
   autoStyle?: boolean;
+  /** the line's own serial on the supplier's bill ("1-10", "7"), printed in the sticker's box (owner, 21 Oct) */
+  sr?: string;
   entry_code?: string; // editable maker initial + date for this purchase line
   review_id?: string;
   /** Old application identity; supplied by its master or a matching saved article. */
@@ -120,7 +122,9 @@ export function combineRepeatedRows(rows: PhotoRow[]): { rows: PhotoRow[]; combi
     const same = up(t.item) === up(r.item) && up(t.unit) === up(r.unit) && t.rate.trim() === r.rate.trim() && t.cost.trim() === r.cost.trim() && String(t.pack || "1").trim() === String(r.pack || "1").trim();
     if (!same) { conflict ||= `Lines ${t.src.join(", ")} and ${i + 1} are the same article/colour (${r.style}${r.color ? " · " + r.color : ""}) but differ in rate, cost, unit or packet. Make them match, or change one line's style/colour.`; out.push({ ...r, src: [i + 1] }); return; }
     const anySet = !!(t.stickers?.trim() || r.stickers?.trim());
-    out[j] = { ...t, qty: String((Number(t.qty) || 0) + (Number(r.qty) || 0)), stickers: anySet ? String(stick(t) + stick(r)) : "", src: [...t.src, i + 1] };
+    // a sticker of a combined line names both bill lines, e.g. "1-4+1-13", so either packet can be matched to the bill
+    const sr = [t.sr, r.sr].map(x => (x || "").trim()).filter(Boolean).join("+");
+    out[j] = { ...t, qty: String((Number(t.qty) || 0) + (Number(r.qty) || 0)), stickers: anySet ? String(stick(t) + stick(r)) : "", ...(sr ? { sr } : {}), src: [...t.src, i + 1] };
     combined++;
   });
   return { rows: out.map(({ src, ...r }) => r as PhotoRow), combined, conflict };
@@ -214,7 +218,7 @@ export async function savePhotoPurchase(rows: PhotoRow[], input: { by: string; r
       // packet keeps the supplier's exact unit total; label_pack retains its sticker size.
       const partial = row.qty % row.pack !== 0;
       purchase.items.push({ ...lineOf(saved, !old), id: uid(), qty: row.qty, pkts: partial ? 0 : Math.floor(row.qty / row.pack), pack: partial ? 1 : row.pack,
-        entry_code: row.entry_code, label_pack: row.pack, ...(row.print_qty !== undefined ? { print_qty: row.print_qty } : {}), cost: row.cost });
+        entry_code: row.entry_code, label_pack: row.pack, ...(row.sr?.trim() ? { bill_sr: row.sr.trim() } : {}), ...(row.print_qty !== undefined ? { print_qty: row.print_qty } : {}), cost: row.cost });
     }
     const saved = await finalizePurchase(purchase);
     await setSetting("purchase_photo_draft", null);

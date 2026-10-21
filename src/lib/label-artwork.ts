@@ -68,14 +68,14 @@ export function labelArtworkGeometry(cfg: LabelCfg, p: Product, qtyOnLabel: numb
 }
 
 /** One self-contained artwork is used by the screen, browser printing and TSPL raster. */
-export function renderLabelSvg(cfg: LabelCfg, p: Product & { entry_code?: string }, qtyOnLabel = 1, line?: number, labelIndex = 0, qrText?: string): string {
+export function renderLabelSvg(cfg: LabelCfg, p: Product & { entry_code?: string }, qtyOnLabel = 1, line?: number | string, labelIndex = 0, qrText?: string): string {
   const { width, height, pad, pp, qr, font, brand } = labelArtworkGeometry(cfg, p, qtyOnLabel, qrText);
   const s = cfg.show, stack = cfg.layout === "stack";
   const qx = stack ? pad : width - pad - brand - qr.sizeDots;
   const qy = pad;
   const tx = stack ? qx + qr.sizeDots + pad : pad;
   const textWidth = stack ? width - tx - pad : qx - pad * 2;
-  type Detail = { text: string; scale?: number; weight?: number; line?: number; mono?: boolean };
+  type Detail = { text: string; scale?: number; weight?: number; line?: number | string; mono?: boolean };
   const details: Detail[] = [];
   if (stack && s.shop && cfg.shop) details.push({ text: cfg.shop, scale: 0.9, weight: 800 });
   if (s.item && p.item) details.push({ text: p.item, weight: stack ? 700 : 500 });
@@ -94,7 +94,9 @@ export function renderLabelSvg(cfg: LabelCfg, p: Product & { entry_code?: string
   const quantity = s.qty ? `${pp.pack}${p.type || "PCS"}` : "";
   if (stack && quantity) details.push({ text: `${pp.pack} ${p.type || "PCS"}` });
   if (stack && rate) details.push({ text: rate, scale: 1.25, weight: 800 });
-  const billLine = (s.line ?? true) && line && Number.isSafeInteger(line) && line > 0 ? line : undefined;
+  // the box: the supplier bill's own serial ("1-10", "4+13") when it was read, else the line's position
+  const lineOk = typeof line === "string" ? /^[0-9A-Za-z+\-/]{1,9}$/.test(line.trim()) : !!line && Number.isSafeInteger(line) && line > 0;
+  const billLine = (s.line ?? true) && lineOk ? (typeof line === "string" ? line.trim() : line) : undefined;
   if ((s.cost_code && pp.cost_code) || billLine) details.push({ text: s.cost_code ? printedCostCode(pp.cost_code, cfg, labelIndex) : "", line: billLine, scale: stack ? 0.95 : 1, weight: stack ? 700 : 500, mono: stack });
   if (s.code && p.code) details.push({ text: p.code, scale: 0.85, mono: stack });
   const bottom = stack ? "" : rate ? `${rate}${quantity ? `X${quantity}` : ""}` : quantity;

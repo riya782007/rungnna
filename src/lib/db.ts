@@ -145,6 +145,7 @@ export interface PurchaseLine {
   id: string; product_id: string; code: string; item: string; style: string; color: string; pack: number; pkts: number; qty: number; cost: number; rate: number; isNew?: boolean;
   label_pack?: number; // reviewed units per sticker; independent of stock-entry packet accounting
   print_qty?: number;  // blank/absent: one per packet; zero: no stickers; otherwise exact copies
+  bill_sr?: string;    // the line's serial on the supplier's bill ("1-10"): the number in the sticker's box
 }
 export interface Purchase extends Row {
   invoice_total?: number; // supplier payable, including reviewed tax/freight/discount

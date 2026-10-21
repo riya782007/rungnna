@@ -61,11 +61,21 @@ export function parseLabel(rawIn: string, patterns: Pattern[] = []): Parsed {
   const base: Parsed = { raw, how: "code", tokens: [raw] };
   if (!raw) return base;
 
-  // 1. our own QR
-  if (raw.startsWith(OWN_PREFIX + "|")) {
-    const t = raw.split("|");
-    const [, code, item, type, style, color, tk, rate, pack] = t;
-    return { raw, how: "rungnna", tokens: t, code, item, type, style, color, tk, rate: num(rate || ""), qty: num(pack || "") };
+  // 1. our own QR:  RJ1|code|item|type|style|color|tk|rate|pack
+  //    A scanner typing on a different keyboard layout changes the "|" (and can change the case): on the
+  //    shop's counter the old labels' "~" already arrives as "-", "`" or "^" (see 1c). Stickers printed from
+  //    purchase bills carry this QR and were refused at billing for that reason (owner's video, 21 Oct).
+  //    So whatever single symbol follows RJ1 is the separator, and the case doesn't matter.
+  const own = /^RJ1([^A-Za-z0-9\s])/i.exec(raw);
+  if (own) {
+    const sep = own[1], t = raw.split(sep);
+    const fix = (v = "") => (raw === raw.toLowerCase() ? v.toUpperCase() : v);   // all lower-case = caps lock / shift lost
+    // a "-" or "/" separator also occurs inside names and styles: then only the code (letters and digits) is certain
+    const sure = !/[-/.]/.test(sep);
+    const [, code = "", item, type, style, color, tk, rate, pack] = t.map(x => fix(x));
+    return sure
+      ? { raw, how: "rungnna", tokens: t, code: code.toUpperCase(), item, type, style, color, tk, rate: num(rate || ""), qty: num(pack || "") }
+      : { raw, how: "rungnna", tokens: t, code: code.toUpperCase() };
   }
 
   // 1b. the shop's existing labels (old billing software):
@@ -79,7 +89,7 @@ export function parseLabel(rawIn: string, patterns: Pattern[] = []): Parsed {
   // 1c. the same old label typed by a scanner on the wrong keyboard layout, which turns
   //     "~" into "-", "`" or "^":  255-224-1-183--K5208/2T-KXZ. Styles can contain "-",
   //     so the colour is the last piece and everything between tk and colour is style.
-  const alt = !raw.includes("~") && /^(\d+)([-`^])(\d+(?:\.\d+)?)\2(\d+)\2/.exec(raw);
+  const alt = !raw.includes("~") && /^(\d+)([-`^\\|#¬°'"])(\d+(?:\.\d+)?)\2(\d+)\2/.exec(raw);
   if (alt) {
     const t = raw.split(alt[2]).map(x => x.trim());
     if (t.length >= 7) {

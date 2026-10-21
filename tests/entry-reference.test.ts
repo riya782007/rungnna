@@ -26,7 +26,7 @@ describe("editable purchase maker/date reference", () => {
     const job = purchaseLabelJobs(purchase, [p])[0];
     const lines = labelLines({ shop: "Shop", show: { item: true, style: true } as any }, job.p, 3);
     expect(lines.map(l => l.text)).toEqual(["EARRING", "K201026 SH11"]);
-    expect(renderLabelSvg({ ...DEFAULT_CFG, format: "rungnna" }, job.p, 3)).toContain("K201026 SH11");
+    expect(renderLabelSvg({ ...DEFAULT_CFG, format: "rungnna", show: { ...DEFAULT_CFG.show, style: true, color: true, rate: true, qty: true } }, job.p, 3)).toContain("K201026 SH11");
     expect(job.p.ref).toBe("legacy");
     expect(job.p.style).toBe("SH11");
     const old = purchaseLabelJobs({ ...purchase, items: [{ ...purchase.items[0], entry_code: undefined }] }, [p])[0];

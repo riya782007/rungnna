@@ -228,6 +228,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         item: text(r.item), style: text(r.style), color: text(r.color), unit: text(r.unit) || "PCS",
         hsn: text(r.hsn), qty: readCount(r.qty), pack: text(r.pack),
         cost: text(r.cost), rate: text(r.rate), amount: text(r.amount), box: text(r.box),
+        sr: text(r.sr).trim().replace(/\s+/g, "").slice(0, 9).replace(/[^0-9A-Za-z+\-/]/g, ""),
       }));
       // the bill checked against itself: ditto marks written out, each line's amount, the Net
       const checked = checkBill(raw, text(out.invoice_total));
@@ -322,7 +323,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       const checked = validatePhotoRows(rows), products = draftLabelProducts(rows, by, rule, rows.length);
       const preflight = checked.flatMap((r, i) => {
         const copies = r.print_qty ?? Math.ceil(r.qty / r.pack);
-        return copies ? [{ p: products[i], qtyOnLabel: r.pack, copies, line: i + 1 }] : [];
+        return copies ? [{ p: products[i], qtyOnLabel: r.pack, copies, line: r.sr?.trim() || i + 1 }] : [];
       });
       if (preflight.length) validateLabelPrint(current, preflight);
       // the same supplier bill was saved before: don't save it twice, print its labels again
@@ -517,7 +518,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       <div className="selection-bar"><SelectAll ids={d.rows.map(r => r.review_id!)} selected={selection} onChange={setSelection} label="Select all purchase lines" /><span className="sm">{d.rows.filter(r => selection.has(r.review_id!)).length} selected</span><DeleteButton className="btn sm bad" disabled={busy || !d.rows.some(r => selection.has(r.review_id!))} onDelete={() => removeRows(d.rows.filter(r => selection.has(r.review_id!)).map(r => r.review_id!))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }}>Keys: ↑↓ lines · ←→ fields · Space select · Shift+↑↓ range</span></div>
       <div className="tw purchase-lines" onKeyDown={onPurchaseGridKey}><table className="pos-t"><thead><tr>{["No.", "Supplier S.No.", ...FIELDS.map(f => captions[f]), ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
         {d.rows.map((r, i) => <tr key={r.review_id || i}>
-          <td className="line-no" data-l="Line" title="Line number: the same small boxed number printed on this line's stickers"><input type="checkbox" aria-label={"Select purchase line " + (i + 1)} checked={selection.has(r.review_id!)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(r.review_id!) : next.delete(r.review_id!); return next; })} />{i + 1}</td>
+          <td className="line-no" data-l="Line" title="Line number: the same small boxed number printed on this line's stickers"><input type="checkbox" aria-label={"Select purchase line " + (i + 1)} checked={selection.has(r.review_id!)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(r.review_id!) : next.delete(r.review_id!); return next; })} />{r.sr?.trim() ? <span title={"Serial on the supplier's bill (line " + (i + 1) + " here)"}>{r.sr}</span> : i + 1}</td>
           <td data-l="Supplier S.No." className="supplier-number mono" title="Saved supplier roll number">{vendor?.vendor_code || "—"}</td>
           {FIELDS.map(k => <td key={k} data-l={captions[k]}>
             <input className={"in" + ((k === "style" && r.autoStyle) || d.check?.fixes.some(f => f.line === i + 1 && f.field === k) ? " auto-filled" : "") + (k === "cost" && lowCost.includes(i + 1) ? " cost-low" : "")} aria-label={`${k} line ${i + 1}`}
@@ -561,7 +562,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
 
       {!!preview.length && <div className="stack">
         <div className="row"><b>{labelCount} labels</b><span className="xs mut">Stickers: grey means one per packet; enter an exact count, or 0 for none. X is the quantity in each packet. · {cfg.w}×{cfg.h}mm · {cfg.output === "tspl" && directPrintSupported() ? "straight to the TSC printer" : "browser print sheet"}</span></div>
-        <div className="label-preview">{preview.map((p, i) => <LabelView key={i} cfg={cfg} p={p} qtyOnLabel={p.pack || 1} line={i + 1} />)}
+        <div className="label-preview">{preview.map((p, i) => <LabelView key={i} cfg={cfg} p={p} qtyOnLabel={p.pack || 1} line={d.rows[i]?.sr?.trim() || i + 1} />)}
           {d.rows.length > preview.length && <span className="xs mut">+{d.rows.length - preview.length} more designs</span>}</div>
       </div>}
 

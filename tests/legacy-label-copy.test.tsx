@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { legacyLabelCopy, validateLegacyCopy } from "../src/lib/legacy-label-copy";
 import { blankProduct } from "../src/lib/products";
-import { DEFAULT_CFG, PrintSheet, PRESETS, tscCommands, validateLabelPrint } from "../src/pages/Labels";
+import { DEFAULT_CFG as BASE_CFG, PrintSheet, PRESETS, tscCommands, validateLabelPrint } from "../src/pages/Labels";
 import { validateLabelBitmapJob } from "../src/lib/label-bitmap";
+// the sticker as the shop prints it (the app's default shows only the item until a counter turns fields on)
+const DEFAULT_CFG = { ...BASE_CFG, show: { ...BASE_CFG.show, style: true, color: true, rate: true, qty: true } };
 const original="203~360~1~212~~K5209/11P~W/XZBSPHL";
 const saved={...blankProduct("owner"),item:"EARING",type:"PAIR",rate:99900,ref:"WRONG",tk:"WRONG",item_code:"999",pack:12};
 describe("exact working old QR copies",()=>{
