@@ -295,7 +295,14 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
     const direct = current.output === "tspl" && directPrintSupported() && current.mode === "roll" && current.cols === 1;
     const list = expandJobs(queue);
     if (direct) tscCommands(current, list.slice(0, 1));
-    const result = printer.start(list, direct, prompt, current);
+    let result = printer.start(list, direct, prompt, current);
+    // direct/QZ printer not ready (no printer chosen, not connected): print through the normal
+    // print window instead, so the stickers still come out today
+    if (!result.started && !result.cancelled && (direct || current.output === "qz")) {
+      const viaBrowser = { ...current, output: "browser" as const };
+      result = printer.start(list, false, prompt, viaBrowser);
+      if (result.started) { toast("Direct printer not ready — opening the print window instead", true); return "browser"; }
+    }
     if (!result.started) throw new Error(result.message);
     return current.output === "qz" ? "qz" : direct ? "tsc" : "browser";
   };
@@ -314,6 +321,17 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         return copies ? [{ p: products[i], qtyOnLabel: r.pack, copies, line: i + 1 }] : [];
       });
       if (preflight.length) validateLabelPrint(current, preflight);
+      // the same supplier bill was saved before: don't save it twice, print its labels again
+      const billNo = d.billNo.trim().toUpperCase();
+      const before = await db.purchases.filter(x => !x.deleted && x.status === "final" && x.supplier_id === d.supplier && x.supplier_bill.trim().toUpperCase() === billNo).first();
+      if (before) {
+        const queue = await jobsFor(before);
+        setSaved(before); setJobs(queue); await setSetting(LAST, { id: before.id });
+        if (!queue.length) { toast(`Bill ${d.billNo} was already saved as ${before.no} · it has no stickers`); return; }
+        const how = await sendToPrinter(queue, true);
+        toast(`Bill ${d.billNo} was already saved as ${before.no} · ${how === "browser" ? "opening its labels to print" : "printing its labels again"}`);
+        return;
+      }
       const p = await savePhotoPurchase(rows, { by, rack: d.rack, supplierId: d.supplier, billNo: d.billNo, photoId: d.photoId, invoiceTotal: d.total, note: [d.warnings, d.total ? "Supplier invoice total (as printed): " + d.total : ""].filter(Boolean).join("\n") });
       savedPurchase = p;
       setSaved(p); setBulkQty(""); setBulkRef(""); setQuantityNote("");
