@@ -35,12 +35,19 @@ export async function printDocument(source: Document, frame: () => Promise<void>
     const base = doc.createElement("base"); base.href = source.baseURI; doc.head.appendChild(base);
     const styles = Array.from(source.querySelectorAll("style,link[rel=stylesheet]"))
       .filter(el => !content.contains(el));
-    await Promise.all(styles.map(el => new Promise<void>((resolve, reject) => {
+    // The styles are copied from what this page already has in memory, never downloaded again. After a
+    // website update the old stylesheet's file is gone from the server while an open screen still uses it;
+    // fetching it again failed with "Printer styles could not load" and no bill or sticker printed until the
+    // app was reloaded (owner, 21 Oct: "stuck again" right after an update).
+    await Promise.all(styles.map(el => new Promise<void>(resolve => {
+      const css = el.tagName === "LINK" ? inlineSheet(source, el) : null;
+      if (css !== null) { const style = doc.createElement("style"); style.textContent = css; doc.head.appendChild(style); resolve(); return; }
       const clone = doc.importNode(el, true);
       if (clone.tagName !== "LINK") { doc.head.appendChild(clone); resolve(); return; }
-      const timer = setTimeout(() => reject(new Error("Printer styles did not load. Try again.")), 8000);
+      // a sheet the page can't read (another site's): link it, but never let it hold up or stop the print
+      const timer = setTimeout(resolve, 3000);
       clone.addEventListener("load", () => { clearTimeout(timer); resolve(); }, { once: true });
-      clone.addEventListener("error", () => { clearTimeout(timer); reject(new Error("Printer styles could not load.")); }, { once: true });
+      clone.addEventListener("error", () => { clearTimeout(timer); resolve(); }, { once: true });
       doc.head.appendChild(clone);
     })));
     // Print a snapshot, not the live POS. Clearing the bill cannot erase this job.
@@ -66,6 +73,17 @@ export async function printDocument(source: Document, frame: () => Promise<void>
     win.focus(); win.print();
     return remove;
   } catch (e) { remove(); throw e; }
+}
+
+/** A loaded stylesheet's rules as text (relative url()s made absolute), or null when the page can't read it. */
+export function inlineSheet(source: Document, link: Element): string | null {
+  const sheet = Array.from(source.styleSheets).find(x => x.ownerNode === link);
+  if (!sheet) return null;
+  let rules: CSSRuleList;
+  try { rules = sheet.cssRules; } catch { return null; }
+  const base = sheet.href || source.baseURI;
+  return Array.from(rules).map(r => r.cssText).join("\n")
+    .replace(/url\((['"]?)(?!data:|blob:|https?:|\/|#)([^'")]+)\1\)/g, (all, q, path) => { try { return `url(${q}${new URL(path, base).href}${q})`; } catch { return all; } });
 }
 
 export async function preparePrint(doc: Document, frame: () => Promise<void>) {
