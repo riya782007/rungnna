@@ -16,5 +16,8 @@ The same app as the website, built as an Android app with Capacitor. The Android
 
 Changing the key means uninstalling the test app once. Sync first so nothing is lost.
 
+## Updates
+Like the Windows app, the Android app downloads each new website version by itself (`android-src/RjUpdatePlugin.java`), shows **Update**, and rolls back a version that fails to start. A new APK is only needed when the app itself changes.
+
 ## Build
 GitHub → Actions → **Apps (Windows + Android)** → Run workflow. Or push tag `apps-v1.0.1`.

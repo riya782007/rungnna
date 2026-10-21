@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 import { copyFileSync, mkdirSync } from "node:fs";
+import { appBuildManifest } from "./scripts/app-build-manifest.mjs";
 
 // Self-host the barcode/QR decoder so scanning works with zero internet.
 const copyWasm = () => ({
@@ -45,6 +46,7 @@ export default defineConfig({
         ],
       },
     }),
+    appBuildManifest(),   // dist/app-build.json: lets the Windows/Android apps update themselves
   ],
   build: { target: "es2020", chunkSizeWarningLimit: 1200 },
   test: { environment: "node" },

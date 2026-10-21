@@ -16,6 +16,94 @@ const { pathToFileURL } = require("node:url");
 const WEB_ORIGIN = "https://rungnnashopos.vercel.app";
 const RELEASES = "https://api.github.com/repos/riya782007/rungnna/releases/latest";
 const WEB_DIR = path.join(__dirname, "web");
+const crypto = require("node:crypto");
+
+/* ---------------- automatic updates (no reinstall) ----------------
+   Every website release publishes app-build.json (every file + SHA-256). This app downloads a
+   new release into %APPDATA%\Rungnna Shop OS\web-updates\<id>, checks every file, and switches
+   to it only when the owner taps Update (or the app is idle on Home / next start). The running
+   screen keeps its own files until then, so a bill in progress is never disturbed. A release
+   that fails to start is rolled back to the last good one automatically. */
+const SHELL_API = 1;                           // bump when main/preload gain features new screens rely on
+const UPD_DIR = () => path.join(app.getPath("userData"), "web-updates");
+const STATE = () => path.join(UPD_DIR(), "state.json");
+const readState = () => { try { return JSON.parse(fs.readFileSync(STATE(), "utf8")); } catch { return {}; } };
+const writeState = st => { fs.mkdirSync(UPD_DIR(), { recursive: true }); fs.writeFileSync(STATE() + ".tmp", JSON.stringify(st)); fs.renameSync(STATE() + ".tmp", STATE()); };
+const buildDir = id => path.join(UPD_DIR(), id);
+const bundledId = () => { try { return JSON.parse(fs.readFileSync(path.join(WEB_DIR, "app-build.json"), "utf8")).id; } catch { return "bundled"; } };
+let activeDir = WEB_DIR, activeId = "bundled", readyId = "", updating = false;
+
+function pickActive() {
+  const st = readState();
+  // a release that was switched to but never reported "started OK" twice in a row is abandoned
+  if (st.trial && st.trial === st.active && (st.trialStarts || 0) >= 2) { st.bad = [...new Set([...(st.bad || []), st.active])]; st.active = st.good || ""; st.trial = ""; writeState(st); }
+  if (st.active && fs.existsSync(path.join(buildDir(st.active), "index.html"))) {
+    if (st.trial === st.active) { st.trialStarts = (st.trialStarts || 0) + 1; writeState(st); }
+    activeDir = buildDir(st.active); activeId = st.active;
+  } else { activeDir = WEB_DIR; activeId = bundledId(); }
+  if (st.pending && st.pending !== activeId && fs.existsSync(path.join(buildDir(st.pending), "index.html"))) readyId = st.pending;
+}
+
+async function downloadBuild(m) {
+  const dir = buildDir(m.id), tmp = dir + ".partial";
+  fs.rmSync(tmp, { recursive: true, force: true });
+  for (const f of m.files) {
+    if (!/^[\w./@-]+$/.test(f.path) || f.path.includes("..")) throw new Error("bad path " + f.path);
+    const local = path.join(WEB_DIR, f.path);   // unchanged files are copied from what we already have
+    let bytes = null;
+    for (const have of [path.join(activeDir, f.path), local]) {
+      try { const b = fs.readFileSync(have); if (crypto.createHash("sha256").update(b).digest("hex") === f.sha256) { bytes = b; break; } } catch { /* not here */ }
+    }
+    if (!bytes) {
+      const r = await net.fetch(WEB_ORIGIN + "/" + f.path.split("/").map(encodeURIComponent).join("/") + "?b=" + m.id, { cache: "no-store" });
+      if (!r.ok) throw new Error(f.path + " " + r.status);
+      bytes = Buffer.from(await r.arrayBuffer());
+      if (crypto.createHash("sha256").update(bytes).digest("hex") !== f.sha256) throw new Error("checksum " + f.path);
+    }
+    const out = path.join(tmp, f.path);
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    fs.writeFileSync(out, bytes);
+  }
+  fs.writeFileSync(path.join(tmp, "app-build.json"), JSON.stringify(m));
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.renameSync(tmp, dir);
+}
+
+async function checkWebUpdate() {
+  if (updating) return;
+  updating = true;
+  try {
+    const r = await net.fetch(WEB_ORIGIN + "/app-build.json?t=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) return;
+    const m = await r.json();
+    const st = readState();
+    if (!m?.id || !Array.isArray(m.files) || m.id === activeId || m.id === readyId || (st.bad || []).includes(m.id)) return;
+    if ((m.minShell || 1) > SHELL_API) return;           // needs a newer installer: checkForUpdate() offers it
+    await downloadBuild(m);
+    writeState({ ...readState(), pending: m.id });
+    readyId = m.id;
+    if (win && !win.isDestroyed()) win.webContents.send("rj-update-ready", m.id);
+  } catch (e) { console.warn("update check failed", e?.message || e); }
+  finally { updating = false; }
+}
+
+function applyWebUpdate() {
+  if (!readyId) return false;
+  const st = readState();
+  writeState({ ...st, good: st.active && st.trial !== st.active ? st.active : st.good || "", active: readyId, trial: readyId, trialStarts: 0, pending: "" });
+  activeDir = buildDir(readyId); activeId = readyId; readyId = "";
+  if (win && !win.isDestroyed()) win.loadURL(HOME + "#/home");
+  return true;
+}
+
+function startedOk() {
+  const st = readState();
+  if (st.trial && st.trial === activeId) {
+    writeState({ ...st, trial: "", trialStarts: 0, good: activeId });
+    // keep only the running release and the last good one
+    try { for (const d of fs.readdirSync(UPD_DIR())) if (![activeId, st.good, readyId, "state.json"].includes(d)) fs.rmSync(path.join(UPD_DIR(), d), { recursive: true, force: true }); } catch { /* fine */ }
+  }
+}
 const HOME = "app://rungnna/";
 
 // Billing speed: never slow the app down when its window is behind another one.
@@ -41,8 +129,9 @@ async function serve(request) {
   if (url.pathname.startsWith("/api/")) return proxy(request, url);
   if (SERVER_PAGES.test(url.pathname)) { void shell.openExternal(WEB_ORIGIN + url.pathname + url.search); return new Response("", { status: 204 }); }
   let rel = decodeURIComponent(url.pathname).replace(/^\/+/, "") || "index.html";
-  let file = path.normalize(path.join(WEB_DIR, rel));
-  if (!file.startsWith(WEB_DIR) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(WEB_DIR, "index.html");
+  const root = activeDir;
+  let file = path.normalize(path.join(root, rel));
+  if (!file.startsWith(root) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(root, "index.html");
   const body = await fs.promises.readFile(file);
   return new Response(body, { headers: { "content-type": MIME[path.extname(file).toLowerCase()] || "application/octet-stream", "cache-control": "no-cache" } });
 }
@@ -145,6 +234,8 @@ async function checkForUpdate() {
     const latest = String(rel.tag_name || "").replace(/^desktop-v/, "");
     const newer = (a, b) => { const x = a.split(".").map(Number), y = b.split(".").map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
     if (!latest || !newer(latest, app.getVersion())) return;
+    // screens update by themselves; a new installer is only needed when the live screens require it
+    try { const m = await (await net.fetch(WEB_ORIGIN + "/app-build.json?t=" + Date.now())).json(); if ((m.minShell || 1) <= SHELL_API) return; } catch { return; }
     const { response } = await dialog.showMessageBox(win, { type: "info", buttons: ["Download now", "Later"], defaultId: 1, title: "Update available",
       message: `Rungnna Shop OS ${latest} is ready.`, detail: "Finish the current bill, download the new version and run it. Your bills and settings stay on this computer." });
     if (response === 0) void shell.openExternal(rel.html_url);
@@ -152,11 +243,17 @@ async function checkForUpdate() {
 }
 
 ipcMain.on("rj-version", e => { e.returnValue = app.getVersion(); });
+ipcMain.on("rj-build", e => { e.returnValue = { active: activeId, ready: readyId, shell: SHELL_API }; });
+ipcMain.handle("rj-apply-update", () => applyWebUpdate());
+ipcMain.on("rj-started", () => startedOk());
 app.on("second-instance", () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
 app.whenReady().then(() => {
+  pickActive();
   protocol.handle("app", serve);
   permissions(session.defaultSession);
   createWindow();
   setTimeout(checkForUpdate, 20_000);
+  setTimeout(checkWebUpdate, 15_000);
+  setInterval(checkWebUpdate, 20 * 60_000);
 });
 app.on("window-all-closed", () => app.quit());
