@@ -12,7 +12,7 @@ import { compress, savePhoto } from "../lib/image";
 import { getRule, type PricingRule } from "../lib/pricing";
 import {
   preparePhotoRows, savePhotoPurchase, validatePhotoRows, pricePhotoRows, applyVendorTerms, repricePhotoRows, suspiciousCosts, restoreBillCosts,
-  autoArticle, autoArticleCount, draftLabelProducts, combineRepeatedRows, labelCountFor, type PhotoRow,
+  autoArticle, autoArticleCount, draftLabelProducts, combineRepeatedRows, labelCountFor, lineSignature, type PhotoRow,
 } from "../lib/purchase-photo";
 import { applyPhotoQuantities, readCount, repeatPhotoCount, stickersPerPacket, type RepeatedCountField } from "../lib/purchase-quantities";
 import { purchaseLabelJobs } from "../lib/purchase-labels";
@@ -21,6 +21,7 @@ import { directPrintSupported } from "../lib/tsc";
 import { currentStore } from "../lib/scope";
 import { toast } from "../lib/app";
 import { RackPicker } from "./RackPicker";
+import { StickerQuickBar } from "./StickerQuickBar";
 import { SupplierNo } from "./SupplierNo";
 import { checkBill, checkSummary, matchSupplier, fallbackBillNo, type LineFix } from "../lib/billCheck";
 import { newParty } from "../lib/billing";
@@ -331,6 +332,20 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       // the same supplier bill was saved before: don't save it twice, print its labels again
       const billNo = d.billNo.trim().toUpperCase();
       const before = await db.purchases.filter(x => !x.deleted && x.status === "final" && x.supplier_id === d.supplier && x.supplier_bill.trim().toUpperCase() === billNo).first();
+      // the same lines saved recently under another bill no. or supplier: print those stickers again rather
+      // than adding the stock and the supplier's amount a second time
+      const sig = lineSignature(checked.map(r => ({ style: r.style, color: r.color, qty: r.qty, cost: r.cost })));
+      const since = new Date(Date.now() - 30 * 86400000).toISOString();
+      const twin = before ? undefined : await db.purchases.filter(x => !x.deleted && x.status === "final" && (x.store_id || currentStore()) === currentStore() && x.at >= since
+        && x.items.length === checked.length && lineSignature(x.items.map(l => ({ style: l.style, color: l.color, qty: l.qty, cost: l.cost }))) === sig).last();
+      if (twin && confirm(`This looks like ${twin.no}, saved ${new Date(twin.at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}${twin.supplier_name ? " · " + twin.supplier_name : ""} · bill ${twin.supplier_bill}: the same ${checked.length} line${checked.length === 1 ? "" : "s"} and pieces.\n\nOK — print its stickers again (stock is NOT added again).\nCancel — it is a different bill: save it as a new purchase.`)) {
+        const queue = await jobsFor(twin);
+        setSaved(twin); setJobs(queue); await setSetting(LAST, { id: twin.id });
+        if (!queue.length) { toast(`${twin.no} has no stickers`); return; }
+        const how = await sendToPrinter(queue, true);
+        toast(`${twin.no} · ${how === "browser" ? "opening its labels to print" : "printing its labels again"} · stock not added again`);
+        return;
+      }
       if (before) {
         const queue = await jobsFor(before);
         setSaved(before); setJobs(queue); await setSetting(LAST, { id: before.id });
@@ -448,7 +463,8 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         <a className="btn" href={"#/labels/purchase/" + saved.id}>Open in QR labels</a>
         <button type="button" className="linkbtn" onClick={() => { setSaved(null); setJobs([]); void setSetting(LAST, null); }}>Close</button>
       </div>
-      <div className="xs mut">This stays here until you close it or approve the next bill — no need to read the bill photo again.</div>
+      <StickerQuickBar cfg={cfg} onChange={setCfg} />
+      <div className="xs mut">This stays here until you close it or approve the next bill — no need to read the bill photo again. Change the sticker above, then “Print saved labels”.</div>
       <div className="tw"><table className="pos-t"><thead><tr><th>Item</th><th>Style</th><th>Colour</th><th className="r">Qty</th><th className="r">Rate</th></tr></thead><tbody>
         {saved.items.map((l, i) => <tr key={i}><td>{l.item}</td><td className="mono">{l.style}</td><td>{l.color}</td><td className="r">{l.pack > 1 ? l.pkts * l.pack : l.qty}</td><td className="r">{l.rate ? (l.rate / 100).toFixed(2) : "—"}</td></tr>)}
       </tbody></table></div>
@@ -575,6 +591,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       {pricing && <div className="row sm"><span>Pricing: {pricing.margin.mode === "percent" ? `+${pricing.margin.percent}%` : `${pricing.margin.mode === "divide" ? "÷" : "×"}${pricing.margin.factor}`} · round ₹{pricing.margin.round_to} {pricing.margin.round_dir}</span><a href="#/settings/prices">Pricing settings</a></div>}
 
       {!!preview.length && <div className="stack">
+        <StickerQuickBar cfg={cfg} onChange={setCfg} />
         <div className="row"><b>{labelCount} labels</b><span className="xs mut">Stickers: grey means one per packet; enter an exact count, or 0 for none. X is the quantity in each packet. · {cfg.w}×{cfg.h}mm · {cfg.output === "tspl" && directPrintSupported() ? "straight to the TSC printer" : "browser print sheet"}</span></div>
         <div className="label-preview">{preview.map((p, i) => <LabelView key={i} cfg={cfg} p={p} qtyOnLabel={p.pack || 1} line={d.rows[i]?.sr?.trim() || i + 1} />)}
           {d.rows.length > preview.length && <span className="xs mut">+{d.rows.length - preview.length} more designs</span>}</div>

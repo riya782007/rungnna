@@ -225,3 +225,10 @@ export async function savePhotoPurchase(rows: PhotoRow[], input: { by: string; r
     return saved;
   });
 }
+
+/** What a bill's lines add up to, whatever its bill no. or supplier: article + colour + pieces + cost.
+    Two purchases with the same signature are the same bill entered twice (owner's log, 21 Oct: one bill saved
+    again with a "/" added to its number, another under a second supplier, to print the stickers again). */
+export function lineSignature(lines: { style: string; color: string; qty: number; cost: number }[]): string {
+  return lines.map(l => [l.style.trim().toUpperCase(), (l.color || "").trim().toUpperCase(), l.qty, Math.round(l.cost)].join("|")).sort().join(";");
+}

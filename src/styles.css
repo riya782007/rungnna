@@ -1069,3 +1069,10 @@ html{scrollbar-gutter:stable}
 .set-terms-r .in{min-height:34px;height:34px}
 .set-terms-r.dirty{background:var(--warn-l)}
 @media(max-width:600px){.set-terms-h,.set-terms-r{grid-template-columns:56px minmax(0,1fr) 64px 64px 60px;gap:6px;padding:6px}}
+/* bill reader: the sticker settings he changes, right above the preview (owner, 21 Oct) */
+.sticker-quick{display:flex;flex-direction:column;gap:8px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+.sticker-quick .sq-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px}
+.sticker-quick .sq-h{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin-right:2px}
+.sticker-quick .sq-pair{display:inline-flex;align-items:center;gap:4px;margin-right:6px}
+.sticker-quick .sq-pair .btn{min-width:34px;justify-content:center}
+.sticker-quick .chip[aria-pressed="false"]{opacity:.55;text-decoration:line-through}
