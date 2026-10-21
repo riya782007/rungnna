@@ -133,3 +133,6 @@ ${base}` },
     return json({ error: e?.message || "AI failed" }, e?.status || 500);
   }
 }
+
+/* CORS pre-check from the Android app (https://localhost); headers come from vercel.json. */
+export function OPTIONS() { return new Response(null, { status: 204 }); }

@@ -23,7 +23,7 @@ import { toPaise } from "../lib/format";
 import { getRule, priceFromCost, evenRate, type PricingRule } from "../lib/pricing";
 import { labelTSPL, rateMark } from "../lib/label-tspl";
 import { labelBatches, runsOf, DEFAULT_BATCH, type LabelBatch } from "../lib/labelBatches";
-import { printTSPL, directPrintSupported, connectSerial, connectUSB, serialSupported, usbSupported } from "../lib/tsc";
+import { printTSPL, directPrintSupported, connectSerial, connectUSB, serialSupported, usbSupported, bluetoothSupported, connectBluetooth } from "../lib/tsc";
 import { renderLabelSvg } from "../lib/label-artwork";
 import { buildLabelBitmapJob, validateLabelBitmapJob } from "../lib/label-bitmap";
 import { listQzPrinters, printQzTSPL } from "../lib/qz";
@@ -404,6 +404,8 @@ function LabelSettings({ cfg, upd, sample, qty, onTest }: { cfg: LabelCfg; upd: 
         </div>}
         {cfg.output === "tspl" && serialSupported() && <button className="btn" onClick={() => connectSerial().then(() => toast("Serial printer connected")).catch(e => toast(e.message, true))}>Connect serial printer</button>}
         {cfg.output === "tspl" && usbSupported() && <button className="btn" onClick={() => connectUSB().then(() => toast("USB printer connected")).catch(e => toast(e.message, true))}>Connect TSC USB printer</button>}
+        {cfg.output === "tspl" && bluetoothSupported() && <button className="btn" onClick={() => connectBluetooth().then(n => toast(`Bluetooth printer connected: ${n}`)).catch(e => { if (e?.name !== "NotFoundError") toast(e.message, true); })}>Connect Bluetooth printer</button>}
+        {cfg.output === "tspl" && bluetoothSupported() && <div className="xs mut">Bluetooth: switch the printer on, then tap Connect and pick it. Works with BLE label printers that speak TSPL (TSC-compatible).</div>}
         <div className="grid g2">
           <label className="f">Print darkness (0–15)<input className="in mono" type="number" min={0} max={15} step={1} disabled={!cfg.output || cfg.output === "browser"} value={cfg.density ?? DEFAULT_LABEL_DENSITY} onChange={e => upd({ density: Number(e.target.value) })} /></label>
           <label className="f">Print speed (1–6)<input className="in mono" type="number" min={1} max={6} step={1} disabled={!cfg.output || cfg.output === "browser"} value={cfg.speed ?? DEFAULT_LABEL_SPEED} onChange={e => upd({ speed: Number(e.target.value) })} /></label>

@@ -1,15 +1,67 @@
 {
   "rewrites": [
-    { "source": "/shop", "destination": "/api/page?view=shop" },
-    { "source": "/p/:slug", "destination": "/api/page?view=product&slug=:slug" },
-    { "source": "/trade", "destination": "/api/page?view=trade" },
-    { "source": "/dealer", "destination": "/api/page?view=dealer" },
-    { "source": "/c/:slug", "destination": "/api/page?view=catalogue&slug=:slug" },
-    { "source": "/sitemap.xml", "destination": "/api/page?view=sitemap" },
-    { "source": "/robots.txt", "destination": "/api/page?view=robots" }
+    {
+      "source": "/shop",
+      "destination": "/api/page?view=shop"
+    },
+    {
+      "source": "/p/:slug",
+      "destination": "/api/page?view=product&slug=:slug"
+    },
+    {
+      "source": "/trade",
+      "destination": "/api/page?view=trade"
+    },
+    {
+      "source": "/dealer",
+      "destination": "/api/page?view=dealer"
+    },
+    {
+      "source": "/c/:slug",
+      "destination": "/api/page?view=catalogue&slug=:slug"
+    },
+    {
+      "source": "/sitemap.xml",
+      "destination": "/api/page?view=sitemap"
+    },
+    {
+      "source": "/robots.txt",
+      "destination": "/api/page?view=robots"
+    }
   ],
   "functions": {
-    "api/ai.ts": { "maxDuration": 60 },
-    "api/purchase-photo.ts": { "maxDuration": 60 }
-  }
+    "api/ai.ts": {
+      "maxDuration": 60
+    },
+    "api/purchase-photo.ts": {
+      "maxDuration": 60
+    }
+  },
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "https://localhost"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "content-type, authorization"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, POST, OPTIONS"
+        },
+        {
+          "key": "Access-Control-Max-Age",
+          "value": "86400"
+        },
+        {
+          "key": "Vary",
+          "value": "Origin"
+        }
+      ]
+    }
+  ]
 }

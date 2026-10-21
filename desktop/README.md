@@ -15,5 +15,8 @@ Sign in to cloud backup once (Settings → Cloud backup) so the shop's products,
 ## What needs the internet
 Cloud sync, AI bill reading, Ask, GST e-invoice / e-way bill, and photo upload. These use the live server and work again as soon as the internet is back. Everything else works offline.
 
+## Label printer
+USB/serial TSC printers work as in Chrome. Bluetooth (BLE) label printers: Labels → Printer settings → TSC / TSPL → **Connect Bluetooth printer** → pick it from the list.
+
 ## Build a new version
-GitHub → Actions → **Windows desktop app** → Run workflow → enter a version (e.g. `1.0.1`). Or push a tag `desktop-v1.0.1`. The release appears with the installer and zip, and open apps offer the update.
+GitHub → Actions → **Apps (Windows + Android)** → Run workflow → enter a version (e.g. `1.0.1`). Or push a tag `apps-v1.0.1`. The release appears with the installer and zip, and open apps offer the update.

@@ -1,4 +1,5 @@
 import { sb, signOut } from "./sync";
+import { apiUrl } from "./platform";
 import { db } from "./db";
 
 /* Calls the shop's own server functions (/api/…). They hold the Gemini / WhatsApp keys; the phone never sees them. */
@@ -8,7 +9,7 @@ async function token() {
 }
 export async function api<T = any>(path: string, body?: unknown): Promise<T> {
   if (!navigator.onLine) throw new Error("AI needs internet — everything else keeps working offline");
-  const r = await fetch("/api/" + path, {
+  const r = await fetch(apiUrl(path), {
     method: body ? "POST" : "GET",
     headers: { "content-type": "application/json", authorization: "Bearer " + (await token()) },
     body: body ? JSON.stringify(body) : undefined,

@@ -63,10 +63,10 @@ async function proxy(request, url) {
 
 function permissions(ses) {
   // camera (scan / photos), label printer on USB or COM port, clipboard, notifications
-  const allowed = new Set(["media", "mediaKeySystem", "clipboard-read", "clipboard-sanitized-write", "notifications", "fullscreen", "serial", "usb", "hid", "speaker-selection"]);
+  const allowed = new Set(["media", "mediaKeySystem", "clipboard-read", "clipboard-sanitized-write", "notifications", "fullscreen", "serial", "usb", "hid", "bluetooth", "speaker-selection"]);
   ses.setPermissionRequestHandler((_wc, perm, cb) => cb(allowed.has(perm)));
   ses.setPermissionCheckHandler((_wc, perm) => allowed.has(perm));
-  ses.setDevicePermissionHandler(d => ["serial", "usb", "hid"].includes(d.deviceType));
+  ses.setDevicePermissionHandler(d => ["serial", "usb", "hid", "bluetooth"].includes(d.deviceType));
   // the label printer: pick it without a browser chooser (TSC printers first)
   ses.on("select-serial-port", (event, ports, _wc, cb) => {
     event.preventDefault();
@@ -99,6 +99,24 @@ function createWindow() {
   });
   win.webContents.on("will-navigate", (e, url) => {
     if (!url.startsWith(HOME)) { e.preventDefault(); if (/^(https?|mailto|tel|whatsapp):/i.test(url)) void shell.openExternal(url); }
+  });
+
+  // Bluetooth label printer: list nearby devices for a few seconds, then let the user pick one
+  let btPick = null;
+  win.webContents.on("select-bluetooth-device", (event, devices, cb) => {
+    event.preventDefault();
+    if (!btPick) {
+      btPick = { cb, devices };
+      setTimeout(async () => {
+        const { cb: done, devices: found } = btPick; btPick = null;
+        const named = found.filter(d => d.deviceName);
+        if (!named.length) { done(""); return; }
+        const list = named.slice(0, 8);
+        const { response } = await dialog.showMessageBox(win, { type: "question", title: "Bluetooth printer",
+          message: "Pick the label printer", buttons: [...list.map(d => d.deviceName), "Cancel"], cancelId: list.length });
+        done(response < list.length ? list[response].deviceId : "");
+      }, 4000);
+    } else btPick.devices = devices;
   });
 
   // never stay on a frozen or crashed screen at the counter: the bill is already saved on disk

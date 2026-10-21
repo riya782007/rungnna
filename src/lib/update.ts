@@ -1,5 +1,5 @@
 import { registerSW } from "virtual:pwa-register";
-import { isDesktop } from "./platform";
+import { isDesktop, isNativeApp } from "./platform";
 
 /* Updates never reload the page on their own (that could wipe a bill being typed).
    A small "New version ready" bar appears; it updates when tapped, or by itself when the app is idle on Home.
@@ -35,7 +35,7 @@ export async function applyUpdate() {
 
 export function startUpdates() {
   // The desktop app ships its files inside the installer; new versions come as a new installer.
-  if (isDesktop() || !/^https?:$/.test(location.protocol)) return;
+  if (isDesktop() || isNativeApp() || !/^https?:$/.test(location.protocol)) return;
   apply = registerSW({
     immediate: true,
     onNeedRefresh() {

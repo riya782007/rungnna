@@ -1,0 +1,14 @@
+{
+  "name": "rungnna-shop-os-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Rungnna Shop OS for Android (Capacitor shell around the same web build)",
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.0"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/core": "^6.2.0",
+    "@capacitor-community/bluetooth-le": "^6.0.2"
+  }
+}

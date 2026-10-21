@@ -32,7 +32,11 @@ const q = (s: string) => `"${String(s || "").replace(/[\x00-\x1f\x7f]/g, " ").re
 
 export function serialSupported() { return typeof navigator !== "undefined" && "serial" in navigator; }
 export function usbSupported() { return typeof navigator !== "undefined" && "usb" in navigator; }
-export const directPrintSupported = () => serialSupported() || usbSupported();
+/* Bluetooth (BLE) label printers: Web Bluetooth (Chrome on Android, desktop app) or, inside the
+   Android/iOS app, the native Bluetooth LE plugin (window.Capacitor.Plugins.BluetoothLe). */
+const nativeBle = (): any => (typeof window !== "undefined" ? (window as any).Capacitor?.Plugins?.BluetoothLe : undefined);
+export function bluetoothSupported() { return !!nativeBle() || (typeof navigator !== "undefined" && "bluetooth" in navigator); }
+export const directPrintSupported = () => serialSupported() || usbSupported() || bluetoothSupported();
 
 let serialPort: any = null; // remembered across prints in one session
 
@@ -89,12 +93,82 @@ async function sendUSB(tspl: string, prompt: boolean): Promise<boolean> {
   return true;
 }
 
+/* ---- Bluetooth LE ----
+   Printers expose one "write" characteristic; its service UUID differs by maker, so we ask for
+   the common ones and pick the first writable characteristic. Data goes in small chunks (BLE
+   packets are ~20–180 bytes) with a short pause so cheap printers' buffers never overflow. */
+const BLE_SERVICES = [
+  "000018f0-0000-1000-8000-00805f9b34fb", "0000ff00-0000-1000-8000-00805f9b34fb", "0000ffe0-0000-1000-8000-00805f9b34fb",
+  "0000fee7-0000-1000-8000-00805f9b34fb", "49535343-fe7d-4ae5-8fa9-9fafd205e455", "e7810a71-73ae-499d-8c15-faa9aef0c3f2",
+  "0000ae30-0000-1000-8000-00805f9b34fb", "0000ff12-0000-1000-8000-00805f9b34fb",
+];
+const BLE_CHUNK = 180, BLE_PAUSE_MS = 12;
+type BleLink = { name: string; write: (chunk: Uint8Array) => Promise<void>; close: () => Promise<void> };
+let ble: BleLink | null = null;
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+const hex = (b: Uint8Array) => Array.from(b, x => x.toString(16).padStart(2, "0")).join("");
+
+async function webBluetoothLink(): Promise<BleLink> {
+  const dev = await (navigator as any).bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: BLE_SERVICES });
+  const server = await dev.gatt.connect();
+  for (const svc of await server.getPrimaryServices()) {
+    for (const ch of await svc.getCharacteristics()) {
+      if (!ch.properties.write && !ch.properties.writeWithoutResponse) continue;
+      const fast = ch.properties.writeWithoutResponse;
+      return { name: dev.name || "Bluetooth printer",
+        write: c => fast && ch.writeValueWithoutResponse ? ch.writeValueWithoutResponse(c) : ch.writeValue(c),
+        close: async () => { try { dev.gatt.disconnect(); } catch { /* gone */ } } };
+    }
+  }
+  try { dev.gatt.disconnect(); } catch { /* gone */ }
+  throw new Error("This Bluetooth device has no printer channel. Pick the label printer, not a phone or speaker.");
+}
+
+async function nativeBluetoothLink(): Promise<BleLink> {
+  const B = nativeBle();
+  await B.initialize({ androidNeverForLocation: true });
+  const { deviceId, name } = await B.requestDevice({ optionalServices: BLE_SERVICES });
+  await B.connect({ deviceId });
+  const { services } = await B.getServices({ deviceId });
+  for (const svc of services || []) for (const ch of svc.characteristics || []) {
+    const p = ch.properties || {};
+    if (!p.write && !p.writeWithoutResponse) continue;
+    const method = p.writeWithoutResponse ? "writeWithoutResponse" : "write";
+    return { name: name || "Bluetooth printer",
+      write: c => B[method]({ deviceId, service: svc.uuid, characteristic: ch.uuid, value: hex(c) }),
+      close: async () => { try { await B.disconnect({ deviceId }); } catch { /* gone */ } } };
+  }
+  try { await B.disconnect({ deviceId }); } catch { /* gone */ }
+  throw new Error("This Bluetooth device has no printer channel. Pick the label printer, not a phone or speaker.");
+}
+
+/** Pick and connect the Bluetooth label printer (must be called from a tap). */
+export async function connectBluetooth(): Promise<string> {
+  if (!bluetoothSupported()) throw new Error("Bluetooth printing isn't available here. Use Chrome on Android, or the Rungnna app.");
+  if (ble) { await ble.close(); ble = null; }
+  ble = nativeBle() ? await nativeBluetoothLink() : await webBluetoothLink();
+  return ble.name;
+}
+export const bluetoothPrinterName = () => ble?.name || "";
+
+async function sendBluetooth(bytes: Uint8Array) {
+  if (!ble) throw new Error("Bluetooth printer not connected");
+  try {
+    for (let i = 0; i < bytes.length; i += BLE_CHUNK) { await ble.write(bytes.slice(i, i + BLE_CHUNK)); await sleep(BLE_PAUSE_MS); }
+  } catch (e) { ble = null; throw new Error("Bluetooth printer disconnected. Tap “Connect Bluetooth printer” and print the remaining labels."); }
+}
+
 /* Fire the label. Returns the transport actually used, or throws if none work
-   (the caller then falls back to the browser print sheet). */
-export async function printTSPL(tspl: string, prompt = true): Promise<"serial" | "usb"> {
+   (the caller then falls back to the browser print sheet). A connected Bluetooth printer
+   is used first: it was chosen on purpose for this session. */
+export async function printTSPL(tspl: string | Uint8Array, prompt = true): Promise<"serial" | "usb" | "bluetooth"> {
+  const bytes = typeof tspl === "string" ? new TextEncoder().encode(tspl) : tspl;
+  if (ble) { await sendBluetooth(bytes); return "bluetooth"; }
+  if (typeof tspl !== "string") tspl = new TextDecoder("latin1").decode(tspl);
   if (serialSupported() && await sendSerial(tspl, false)) return "serial";
   if (usbSupported() && await sendUSB(tspl, false)) return "usb";
   if (prompt && usbSupported() && await sendUSB(tspl, true)) return "usb";
   if (prompt && serialSupported() && await sendSerial(tspl, true)) return "serial";
+  if (prompt && bluetoothSupported()) { await connectBluetooth(); await sendBluetooth(bytes); return "bluetooth"; }
   throw new Error("Connect a compatible TSC printer on this device first, or choose Browser in label printer settings.");
 }

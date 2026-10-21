@@ -1,0 +1,22 @@
+{
+  "appId": "in.rungnna.shopos",
+  "appName": "Rungnna Shop OS",
+  "webDir": "web",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false
+  },
+  "plugins": {
+    "BluetoothLe": {
+      "displayStrings": {
+        "scanning": "Looking for printers\u2026",
+        "cancel": "Cancel",
+        "availableDevices": "Pick the label printer",
+        "noDeviceFound": "No printer found \u2014 is it switched on?"
+      }
+    }
+  }
+}

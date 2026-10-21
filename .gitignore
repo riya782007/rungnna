@@ -12,3 +12,9 @@ desktop/node_modules
 desktop/web
 desktop/release
 desktop/build
+# Android app build outputs (generated in CI)
+mobile/node_modules
+mobile/web
+mobile/android
+mobile/release
+mobile/release.jks

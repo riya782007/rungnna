@@ -83,3 +83,6 @@ OTHER
     return json({ error: e.message || "Could not read bill photo" }, e.status || 500);
   }
 }
+
+/* CORS pre-check from the Android app (https://localhost); headers come from vercel.json. */
+export function OPTIONS() { return new Response(null, { status: 204 }); }
