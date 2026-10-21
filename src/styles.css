@@ -1021,3 +1021,25 @@ html{scrollbar-gutter:stable}
 .pos-bill-total .net{background:#FFF3B0;border-color:#B77900}
 .pos-bill-total .net b{font-size:24px}
 @media(max-width:860px){.pos-bill-total{grid-template-columns:1fr 1fr}.pos-bill-total .net{grid-column:1/-1}}
+
+/* Settings → People: name and details get their own readable column; the role
+   picker and buttons wrap underneath on narrow cards instead of crushing the name. */
+.list>div.li.person-row{flex-wrap:wrap;align-items:center;gap:10px 16px}
+.person-info{flex:1 1 220px;min-width:180px}
+.person-name{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:15px;word-break:normal;overflow-wrap:anywhere}
+.person-info .xs{margin-top:2px;line-height:1.4}
+.person-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;flex:0 1 auto;margin-left:auto}
+.person-actions select.in{min-width:140px;width:auto}
+@media(max-width:700px){.person-actions{margin-left:0;width:100%}.person-actions select.in{flex:1 1 100%}}
+
+/* Roles & Permissions: role names never squeeze into a vertical column; the passcode,
+   "Edit" and "Copy" wrap below the name on narrow screens; permission boxes fit any width. */
+.roles-page .role-card>summary.row{flex-wrap:wrap;gap:8px 12px;align-items:flex-start}
+.roles-page .role-card>summary>.grow{flex:1 1 260px;min-width:200px}
+.roles-page .role-card>summary b{word-break:normal;overflow-wrap:anywhere}
+.roles-page .role-card>summary>.xs.mut,.roles-page .role-card>summary>.btn{flex:none;align-self:center}
+.roles-page .perm-grid{grid-template-columns:repeat(auto-fill,minmax(min(260px,100%),1fr))}
+.roles-page .perm span{min-width:0;overflow-wrap:anywhere}
+.roles-page .role-editor>.row{flex-wrap:wrap}
+.roles-page .role-editor .in.grow{min-width:min(220px,100%)!important}
+@media(max-width:700px){.roles-page .passcode-chip{letter-spacing:.1em}.roles-page .role-card>summary>.grow{min-width:100%}}
