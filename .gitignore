@@ -6,3 +6,9 @@ public/zxing_reader.wasm
 .vercel
 # Generated long-estimate browser/PDF verification
 tmp/pdfs/estimate-print-check/
+
+# Windows desktop app build outputs
+desktop/node_modules
+desktop/web
+desktop/release
+desktop/build

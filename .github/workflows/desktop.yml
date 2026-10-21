@@ -1,0 +1,84 @@
+name: Windows desktop app
+
+# Builds the Rungnna Shop OS Windows app (installer + portable zip) from this
+# repository and publishes it as a GitHub release.
+#   Run it: push a tag like desktop-v1.0.0, or Actions → "Windows desktop app" → Run workflow.
+on:
+  push:
+    tags: ["desktop-v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (e.g. 1.0.1)"
+        required: true
+        default: "1.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npx vitest run --reporter=dot
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+
+      - name: Version
+        id: v
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then V="${GITHUB_REF_NAME#desktop-v}"; else V="${{ github.event.inputs.version }}"; fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Build the web app (same build as the website)
+        run: |
+          npm ci
+          npm run build
+
+      - name: Pack the Windows app
+        shell: bash
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          rm -rf web && cp -r ../dist web
+          npm install --no-audit --no-fund
+          npm pkg set version=${{ steps.v.outputs.version }}
+          node make-icon.cjs
+          npx electron-builder --win zip nsis --x64 --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Rungnna-Shop-OS-${{ steps.v.outputs.version }}
+          path: |
+            desktop/release/*.zip
+            desktop/release/*.exe
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: desktop-v${{ steps.v.outputs.version }}
+          name: Rungnna Shop OS ${{ steps.v.outputs.version }} (Windows)
+          make_latest: true
+          body: |
+            **Windows app for Rungnna Shop OS** — billing, stock, labels and every other screen, working with or without internet.
+
+            Download **one** of these:
+            - `Rungnna-Shop-OS-Setup-${{ steps.v.outputs.version }}.exe` — installer (recommended): adds a desktop and Start-menu icon.
+            - `Rungnna-Shop-OS-${{ steps.v.outputs.version }}-x64.zip` — no install: unzip anywhere and open `Rungnna Shop OS.exe`.
+
+            Windows may show "Windows protected your PC" the first time (the app is not code-signed yet): click **More info → Run anyway**.
+          files: |
+            desktop/release/*.zip
+            desktop/release/*.exe

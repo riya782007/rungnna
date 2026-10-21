@@ -1,0 +1,37 @@
+{
+  "name": "rungnna-shop-os-desktop",
+  "productName": "Rungnna Shop OS",
+  "version": "1.0.0",
+  "description": "Rungnna Shop OS — offline billing, stock and labels for Windows",
+  "author": "Rungnna Jewellery & Co",
+  "private": true,
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win zip nsis --x64 --publish never"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "in.rungnna.shopos",
+    "productName": "Rungnna Shop OS",
+    "artifactName": "Rungnna-Shop-OS-${version}-${arch}.${ext}",
+    "directories": { "output": "release", "buildResources": "build" },
+    "files": ["main.cjs", "preload.cjs", "web/**/*", "build/icon.png"],
+    "asar": true,
+    "win": { "icon": "build/icon.png" },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "Rungnna Shop OS",
+      "artifactName": "Rungnna-Shop-OS-Setup-${version}.${ext}",
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

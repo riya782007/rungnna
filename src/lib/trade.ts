@@ -1,4 +1,5 @@
 import { db, put, now, type Bill, type BillType, type Dealer, type Party, type Product, type TradeOrder } from "./db";
+import { publicOrigin } from "./platform";
 import { newBill, newParty, lineFrom, fixLine, totals, holdBill, getShop, normPhone } from "./billing";
 import { requirePerm } from "./scope";
 import { getTradePortal, saveTradePortal, randomKey } from "./listing";
@@ -6,7 +7,7 @@ import { getTradePortal, saveTradePortal, randomKey } from "./listing";
 /* Dealer portal, shop side: approve retailers, turn their orders into bills, set the minimum order.
    Orders are priced by the server when placed; the bill made here starts from those exact rates. */
 
-export const dealerUrl = () => `${location.origin}/dealer`;
+export const dealerUrl = () => `${publicOrigin()}/dealer`;
 
 /** The customer account for a dealer: the linked one, else one with the same mobile, else a new wholesale customer. */
 export async function partyForDealer(d: Dealer): Promise<Party> {
