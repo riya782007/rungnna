@@ -104,6 +104,28 @@ export function autoArticle(rows: PhotoRow[]): PhotoRow[] {
 /** Articles this app invented because the bill printed none — shown to the owner before saving. */
 export const autoArticleCount = (rows: PhotoRow[]) => rows.filter(r => r.autoStyle).length;
 
+/* The same article + colour on two lines (a bill that lists it twice) is one product: identical
+   lines (same item, unit, rate, cost, packet) are added together instead of stopping the save.
+   Lines that differ in price or unit stay apart, with a message naming them. */
+export function combineRepeatedRows(rows: PhotoRow[]): { rows: PhotoRow[]; combined: number; conflict?: string } {
+  const up = (v?: string) => (v || "").trim().toUpperCase();
+  const out: (PhotoRow & { src: number[] })[] = [], at = new Map<string, number>();
+  let combined = 0, conflict: string | undefined;
+  const stick = (x: PhotoRow) => (x.stickers?.trim() ? Number(x.stickers) : Math.ceil((Number(x.qty) || 0) / (Number(x.pack) || 1)));
+  rows.forEach((r, i) => {
+    const key = up(r.style) + "|" + up(r.color);
+    const j = up(r.style) ? at.get(key) : undefined;
+    if (j === undefined) { at.set(key, out.length); out.push({ ...r, src: [i + 1] }); return; }
+    const t = out[j];
+    const same = up(t.item) === up(r.item) && up(t.unit) === up(r.unit) && t.rate.trim() === r.rate.trim() && t.cost.trim() === r.cost.trim() && String(t.pack || "1").trim() === String(r.pack || "1").trim();
+    if (!same) { conflict ||= `Lines ${t.src.join(", ")} and ${i + 1} are the same article/colour (${r.style}${r.color ? " · " + r.color : ""}) but differ in rate, cost, unit or packet. Make them match, or change one line's style/colour.`; out.push({ ...r, src: [i + 1] }); return; }
+    const anySet = !!(t.stickers?.trim() || r.stickers?.trim());
+    out[j] = { ...t, qty: String((Number(t.qty) || 0) + (Number(r.qty) || 0)), stickers: anySet ? String(stick(t) + stick(r)) : "", src: [...t.src, i + 1] };
+    combined++;
+  });
+  return { rows: out.map(({ src, ...r }) => r as PhotoRow), combined, conflict };
+}
+
 export function validatePhotoRows(rows: PhotoRow[]) {
   if (!rows.length || rows.length > 300) throw new Error("Review 1–300 purchase lines");
   return rows.map((r, i) => {
@@ -181,7 +203,7 @@ export async function savePhotoPurchase(rows: PhotoRow[], input: { by: string; r
     const seen = new Set<string>();
     for (const row of checked) {
       const key = [row.style.trim().toUpperCase(), row.color.trim().toUpperCase()].join("|");
-      if (seen.has(key)) throw new Error("Repeated article/colour: combine its quantities before saving");
+      if (seen.has(key)) throw new Error(`Article ${row.style}${row.color ? " · " + row.color : ""} is on two lines that differ in rate, cost, unit or packet. Make them match (they are then added together), or change one line's style/colour.`);
       seen.add(key);
       const old = await findByKey({ model: row.style, style: row.style, color: row.color, vendor_id: supplier.id });
       if (old && old.type !== row.unit.toUpperCase()) throw new Error("Unit differs from the existing article. Review before saving.");
