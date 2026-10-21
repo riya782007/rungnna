@@ -46,7 +46,8 @@ export type LabelCfg = {
   qr: number; font: number; pad: number; offX: number; offY: number;
   shop: string; format: "shop" | "rungnna"; layout: "shop" | "stack"; show: { shop: boolean; item: boolean; style: boolean; color: boolean; rate: boolean; tk: boolean; code: boolean; qty: boolean; cost_code: boolean; line?: boolean };
   batch?: number;        // stickers handed to the printer at a time (0 = all at once) — see lib/labelBatches
-  testFirst?: boolean;   // a long run starts with one test row
+  testFirst?: boolean;   // a long run starts with one test row (only until this computer's setup is confirmed)
+  pauseBatches?: boolean; // wait for "Print next" after every batch (default: carry on by itself)
   edgeR?: number;        // sheet: page x (mm) where the printer stops printing; a sticker past it is laid out narrower
   cur?: string;          // printed before the rate: "9" on the shop's old stickers, or ₹ / Rs. / nothing
   driverPaper?: boolean; // roll: the page size comes from the printer's own stock (one row of stickers), not the page
@@ -432,9 +433,10 @@ function LabelSettings({ cfg, upd, sample, qty, onTest }: { cfg: LabelCfg; upd: 
         <div className="grid g2">
           <label className="f">Stickers per batch (0 = all at once)
             <input className="in mono" type="number" min={0} step={cfg.mode === "roll" ? cfg.cols : 1} value={cfg.batch ?? DEFAULT_BATCH} onChange={e => upd({ batch: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} /></label>
-          <label className="row sm"><input type="checkbox" checked={cfg.testFirst ?? true} onChange={e => upd({ testFirst: e.target.checked })} /> Long runs start with one test row</label>
+          <label className="row sm"><input type="checkbox" checked={cfg.testFirst ?? true} onChange={e => upd({ testFirst: e.target.checked })} /> First run on a new setup starts with one test row</label>
+          <label className="row sm"><input type="checkbox" checked={!!cfg.pauseBatches} onChange={e => upd({ pauseBatches: e.target.checked })} /> Pause after every batch</label>
         </div>
-        <div className="xs mut">The app waits after each batch: <b>Print next</b> or <b>Stop</b>. Windows only ever holds one batch, so switching the printer off never brings back hundreds of stickers.</div>
+        <div className="xs mut">Batches print one after another by themselves; <b>Stop</b> is on screen the whole time. Windows only ever holds one batch, so switching the printer off never brings back hundreds of stickers. Tick “Pause after every batch” to check each batch first.</div>
         <div className="grid g2">
           <label className="f">Shop name on label<input className="in" value={cfg.shop} onChange={e => upd({ shop: e.target.value })} /></label>
           <label className="f">Before the rate
@@ -489,7 +491,8 @@ type Run = {
 export const printerSig = (c: LabelCfg) => [c.output || "browser", c.qzPrinter || "", c.preset, c.mode, c.w, c.h, c.cols, c.gapX, c.gapY, c.offX, c.offY, c.driverPaper ? 1 : 0, c.edgeR ?? "", c.sheetW, c.sheetH, c.rows, c.left, c.top, c.qr, c.font, c.pad, c.rateScale ?? "", c.layout, c.format, c.density ?? DEFAULT_LABEL_DENSITY, c.speed ?? DEFAULT_LABEL_SPEED, c.compactCostCode ? 1 : 0, c.fakeLetters ?? "Z"].join("|");
 
 export function runBatches(total: number, unit: number, perBatch: number, testFirst: boolean, verified: boolean): LabelBatch[] {
-  if (verified || total <= unit) return labelBatches(total, unit, perBatch, testFirst);
+  // once this computer's setup is confirmed, no more test rows: the whole run just prints
+  if (verified || total <= unit) return labelBatches(total, unit, perBatch, verified ? false : testFirst);
   return [{ from: 0, to: unit }, ...labelBatches(total - unit, unit, perBatch, false).map(b => ({ from: b.from + unit, to: b.to + unit }))];
 }
 
@@ -505,7 +508,12 @@ export function useLabelPrint(cfg: LabelCfg, onConfig?: (config: LabelCfg) => vo
   const slice = (r: Run) => r.list.slice(r.batches[r.i].from, r.batches[r.i].to);
   const finished = (r: Run) => {
     if (ref.current !== r) return;
-    if (r.verify && r.i === 0 || r.i + 1 < r.batches.length) return setRun({ ...r, phase: "wait" });
+    if (r.verify && r.i === 0) return setRun({ ...r, phase: "wait" });
+    if (r.i + 1 < r.batches.length) {
+      // a confirmed printer carries on by itself; Stop stays on screen the whole time
+      if (!r.cfg.pauseBatches) { const next = { ...r, i: r.i + 1, phase: "print" as const, n: r.n + 1, verify: false }; setTimeout(() => { if (ref.current === r) void go(next); }, r.direct ? 400 : 900); return; }
+      return setRun({ ...r, phase: "wait" });
+    }
     setRun(null);
     toast(`All ${r.list.length} sticker${r.list.length === 1 ? "" : "s"} sent to the printer`);
   };
