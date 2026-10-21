@@ -21,7 +21,7 @@ describe("direct printing transport", () => {
   it("exports no label builder — label geometry lives in one place only", async () => {
     const mod: Record<string, unknown> = await import("../src/lib/tsc");
     expect(Object.keys(mod).sort()).toEqual(
-      ["connectSerial", "connectUSB", "directPrintSupported", "printTSPL", "serialSupported", "usbSupported"],
+      ["bluetoothPrinterName", "bluetoothSupported", "connectBluetooth", "connectSerial", "connectUSB", "directPrintSupported", "printTSPL", "serialSupported", "usbSupported"],
     );
   });
 });

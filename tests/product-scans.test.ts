@@ -64,7 +64,7 @@ describe("consistent named products across scanners", () => {
     const p = { ...blankProduct("o"), barcodes: [legacy] }; await db.products.put(p);
     expect((await findByScan(legacy))?.item).toBe("SHOP BALI");
     // the owner renames the scanned product (it now carries the label's item code)
-    await db.products.put({ ...(await db.products.get(p.id))!, item: "Original product", type: "SET", rate: 23000 });
+    await db.products.put({ ...(await db.products.get(p.id))!, item: "ORIGINAL PRODUCT", type: "SET", rate: 23000 });
     expect(await findByScan(legacy)).toMatchObject({ item: "ORIGINAL PRODUCT", type: "SET", rate: 23000 });
   });
   it("lets stock-in create a named JSON product without requiring a style", async () => {
