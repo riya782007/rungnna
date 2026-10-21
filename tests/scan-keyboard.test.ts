@@ -45,3 +45,17 @@ describe("purchase-bill stickers scan at billing, whatever the scanner's keyboar
     for (const sep of ["\\", "#"]) expect(parseLabel(["202", "146", "1", "", "", "K5210/11/P", "W/XZ/13"].join(sep))).toMatchObject({ how: "shop label", icode: "202", style: "K5210/11/P", color: "W/XZ/13" });
   });
 });
+
+describe("a sticker whose product was deleted", () => {
+  it("brings that product back, with its cost and supplier, even when the scanner types '-' for '|'", async () => {
+    const pur = await savePhotoPurchase([row({ item: "BANGLES", style: "24610", color: "", unit: "PAIR", rate: "98" })], { by: "o", rack: "rack", supplierId: "s", billNo: "B9", note: "" });
+    const [p] = await db.products.toArray();
+    await db.products.put({ ...p, deleted: 1 });                     // the list was deleted after printing (21 Oct)
+    const qr = ownPayload(productForLabel(p, 1), "shop").replace(/\|/g, "-");
+    const back = await resolveBillingScan(qr, "o");
+    expect(back).toMatchObject({ id: p.id, cost: p.cost, vendor_id: "s", deleted: 0 });
+    expect((await db.products.get(p.id))!.deleted).toBe(0);
+    expect(await db.products.count()).toBe(1);                      // not a second, half-empty copy
+    expect(pur.items[0].product_id).toBe(p.id);
+  });
+});

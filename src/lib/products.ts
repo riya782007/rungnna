@@ -38,9 +38,14 @@ async function findStoredScan(raw: string, x: Parsed): Promise<Product | undefin
   for (const q of byRaw) await put("products", { ...q, barcodes: (q.barcodes || []).filter(b => b !== r) });
   let p = await db.products.where("code").equals(r).first();
   if (p && !p.deleted) return p;
+  // a sticker whose product was deleted (21 Oct: the whole list was deleted at once, minutes after hundreds of
+  // stickers were printed): the goods are in hand, so that product is brought back below if nothing live fits
+  let gone: Product | undefined;
   if (x.code) {
-    p = await db.products.where("code").equals(x.code).first();
-    if (p && !p.deleted) return p;
+    const same = await db.products.where("code").equals(x.code).toArray();
+    const live = same.find(q => !q.deleted);
+    if (live) return live;
+    gone = same.find(q => q.deleted && !contradicts(q, x, labelName));
   }
   if (x.style) {
     const same = (await db.products.where("style").equals(up(x.style)).toArray())
@@ -56,6 +61,11 @@ async function findStoredScan(raw: string, x: Parsed): Promise<Product | undefin
     const rate = x.rate ? toPaise(x.rate) : 0;
     const hit = fits.find(q => rate && q.rate === rate) || fits[0];
     if (hit) return hit;
+  }
+  if (gone) {
+    const back = { ...gone, deleted: 0 } as Product;
+    await put("products", back);   // kept with its cost, supplier and history, not re-made from the sticker
+    return back;
   }
   return undefined;
 }
