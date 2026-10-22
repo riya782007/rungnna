@@ -5,7 +5,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, deviceId, type Staff } from "../lib/db";
 import { Head } from "../components/common";
 import { useApp, toast, newStaff } from "../lib/app";
-import { onSync, signIn, signOut, syncNow, exportAll, importAll, createShopLogin, type SyncState } from "../lib/sync";
+import { onSync, signIn, signOut, syncNow, exportAll, importAll, createShopLogin, sb, type SyncState } from "../lib/sync";
 import type { Pattern } from "../lib/parse";
 import { when } from "../lib/format";
 import { getShop, saveShop, counterCode, DEFAULT_SHOP, type Shop } from "../lib/billing";
@@ -254,6 +254,7 @@ export function WhoAreYou() {
   const [newPin, setNewPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [wait, setWait] = useState(0);
+  const [reset, setReset] = useState(false);
   const needsName = persons.length === 1 && persons[0].name === "Owner" && persons[0].role === "owner" && !persons[0].pin;
   const stage = unlocked ? "identity" : "shop";
   useEffect(() => { entryWait(stage).then(setWait); }, [stage]);
@@ -293,7 +294,9 @@ export function WhoAreYou() {
       <header style={{ background: "linear-gradient(140deg,var(--emerald-dk),var(--emerald))", color: "#fff", borderRadius: "14px 14px 0 0" }}>
         <span className="mark">R</span><div><b style={{ font: "700 26px/1 var(--display)", color: "var(--gold-l)" }}>Rungnna</b><div className="xs" style={{ opacity: .7 }}>Jewellery &amp; Co · Shop OS</div></div></header>
       <div className="pad stack">
-        {unlocked && (needsName || (pick?.role === "owner" && !pick.pin)) ? <form className="stack" onSubmit={e => { e.preventDefault(); void setupOwner(needsName ? persons[0] : pick!, needsName ? owner : pick!.name); }}>
+        {unlocked && reset ? <OwnerPinReset onDone={person => { setReset(false); if (person) setMe(person); }}
+            onUseCloud={o => { setReset(false); setPick(o); setPin(""); setCode(""); setBad(""); }} />
+        : unlocked && (needsName || (pick?.role === "owner" && !pick.pin)) ? <form className="stack" onSubmit={e => { e.preventDefault(); void setupOwner(needsName ? persons[0] : pick!, needsName ? owner : pick!.name); }}>
           <div className="b sm">Set up the owner's personal PIN</div>
           <div className="xs mut">One-time setup for an owner who has no PIN yet. Keep this PIN private; staff use their own access.</div>
           {needsName && <label className="f">Owner's name<input className="in" autoFocus value={owner} onChange={e => setOwner(e.target.value)} placeholder="e.g. Karan" /></label>}
@@ -312,6 +315,7 @@ export function WhoAreYou() {
               setPick(s); setPin(""); setCode(""); setBad("");
             }}><span className="thumb" style={{ width: 36, height: 36 }}>{s.name.slice(0, 1)}</span><span className="grow b">{s.name}</span><span className="xs mut">{roleName(s)}</span></button>)}
             {pick && <button type="button" className="linkbtn" onClick={() => { setPick(null); setPin(""); }}>Use a role passcode</button>}
+            <button type="button" className="linkbtn" onClick={() => { setReset(true); setBad(""); setPick(null); setPin(""); }}>Forgot the owner PIN? Set a new one with the shop's cloud login</button>
           </>}
         </form>}
         {bad && <div className="note warn" role="alert">{bad}</div>}
@@ -320,6 +324,90 @@ export function WhoAreYou() {
         <div className="xs mut">Works offline after this counter has loaded the app and received its staff and stock. Role and PIN changes reach other counters when sync is allowed and connected.</div>
       </div>
     </div>
+  </div>;
+}
+
+/* Owner, 22 Oct: on one counter the owner's PIN was not known (the owner there was named "m", set on that
+   computer and never synced), so nobody could open the app. The shop's cloud login proves it is the shop —
+   checked by the cloud, so a passer-by can't use this — and then a new owner PIN (and the owner's name) is
+   set on this computer. Staff PINs are not touched. */
+function OwnerPinReset({ onDone, onUseCloud }: { onDone: (person?: Staff) => void; onUseCloud: (owner: Staff) => void }) {
+  const owners = useLiveQuery(() => db.staff.filter(s => !s.deleted && !!s.active && s.role === "owner" && !isRoleLogin(s)).toArray(), [], []);
+  const [email, setEmail] = useState(""), [pw, setPw] = useState("");
+  const [ok, setOk] = useState(false), [busy, setBusy] = useState(false), [err, setErr] = useState("");
+  const [id, setId] = useState(""), [name, setName] = useState(""), [pin, setPin] = useState(""), [again, setAgain] = useState("");
+  const owner = owners.find(o => o.id === id) || (owners.length === 1 ? owners[0] : undefined);
+  const [cloud, setCloud] = useState<Staff[] | null>(null);
+  /* The owner as kept in the shop's cloud, i.e. the PIN made in the web app (22 Oct). Its PIN is never
+     shown: it replaces this computer's copy, and the owner then signs in with the PIN they already know. */
+  const loadCloud = async () => {
+    try {
+      const c = await sb(); if (!c) return setCloud([]);
+      const { data, error } = await c.from("staff").select("*").eq("role", "owner");
+      if (error) throw error;
+      setCloud(((data || []) as Staff[]).filter(o => !o.deleted && (o.active ?? 1) && o.pin));
+    } catch { setCloud([]); }
+  };
+  const useCloud = async (o: Staff) => {
+    setBusy(true); setErr("");
+    try {
+      await db.transaction("rw", db.staff, db.outbox, async () => {
+        // this computer's unsent change to the owner (e.g. "m" with a forgotten PIN) must not overwrite the cloud
+        await db.outbox.where("table").equals("staff").filter(x => x.row_id === o.id).delete();
+        await db.staff.put(o);
+      });
+      toast(`${o.name}: sign in with the PIN made in the web app`);
+      onUseCloud(o);
+    } catch (x: any) { setErr(x.message || "Could not load the owner from the cloud"); } finally { setBusy(false); }
+  };
+  useEffect(() => { if (owner && !name) setName(owner.name); }, [owner?.id]);
+  const verify = async (e: React.FormEvent) => {
+    e.preventDefault(); if (busy) return;
+    setBusy(true); setErr("");
+    try { await signIn(email.trim(), pw); setPw(""); setOk(true); void loadCloud(); }
+    catch (x: any) {
+      const m = String(x?.message || "");
+      setErr(/fetch|network|offline/i.test(m) ? "This computer is offline. Connect to the internet and try again."
+        : /not connected yet/i.test(m) ? "This app has no cloud set up, so the shop login can't be checked here. Ask Riya to reset the owner PIN."
+        : "That is not the shop's cloud login. Check the email and password.");
+    }
+    finally { setBusy(false); }
+  };
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault(); if (busy || !owner) return;
+    if (!/^\d{4}$/.test(pin)) return setErr("The PIN must be 4 digits.");
+    if (pin !== again) return setErr("The two PINs are not the same.");
+    if (!name.trim()) return setErr("Type the owner's name.");
+    setBusy(true); setErr("");
+    try { const saved = { ...owner, name: name.trim(), pin }; await put("staff", saved); toast("Owner PIN saved on this computer"); onDone(saved); }
+    catch (x: any) { setErr(x.message || "Could not save"); } finally { setBusy(false); }
+  };
+  return <div className="stack">
+    <div className="b sm">Owner PIN</div>
+    {!ok ? <form className="stack" onSubmit={verify}>
+      <div className="xs mut">First the shop's cloud login, the one used to connect this computer (owner's email and password). It proves this is the shop; the cloud checks it.</div>
+      <label className="f">Shop login email<input className="in" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} /></label>
+      <label className="f">Password<input className="in" type="password" autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} /></label>
+      <button className="btn p" disabled={busy || !pw || !/^\S+@\S+\.\S+$/.test(email.trim())}>{busy ? "Checking…" : "Check the shop login"}</button>
+    </form> : <form className="stack" onSubmit={save}>
+      <div className="note ok sm" role="status">✓ Shop login correct.</div>
+      {cloud === null ? <div className="xs mut">Looking for the owner in the shop's cloud…</div>
+        : cloud.length ? <div className="stack" style={{ gap: 6 }}>
+          <div className="sm b">Use the PIN made in the web app</div>
+          {cloud.map(o => <button key={o.id} type="button" className="btn p" disabled={busy} onClick={() => void useCloud(o)}>Use {o.name}'s PIN from the web app</button>)}
+          <div className="xs mut">This computer takes the owner from the cloud; then sign in with the same PIN as in the web app. Or set a new PIN below.</div>
+        </div> : null}
+      <div className="sm b" style={{ marginTop: 6 }}>Or set a new owner PIN</div>
+      <div className="xs mut">The new PIN becomes the owner's PIN on every counter and in the web app once this computer syncs.</div>
+      {owners.length > 1 && <label className="f">Owner<select className="in" value={owner?.id || ""} onChange={e => { setId(e.target.value); setName(owners.find(o => o.id === e.target.value)?.name || ""); }}>
+        <option value="">Choose</option>{owners.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>}
+      <label className="f">Owner's name<input className="in" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Karan" /></label>
+      <label className="f">New 4-digit PIN<input className="in mono" type="password" inputMode="numeric" maxLength={4} autoComplete="new-password" value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, ""))} /></label>
+      <label className="f">Same PIN again<input className="in mono" type="password" inputMode="numeric" maxLength={4} autoComplete="new-password" value={again} onChange={e => setAgain(e.target.value.replace(/\D/g, ""))} /></label>
+      <button className="btn p" disabled={busy || !owner || pin.length !== 4 || again.length !== 4}>Save PIN &amp; open</button>
+    </form>}
+    {err && <div className="note warn sm" role="alert">{err}</div>}
+    <button type="button" className="linkbtn" onClick={() => onDone()}>Back to sign in</button>
   </div>;
 }
 
