@@ -1076,3 +1076,20 @@ html{scrollbar-gutter:stable}
 .sticker-quick .sq-pair{display:inline-flex;align-items:center;gap:4px;margin-right:6px}
 .sticker-quick .sq-pair .btn{min-width:34px;justify-content:center}
 .sticker-quick .chip[aria-pressed="false"]{opacity:.55;text-decoration:line-through}
+
+/* The small receipt printer prints black dots only: grey or coloured text comes out as a faint dotted pattern
+   (owner's photos, 22 Oct: style/colour lines, notes and the "sale not executed" band "very faded"). Every word
+   on the slip is pure black; the estimate watermark is black outline letters, which a thermal head can print. */
+.inv.thermal,.inv.thermal *{color:#000!important}
+.inv.thermal .inv-sub,.inv.thermal .inv-c{font-weight:600}
+.inv.thermal .inv-notexec{border-color:#000;font-weight:800}
+.inv.thermal .inv-wm span{font-size:24px;color:transparent!important;-webkit-text-stroke:.6px #000;opacity:.9}
+/* slip columns with Unit before Qty: # · (Box hidden) · Item · Pkt · Unit · Qty · Rate · Amount */
+.inv.thermal .inv-t th:nth-child(3){width:27%}
+.inv.thermal .inv-t th:nth-child(4){width:9%}
+.inv.thermal .inv-t th:nth-child(5){width:14%}
+.inv.thermal .inv-t th:nth-child(6){width:9%}
+.inv.thermal .inv-t th:nth-child(7){width:17%}
+.inv.thermal .inv-t th:nth-child(8){width:19%}
+.inv.thermal .inv-t td:nth-child(5){white-space:nowrap;overflow-wrap:normal}
+.inv.narrow .inv-t th:nth-child(3){width:36%}

@@ -10,6 +10,7 @@ import { rateMark } from "../lib/label-tspl";
 import { byRollNo } from "./SupplierNo";
 import { RECEIPT_CUTS, receiptCut, receiptCutSetup, type ReceiptCut } from "../lib/printing";
 import { gstRequest } from "../lib/compliance";
+import { getShop, saveShop } from "../lib/billing";
 
 /* ===========================================================================
    Settings the owner works with himself (owner, 18 Oct: "he must be able to customise it, everything well
@@ -216,7 +217,9 @@ export function PrintingCard() {
   const [cut, setCut] = useState<ReceiptCut>("partial");
   const [copies, setCopies] = useState("1");
   const [ok, setOk] = useState("");
+  const [lines, setLines] = useState<"item" | "full">("item");
   useEffect(() => {
+    getShop().then(s => setLines(s.bill_lines === "full" ? "full" : "item")).catch(() => {});
     getSetting("invoice_copies", 1).then(n => setCopies(String(n || 1)));
     getSetting("thermal_width", "80mm").then(setWidth);
     getSetting("receipt_cut", "partial").then(value => setCut(receiptCut(value)));
@@ -225,6 +228,15 @@ export function PrintingCard() {
   return (
     <div className="card"><header><h3>Bill printing</h3>{ok && <><span className="grow" /><span className="pill ok">✓ {ok}</span></>}</header>
       <div className="pad stack">
+        <Help label="Item lines on bills" help={lines === "item" ? "One short line per item: name, unit, quantity, rate. Long bills (100–150 lines) stay short. Every counter, every bill format." : "The item's style and colour are printed under its name. Every counter, every bill format."}>
+          <select className="in" value={lines} onChange={async e => {
+            const v = e.target.value as "item" | "full"; setLines(v);
+            try { const s = await getShop(); await saveShop({ ...s, bill_lines: v }); done(v === "item" ? "Bills show item names only" : "Bills show style and colour"); }
+            catch (x: any) { toast(x.message, true); }
+          }}>
+            <option value="item">Item name only (short bills)</option>
+            <option value="full">Item + style + colour</option>
+          </select></Help>
         <Help label="Tax invoice copies (A4 / A5)" help="How many copies print for one GST invoice. Each is headed Original / Duplicate / Triplicate.">
           <select className="in" value={copies} onChange={async e => { setCopies(e.target.value); await setSetting("invoice_copies", Number(e.target.value)); done("Copies saved"); }}>
             <option value="1">1 — Original only</option><option value="2">2 — Original + Duplicate (transporter)</option><option value="3">3 — Original, Duplicate, Triplicate (GST rule 48)</option></select></Help>

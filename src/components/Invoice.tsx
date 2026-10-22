@@ -42,6 +42,7 @@ export function InvoiceSheet({ b, shop, format, copy }: { b: Bill; shop: Shop; f
   const title = format === "packing" ? "PACKING SLIP" : docName(b).toUpperCase();
   const boxes = [...new Set(b.items.map(l => l.box_no))].sort((a, z) => a - z);
   const thermal = format === "80mm" || format === "58mm";
+  const full = shop.bill_lines === "full";   // item name only unless the shop chose item + style + colour
   /* Owner rule (R-204): an estimate is a quotation, not a sale. It carries "sale not executed"
      in Hindi and English so it can never be mistaken for a bill — by the party, by a salesman,
      or by an inspector reading it a year later. A numbered tax invoice never carries it. */
@@ -58,7 +59,9 @@ export function InvoiceSheet({ b, shop, format, copy }: { b: Bill; shop: Shop; f
     <div style={{ page: pageName }} className={"inv " + (thermal ? "thermal " : "") + (format === "58mm" ? "narrow" : "")}>
       <style data-thermal-width={thermal ? format.slice(0, 2) : undefined}>{`@page ${pageName}{size:${page};margin:${thermal ? "2mm" : "8mm"}}`}</style>
       <div className="inv-head">
-        <div><div className="inv-shop">{shop.name}</div><div className="inv-sub">{shop.tagline}</div>
+        {/* Owner, 22 Oct: an estimate carries only the shop's initials ("RJ") at the top, no name or tagline.
+            Tax invoices keep the full name, as the law needs. */}
+        <div><div className="inv-shop">{estimate ? initials(shop.name) : shop.name}</div>{!estimate && <div className="inv-sub">{shop.tagline}</div>}
           <div className="inv-sub">{[shop.address, shop.phone].filter(Boolean).join(" · ")}</div>
           {shop.gstin && taxDoc && <div className="inv-sub">GSTIN: <b>{shop.gstin}</b>{shop.state ? " · State: " + shop.state + (shopCode ? " (" + shopCode + ")" : "") : ""}</div>}</div>
         <div className="inv-title">{title}{estimate && <div className="inv-approval">APPROVAL CHALLAN</div>}{copy && <div className="inv-copy">{copy}</div>}{b.status === "void" && <div className="inv-void">CANCELLED</div>}
@@ -69,7 +72,7 @@ export function InvoiceSheet({ b, shop, format, copy }: { b: Bill; shop: Shop; f
         {b.compliance.ewb && <div>{b.compliance.ewb.sandbox ? "SANDBOX · " : ""}EWB: {b.compliance.ewb.id}{b.compliance.ewb.cancelled_at ? " · CANCELLED" : ""}</div>}
       </div>}
       {notExecuted && (!thermal || estimate) && <div className="inv-wm" aria-hidden="true">
-        <span>{estimate && <>ESTIMATE{!thermal && <br />}</>}{!thermal && <>SALE NOT EXECUTED<br />बिक्री निष्पादित नहीं</>}</span>
+        <span>{estimate && <>ESTIMATE<br /></>}SALE NOT EXECUTED{!thermal && <><br />बिक्री निष्पादित नहीं</>}</span>
       </div>}
       <div className="inv-meta">
         <div><b>{docName(b)} No:</b> {b.no || "(draft)"}<br /><b>Date:</b> {new Date(b.at).toLocaleString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
@@ -79,13 +82,15 @@ export function InvoiceSheet({ b, shop, format, copy }: { b: Bill; shop: Shop; f
         <div><b>Party:</b> {b.party_name || "Cash"}{b.party_phone ? " · " + b.party_phone : ""}{b.party_gstin ? <><br /><b>GSTIN:</b> {b.party_gstin}</> : null}{b.party_address ? <><br />{b.party_address}</> : null}{taxDoc && pos ? <><br /><b>Place of supply:</b> {pos}-{GST_STATES[pos]}</> : b.party_state ? <><br /><b>State:</b> {b.party_state}</> : null}</div>
       </div>
       <table className="inv-t">
-        <thead><tr><th>#</th><th>Box</th><th>Item / Style / Colour</th><th className="r">Pkt</th><th className="r">Qty</th>{prices && <><th className="r">Rate</th><th className="r">Amount</th></>}</tr></thead>
+        {/* the slip (owner, 22 Oct): no "# / Item / Style / Colour" heading, only Pkt, Qty, Rate, Amount */}
+        {/* the unit (PCS / PAIR / SET) has its own column before Qty, never a faint word under the item (owner, 22 Oct) */}
+        <thead><tr><th>{thermal ? "" : "#"}</th><th>Box</th><th>{thermal ? "" : full ? "Item / Style / Colour" : "Item"}</th><th className="r">Pkt</th><th>Unit</th><th className="r">Qty</th>{prices && <><th className="r">Rate</th><th className="r">Amount</th></>}</tr></thead>
         <tbody>
-          {thermal ? boxes.map(box => <ReceiptBox key={box} b={b} box={box} prices={prices} narrow={format === "58mm"} />) :
+          {thermal ? boxes.map(box => <ReceiptBox key={box} b={b} box={box} prices={prices} narrow={format === "58mm"} full={full} />) :
           b.items.map((l, i) => (
             <tr key={l.id}><td>{i + 1}</td><td>{l.box_no}</td>
-              <td><b>{l.item}</b> {l.style} <span className="inv-c">{[l.color, l.type].filter(Boolean).join(" · ")}</span>{l.disc && prices ? <span className="inv-c"> · disc {l.disc}</span> : null}</td>
-              <td className="r">{l.pkts ? `${l.pkts}×${l.pack}` : ""}</td><td className="r">{l.qty}</td>
+              <td><b>{l.item}</b>{full && <> {l.style} <span className="inv-c">{l.color}</span></>}{l.disc && prices ? <span className="inv-c"> · disc {l.disc}</span> : null}</td>
+              <td className="r">{l.pkts ? `${l.pkts}×${l.pack}` : ""}</td><td>{l.type || "PCS"}</td><td className="r">{l.qty}</td>
               {prices && <><td className="r">{(l.rate / 100).toFixed(2)}</td><td className="r">{(l.amount / 100).toFixed(2)}</td></>}</tr>))}
         </tbody>
       </table>
@@ -145,10 +150,16 @@ function PrintBillNow({ b, shop, format, onDone, copies = 1 }: { b: Bill; shop: 
   return <>{createPortal(sheets, document.getElementById("printroot")!)}<div className="print-notice" role="status">Print prepared · {b.no}<button className="btn sm" onClick={onDone}>Close print</button></div></>;
 }
 
-function ReceiptBox({ b, box, prices, narrow }: { b: Bill; box: number; prices: boolean; narrow: boolean }) {
+function ReceiptBox({ b, box, prices, narrow, full }: { b: Bill; box: number; prices: boolean; narrow: boolean; full: boolean }) {
   const lines = b.items.filter(l => l.box_no === box);
-  const columns = prices ? narrow ? 4 : 6 : narrow ? 2 : 4;
+  const columns = prices ? narrow ? 5 : 7 : narrow ? 3 : 5;   // the columns that show (Box is hidden on the roll; # and Pkt on 58 mm)
   return <><tr className="receipt-box"><td colSpan={columns}>Box No.: {box}</td></tr>
-    {lines.map(l => <tr key={l.id}><td>{b.items.indexOf(l) + 1}</td><td>{box}</td><td><b>{l.item}</b><div className="inv-c">{[l.style, l.color, l.type].filter(Boolean).join(" · ")}{l.disc && prices ? ` · disc ${l.disc}` : ""}</div></td><td className="r">{l.pkts ? `${l.pkts}×${l.pack}` : ""}</td><td className="r">{l.qty}</td>{prices && <><td className="r">{(l.rate / 100).toFixed(2)}</td><td className="r">{(l.amount / 100).toFixed(2)}</td></>}</tr>)}
+    {lines.map(l => <tr key={l.id}><td>{b.items.indexOf(l) + 1}</td><td>{box}</td><td><b>{l.item}</b>{full && (l.style || l.color) ? <div className="inv-c">{[l.style, l.color].filter(Boolean).join(" · ")}</div> : null}{l.disc && prices ? <div className="inv-c">disc {l.disc}</div> : null}</td><td className="r">{l.pkts ? `${l.pkts}×${l.pack}` : ""}</td><td>{l.type || "PCS"}</td><td className="r">{l.qty}</td>{prices && <><td className="r">{(l.rate / 100).toFixed(2)}</td><td className="r">{(l.amount / 100).toFixed(2)}</td></>}</tr>)}
     <tr className="receipt-box"><td colSpan={columns}>Box qty: {lines.reduce((n, l) => n + l.qty, 0)}</td></tr></>;
+}
+
+/** "RUNGNNA JEWELLERY & CO" → "RJ": what an estimate shows instead of the shop's name. */
+export function initials(name: string) {
+  const words = (name || "").split(/\s+/).filter(w => /^[A-Za-z]/.test(w) && !/^(and|co\.?|company|pvt\.?|ltd\.?|private|limited)$/i.test(w));
+  return (words.slice(0, 3).map(w => w[0]).join("") || name || "").toUpperCase();
 }

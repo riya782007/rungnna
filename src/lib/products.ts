@@ -372,6 +372,15 @@ export async function hideProducts(ids: string[]) {
   });
 }
 
+/** Owner, 23 Oct: "Hide" on the Products page took 137 products and their 1,408 pieces out of view and nothing
+    could bring them back. Their stock and history were never removed; this shows them again. */
+export async function showProducts(ids: string[]) {
+  requirePerm("products.edit", "showing hidden products again");
+  return db.transaction("rw", [db.products, db.outbox], async () => {
+    for (const id of new Set(ids)) { const current = await db.products.get(id); if (current && current.deleted) await put("products", { ...current, deleted: 0 }); }
+  });
+}
+
 export async function saveProduct(p: Product) {
   requirePerm("products.edit", "adding or editing products");
   p.item = p.item.trim().toUpperCase(); p.style = p.style.trim().toUpperCase(); p.color = p.color.trim().toUpperCase();

@@ -39,12 +39,19 @@ describe("estimate carries 'sale not executed' (R-204)", () => {
     for (const f of ["a4", "a5"]) expect(sheet(bill("estimate", "EST/1"), f)).toContain("inv-wm");
   });
 
-  it("the thermal roll carries the bilingual band and a compact ESTIMATE watermark", () => {
+  it("the thermal roll carries the bilingual band and the ESTIMATE / SALE NOT EXECUTED watermark", () => {
+    // owner, 22 Oct: the watermark must come out on the printed slip too (black outline letters on the roll)
     for (const f of ["80mm", "58mm"]) {
       const html = sheet(bill("estimate", "EST/1"), f);
       expect(html).toContain("SALE NOT EXECUTED");
-      expect(html).toMatch(/class="inv-wm"[^>]*><span>ESTIMATE<\/span>/);
+      expect(html).toMatch(/class="inv-wm"[^>]*><span>ESTIMATE<br\/>SALE NOT EXECUTED<\/span>/);
     }
+  });
+  it("an estimate shows only the shop's initials; bill lines show the item name and a Unit column (owner, 22 Oct)", () => {
+    const html = sheet(bill("estimate", "EST/1"), "80mm");
+    expect(html).toContain('class="inv-shop">RJ<');
+    expect(html).not.toContain("Item / Style / Colour");
+    expect(html).toContain("<th>Unit</th>");
   });
 
   it("a packing slip carries no price and no sale wording", () => {

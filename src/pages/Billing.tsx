@@ -732,10 +732,15 @@ export default function Billing({ args }: { args: string[] }) {
           <div className="sumrow"><span>Pieces · Boxes</span><b className="mono">{t.total_qty} · {t.box_count}</b></div>
           {b.rfid_tags?.length ? <div className="sumrow"><span>RFID tags</span><b className="mono">{b.rfid_tags.length}</b></div> : null}
           <div className="sumrow"><span>Gross</span><b className="mono">{billAmount(t.gross)}</b></div>
-          <div className="sumrow"><span>Discount</span>
-            <span className="row" style={{ gap: 4, flexWrap: "nowrap" }}>
-              <MoneyInput className={"cell r" + (b.discount_pct > 100 ? " bad" : "")} style={{ width: 48 }} placeholder="%" paise={Math.round((b.discount_pct || 0) * 100)} onPaise={v => set({ discount_pct: v / 100 })} />
-              {b.discount_pct ? <input className="cell r" style={{ width: 72 }} disabled value={(t.discount / 100).toFixed(2)} readOnly /> : <MoneyInput className="cell r" style={{ width: 72 }} placeholder="Amount" paise={b.discount} onPaise={v => set({ discount: v })} />}</span></div>
+          {/* Owner, 23 Oct: he typed 50 for a 50% discount (his old software's discount box is a percentage; half
+              the sticker rate is the wholesale rate) and it took off ₹50 from the small "Amount" box. Percent is
+              now the main box, first and labelled; a rupee amount is the smaller "or ₹" box. */}
+          <div className="sumrow"><span>Discount %</span>
+            <span className="row" style={{ gap: 4, flexWrap: "nowrap", alignItems: "center" }}>
+              <MoneyInput className={"cell r disc-pct" + (b.discount_pct > 100 ? " bad" : "")} style={{ width: 64 }} placeholder="%" aria-label="Discount percent" paise={Math.round((b.discount_pct || 0) * 100)} onPaise={v => set({ discount_pct: v / 100, ...(v ? { discount: 0 } : {}) })} />
+              <b className="sm">%</b>
+              {b.discount_pct ? <span className="mono sm mut" title="Discount in rupees">= {billAmount(t.discount)}</span>
+                : <MoneyInput className="cell r" style={{ width: 64 }} placeholder="or ₹" aria-label="Discount in rupees" paise={b.discount} onPaise={v => set({ discount: v })} />}</span></div>
           <div className="sumrow"><span>Packing</span><MoneyInput className="cell r" style={{ width: 80 }} paise={b.packing} onPaise={v => set({ packing: v })} /></div>
           {b.bill_type === "gst" && <div className="sumrow"><span>GST{gstLabel(t)} <button className="linkbtn" onClick={() => set({ gst_mode: b.gst_mode === "exclusive" ? "inclusive" : "exclusive" })}>{b.gst_mode === "exclusive" ? "added" : "included"}</button></span><b className="mono">{billAmount(t.gst)}</b></div>}
           {b.bill_type === "gst" && b.party_state && !placeCode(b.party_gstin, b.party_state) && <div className="xs" style={{ textAlign: "right", color: "var(--bad)" }}>Check buyer state “{b.party_state}” — not recognised, GST type may be wrong</div>}

@@ -16,6 +16,8 @@ import { purgeEstimates } from "./estimatePurge";
 export interface Shop {
   name: string; tagline: string; address: string; phone: string; whatsapp: string; gstin: string;
   state: string; upi: string; bank: string; terms: string; hsn: string; gst_rate: number; gst_mode: "exclusive" | "inclusive"; max_disc: number;
+  /** what a bill line shows: just the item name (default, owner 22 Oct: bills of 100–150 lines stay short) or item + style + colour */
+  bill_lines?: "item" | "full";
 }
 export const DEFAULT_SHOP: Shop = {
   name: "RUNGNNA JEWELLERY & CO", tagline: "Fashion & Imitation Jewellery", address: "", phone: "", whatsapp: "", gstin: "",

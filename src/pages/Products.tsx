@@ -6,7 +6,7 @@ import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, type Product } from "../lib/db";
-import { label, DEFAULT_TYPES, saveProduct, hideProducts } from "../lib/products";
+import { label, DEFAULT_TYPES, saveProduct, hideProducts, showProducts } from "../lib/products";
 import { Head, Thumb, useLocations, locName, DeadToggle, ImageAssist , MoneyInput } from "../components/common";
 import { WedgeInput } from "../components/Scanner";
 import { findByScan } from "../lib/products";
@@ -34,29 +34,34 @@ function ProductList() {
   const [dead, setDead] = useState(false);
   const [limit, setLimit] = useState(60);
   const [rfid, setRfid] = useState(false);
-  useEffect(() => { setSelection(new Set()); }, [q, item, dead]);
+  const [hiddenView, setHiddenView] = useState(false);   // products hidden with "Hide", listed so they can be shown again
+  useEffect(() => { setSelection(new Set()); }, [q, item, dead, hiddenView]);
   const all = useLiveQuery(() => db.products.orderBy("updated_at").reverse().toArray(), [], []);
   const cells = useLiveQuery(() => storeStock(), [], []);
   const qty = useMemo(() => { const m = new Map<string, number>(); cells.forEach(c => m.set(c.product_id, (m.get(c.product_id) || 0) + c.qty)); return m; }, [cells]);
   const items = useMemo(() => [...new Set(all.filter(p => !p.deleted).map(p => p.item).filter(Boolean))].sort(), [all]);
   const list = useMemo(() => {
     const t = q.trim().toUpperCase().split(/\s+/).filter(Boolean);
-    return all.filter(p => !p.deleted && (!item || p.item === item) && (!dead || !!p.tk?.trim()) &&
+    return all.filter(p => (hiddenView ? !!p.deleted : !p.deleted) && (!item || p.item === item) && (!dead || !!p.tk?.trim()) &&
       t.every(w => (p.code + " " + p.item + " " + p.style + " " + p.color + " " + p.tk + " " + (p.barcodes || []).join(" ")).toUpperCase().includes(w)));
-  }, [all, q, item, dead]);
+  }, [all, q, item, dead, hiddenView]);
+  const hiddenCount = all.filter(p => p.deleted).length;
   return (
     <div>
-      <Head title="Products" sub={`${all.filter(p => !p.deleted).length} products`}>
+      <Head title="Products" sub={hiddenView ? `${hiddenCount} hidden products · tick and “Show again” to bring them and their stock back` : `${all.filter(p => !p.deleted).length} products`}>
         <button className="btn" onClick={() => setRfid(true)}>Link RFID tag</button>
       </Head>
       {rfid && <LinkRfid onClose={() => setRfid(false)} />}
       <div className="card pad stack" style={{ marginBottom: 12 }}>
         <input className="in" placeholder="Search style, colour, item, code…" value={q} onChange={e => setQ(e.target.value)} />
         <WedgeInput autoFocus={false} placeholder="…or scan a label to open it" onCode={async raw => { const p = await findByScan(raw); p ? go("product/" + p.id) : toast("Not found", true); }} />
-        <div className="chips"><button className="chip" aria-pressed={!item && !dead} onClick={() => { setItem(""); setDead(false); }}>All</button><button className="chip" aria-pressed={dead} onClick={() => setDead(!dead)}>Dead stock (TK)</button>
+        <div className="chips"><button className="chip" aria-pressed={!item && !dead && !hiddenView} onClick={() => { setItem(""); setDead(false); setHiddenView(false); }}>All</button>
+          {editable && hiddenCount > 0 && <button className="chip" aria-pressed={hiddenView} title="Products hidden with Hide: their stock and history are kept" onClick={() => setHiddenView(!hiddenView)}>Hidden ({hiddenCount})</button>}<button className="chip" aria-pressed={dead} onClick={() => setDead(!dead)}>Dead stock (TK)</button>
           {items.map(i => <button key={i} className="chip" aria-pressed={item === i} onClick={() => setItem(i)}>{i}</button>)}</div>
       </div>
-      {editable && <div className="selection-bar"><SelectAll ids={list.map(p => p.id)} selected={selection} onChange={setSelection} label={"Select all " + list.length + " matching products"} /><DeleteButton className="btn sm bad" disabled={!list.some(p => selection.has(p.id))} onDelete={async () => { const ids = list.filter(p => selection.has(p.id)).map(p => p.id); if (!await confirmDelete("Hide " + ids.length + " selected products? Their stock and bill history stay recorded.")) return; try { await hideProducts(ids); setSelection(new Set()); toast("Products hidden"); } catch (e: any) { toast(e.message, true); } }}>Delete selected</DeleteButton></div>}
+      {editable && <div className="selection-bar"><SelectAll ids={list.map(p => p.id)} selected={selection} onChange={setSelection} label={"Select all " + list.length + " matching products"} />{hiddenView
+        ? <button className="btn sm p" disabled={!list.some(p => selection.has(p.id))} onClick={async () => { const ids = list.filter(p => selection.has(p.id)).map(p => p.id); try { await showProducts(ids); setSelection(new Set()); toast(ids.length + " product" + (ids.length === 1 ? "" : "s") + " showing again, with their stock"); } catch (e: any) { toast(e.message, true); } }}>Show again</button>
+        : <DeleteButton className="btn sm bad" disabled={!list.some(p => selection.has(p.id))} onDelete={async () => { const ids = list.filter(p => selection.has(p.id)).map(p => p.id); if (!await confirmDelete("Hide " + ids.length + " selected products? They and their stock leave Products and Stock until shown again (Products › Hidden). Bill history stays.")) return; try { await hideProducts(ids); setSelection(new Set()); toast("Products hidden · Products › Hidden shows them again"); } catch (e: any) { toast(e.message, true); } }}>Hide selected</DeleteButton>}</div>}
       <div className="stack" style={{ gap: 6 }}>
         {list.slice(0, limit).map(p => (
           <div key={p.id} className="item">{editable && <input type="checkbox" aria-label={"Select product " + label(p)} checked={selection.has(p.id)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(p.id) : next.delete(p.id); return next; })} />}<a className="row grow" style={{ textDecoration: "none" }} href={"#/product/" + p.id}>
