@@ -43,18 +43,20 @@ const Settings = lazy(() => import("./pages/Settings"));
 const Roles = lazy(() => import("./pages/Roles"));
 const AddInventory = lazy(() => import("./pages/AddInventory"));
 const Dealers = lazy(() => import("./pages/Dealers"));
+const Purchase = lazy(() => import("./pages/Purchase"));
 
 /* Five places. Everything else is a tab inside one of them. */
 type Sec = { key: string; label: string; icon: string; tabs?: [string, string][] };
 const SECTIONS: Sec[] = [
   { key: "home", label: "Home", icon: "home" },
+  { key: "purchase", label: "Bill → Stickers", icon: "print" },
   { key: "sell", label: "Sell", icon: "sell", tabs: [["bill", "New bill"], ["bills", "Bills"], ["customers", "Customers"], ["suppliers", "Suppliers"], ["dealers", "Trade orders"], ["vouchers", "Vouchers"]] },
   { key: "stock", label: "Stock", icon: "stock", tabs: [["products", "Products"], ["add", "Add inventory"], ["stockin", "Stock in"], ["scan", "Scan & record"], ["recheck", "Recheck"], ["rfid", "RFID count"], ["labels", "Labels"], ["catalogue", "Catalogue"], ["racks", "Racks"], ["move", "Move"], ["activity", "Activity"], ["import", "Import"]] },
   { key: "reports", label: "Reports", icon: "sales" },
   { key: "ask", label: "Ask", icon: "ask" },
   { key: "settings", label: "Settings", icon: "settings" },
 ];
-const sectionOf = (r: string) => (["bill", "bills", "customers", "suppliers", "dealers", "vouchers"].includes(r) ? "sell" : ["products", "product", "add", "stockin", "scan", "recheck", "rfid", "labels", "catalogue", "racks", "move", "activity", "import"].includes(r) ? "stock" : r === "ask" || r === "settings" || r === "reports" ? r : r === "roles" ? "settings" : "home");
+const sectionOf = (r: string) => (["bill", "bills", "customers", "suppliers", "dealers", "vouchers"].includes(r) ? "sell" : ["products", "product", "add", "stockin", "scan", "recheck", "rfid", "labels", "catalogue", "racks", "move", "activity", "import"].includes(r) ? "stock" : r === "ask" || r === "settings" || r === "reports" || r === "purchase" ? r : r === "roles" ? "settings" : "home");
 const lastTab: Record<string, string> = { sell: "bill", stock: "products" };
 /* What each screen needs (lib/roles). A tab you can't use is not shown. */
 const ROUTE_PERM: Record<string, string> = {
@@ -62,7 +64,7 @@ const ROUTE_PERM: Record<string, string> = {
   reports: "reports.view", ask: "ai.use", scan: "stock.in", stockin: "stock.in", recheck: "stock.count", rfid: "stock.count",
   labels: "labels.print", catalogue: "catalogue.share", racks: "racks.manage", move: "stock.move", products: "stock.view", product: "stock.view",
   activity: "stock.view", add: "products.edit", dealers: "dealers.manage", import: "import.data", bank: "bank.reconcile", stores: "stores.transfer", roles: "staff.manage",
-  settings: "settings.manage",
+  settings: "settings.manage", purchase: "purchases.photo",
 };
 
 function useSync() {
@@ -110,6 +112,7 @@ function Shell() {
     const f = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPal(true); }
       if (e.key === "F2" && route !== "bill") { e.preventDefault(); go("bill"); }
+      if (e.key === "F1" && route !== "purchase") { e.preventDefault(); go("purchase"); }
     };
     addEventListener("keydown", f); return () => removeEventListener("keydown", f);
   }, [route]);
@@ -166,6 +169,7 @@ function Shell() {
     case "roles": page = <Roles />; break;
     case "add": page = <AddInventory />; break;
     case "dealers": page = <Dealers />; break;
+    case "purchase": page = <Purchase />; break;
     default: page = <Home />;
   }
   if (!ok(route)) page = <NoAccess />;

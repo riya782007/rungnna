@@ -6,7 +6,7 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState }
 const BillCamera = lazy(() => import("./CustomerCamera"));
 import { useLiveQuery } from "dexie-react-hooks";
 import { Camera, Plus, Trash2 } from "lucide-react";
-import { db, put, uid, getSetting, setSetting, type Product, type Purchase } from "../lib/db";
+import { db, put, uid, now, getSetting, setSetting, type Product, type Purchase } from "../lib/db";
 import { api, blobToB64 } from "../lib/ai";
 import { compress, savePhoto } from "../lib/image";
 import { getRule, type PricingRule } from "../lib/pricing";
@@ -46,6 +46,28 @@ type Draft = { store: string; rows: PhotoRow[]; supplier: string; billNo: string
    is in a box of its own (`camera`), or by event when it is already on the page (Labels, Stock in). */
 export const BILL_CAMERA = "rj-bill-camera";
 export function askBillCamera() { (window as any).__rjBillCamera = true; window.dispatchEvent(new Event(BILL_CAMERA)); }
+
+/* Owner, 22 Oct ("Still not printing" — the Approve button was grey because no supplier and no rack
+   were chosen, and the AI had read the shop's own letterhead "RUGUNNA JEW - DELHI" as the supplier).
+   Printing now needs as little as possible: a missing supplier, rack, bill number or selling rate is
+   filled in by itself at Approve, and the shop's own name is never taken as the supplier. */
+export const OWN_SHOP = /R[UA]+N?G+U?N+A/i;
+export const NO_SUPPLIER = "SUPPLIER NOT NAMED";
+const RACK_KEY = "purchase_rack";
+async function receivingRack(chosen: string): Promise<string> {
+  const usable = async (id?: string) => { const l = id ? await db.locations.get(id) : undefined; return l && !l.deleted && l.kind !== "bucket" ? l.id : ""; };
+  const picked = await usable(chosen) || await usable(await getSetting<string>(RACK_KEY, ""));
+  if (picked) return picked;
+  const store = currentStore();
+  const first = await db.locations.filter(l => !l.deleted && l.kind === "rack" && (l.store_id || store) === store).first();
+  if (first) return first.id;
+  const recv = { id: uid(), code: "G-RECEIVING", floor: "G", rack: "IN", box: "", name: "Receiving (new stock)", kind: "rack" as const, updated_at: now() };
+  await put("locations", recv as any);
+  return recv.id;
+}
+
+/** Blank articles and blank selling rates filled the way the bill reader does (shop pricing). */
+export const fillGaps = (rows: PhotoRow[], rule: PricingRule | null | undefined) => rule ? pricePhotoRows(autoArticle(rows), rule) : autoArticle(rows);
 
 export default function PurchasePhoto({ by, camera = false }: { by: string; camera?: boolean }) {
   const [d, setD] = useState<Draft>({ store: currentStore(), rows: [], supplier: "", billNo: "", rack: "", warnings: "", total: "" });
@@ -255,12 +277,13 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         // read twice (owner's bill, 18 Oct: rate 170 = cost 170), so it is left for shop pricing to fill
         const read: PhotoRow[] = checked.rows.slice(before).map(({ amount: _a, box: _b, ...r }) => ({ ...r, stickers: "", billCost: r.cost, rate: r.rate && Number(r.rate) === Number(r.cost) ? "" : r.rate }));
         // bills that print no article get one built from item + rate, so the lines neither collide nor merge
-        const supplier = current.supplier || matchSupplier(text(out.supplier).trim(), suppliers)?.id || "";
+        const readName = OWN_SHOP.test(text(out.supplier)) ? "" : text(out.supplier).trim();
+        const supplier = current.supplier || matchSupplier(readName, suppliers)?.id || "";
         const rows = await preparePhotoRows(pricePhotoRows(autoArticle(read), rule), supplier, packetDefault);
         const boxes = out.rows.filter((r: any) => r?.box && String(r.box).trim() && String(r.box).trim() !== "0").length;
         const readBy = out.read_by ? String(out.read_by) : "";
         const fellBack = Array.isArray(out.attempts) && out.attempts.some((a: any) => a && a.ok === false && !a.skipped);
-        const supplierName = current.supplierName || text(out.supplier).trim();
+        const supplierName = current.supplierName || readName;
         const printedNo = text(out.bill_no).trim();
         const counted = Number(text(out.lines_on_bill)) || 0;
         const keepNo = !!current.billNo && !current.autoBillNo;
@@ -337,15 +360,32 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
 
   /* THE one approval: drafts the products, records the purchase, and sends the labels — one press. */
   const approve = async () => {
-    if (!reviewed || lock.current) return;
+    if (lock.current) return;
     lock.current = true; setBusy(true); setError("");
     let savedPurchase: Purchase | null = null;
     try {
+      // fill in what was left blank, so the stickers print
+      const rule0 = await getRule();
+      let supplierId = d.supplier;
+      if (!supplierId) {
+        const name = (d.supplierName || "").trim().toUpperCase();
+        const want = name && !OWN_SHOP.test(name) ? name : NO_SUPPLIER;
+        const found = matchSupplier(want, suppliers) || suppliers.find(x => x.name.trim().toUpperCase() === want);
+        if (found) supplierId = found.id;
+        else { const sup = { ...newParty(want), kind: "supplier" as const }; await put("parties", sup); supplierId = sup.id; }
+      }
+      const rackId = await receivingRack(d.rack);
+      await setSetting(RACK_KEY, rackId);
+      // date AND time, so two un-numbered bills on one day never look like the same bill
+      const billNoIn = d.billNo.trim() || `EST ${new Date().toLocaleString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).replace(",", "")}`;
+      const filled = fillGaps(d.rows, rule0);
+      set({ supplier: supplierId, rack: rackId, billNo: billNoIn, rows: filled });
+      const D = { ...d, supplier: supplierId, rack: rackId, billNo: billNoIn };
       // a bill listing the same article twice: add identical lines together instead of refusing
-      const merged = combineRepeatedRows(d.rows);
+      const merged = combineRepeatedRows(filled);
       if (merged.conflict) throw new Error(merged.conflict);
       if (merged.combined) { set({ rows: merged.rows }); toast(`${merged.combined} repeated line${merged.combined === 1 ? "" : "s"} added together`); }
-      const rows = await preparePhotoRows(merged.rows, d.supplier, packetDefault);
+      const rows = await preparePhotoRows(merged.rows, D.supplier, packetDefault);
       const rule = await getRule(), current = await loadLabelCfg();
       const checked = validatePhotoRows(rows), products = draftLabelProducts(rows, by, rule, rows.length);
       const preflight = checked.flatMap((r, i) => {
@@ -354,8 +394,8 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       });
       if (preflight.length) validateLabelPrint(current, preflight);
       // the same supplier bill was saved before: don't save it twice, print its labels again
-      const billNo = d.billNo.trim().toUpperCase();
-      const before = await db.purchases.filter(x => !x.deleted && x.status === "final" && x.supplier_id === d.supplier && x.supplier_bill.trim().toUpperCase() === billNo).first();
+      const billNo = D.billNo.trim().toUpperCase();
+      const before = await db.purchases.filter(x => !x.deleted && x.status === "final" && x.supplier_id === D.supplier && x.supplier_bill.trim().toUpperCase() === billNo).first();
       // the same lines saved recently under another bill no. or supplier: print those stickers again rather
       // than adding the stock and the supplier's amount a second time
       const sig = lineSignature(checked.map(r => ({ style: r.style, color: r.color, qty: r.qty, cost: r.cost })));
@@ -373,18 +413,18 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       if (before) {
         const queue = await jobsFor(before);
         setSaved(before); setJobs(queue); await setSetting(LAST, { id: before.id });
-        if (!queue.length) { toast(`Bill ${d.billNo} was already saved as ${before.no} · it has no stickers`); return; }
+        if (!queue.length) { toast(`Bill ${D.billNo} was already saved as ${before.no} · it has no stickers`); return; }
         const how = await sendToPrinter(queue, true);
-        toast(`Bill ${d.billNo} was already saved as ${before.no} · ${how === "browser" ? "opening its labels to print" : "printing its labels again"}`);
+        toast(`Bill ${D.billNo} was already saved as ${before.no} · ${how === "browser" ? "opening its labels to print" : "printing its labels again"}`);
         return;
       }
-      const p = await savePhotoPurchase(rows, { by, rack: d.rack, supplierId: d.supplier, billNo: d.billNo, photoId: d.photoId, invoiceTotal: d.total, note: [d.warnings, d.total ? "Supplier invoice total (as printed): " + d.total : ""].filter(Boolean).join("\n") });
+      const p = await savePhotoPurchase(rows, { by, rack: D.rack, supplierId: D.supplier, billNo: D.billNo, photoId: d.photoId, invoiceTotal: d.total, note: [d.warnings, d.total ? "Supplier invoice total (as printed): " + d.total : ""].filter(Boolean).join("\n") });
       savedPurchase = p;
       setSaved(p); setBulkQty(""); setBulkRef(""); setQuantityNote("");
       await setSetting(LAST, { id: p.id });
       // Financial saving succeeded. Any subsequent print failure is recovered
       // by printing this saved purchase, never by approving it a second time.
-      set({ rows: [], supplier: d.supplier, billNo: "", total: "", warnings: "", photoId: undefined });
+      set({ rows: [], supplier: D.supplier, billNo: "", total: "", warnings: "", photoId: undefined });
       setReviewed(false);
       const queue = await jobsFor(p);
       setJobs(queue);
@@ -423,7 +463,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
   const invented = autoArticleCount(d.rows);
   let total = "—", labelCount = 0, validation = "";
   try {
-    const rows = validatePhotoRows(d.rows);
+    const rows = validatePhotoRows(fillGaps(d.rows, pricing));
     total = (rows.reduce((n, r) => n + r.qty * r.cost, 0) / 100).toFixed(2);
     labelCount = labelCountFor(rows);
     if (labelCount > 5000) validation = "More than 5000 labels: reduce stickers or split this purchase into smaller batches.";
@@ -433,15 +473,16 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
     () => (pricing && d.rows.length ? draftLabelProducts(d.rows, by, pricing) : []),
     [d.rows, pricing, by]);
 
-  const ready4 = !busy && reviewed && !validation && !!d.supplier && !!d.rack && !!d.billNo.trim();
+  const ready4 = !busy && !validation;
   const legacyCount = cfg.format === "shop" ? d.rows.filter(r => r.stickers?.trim() !== "0" && !r.item_code?.trim()).length : 0;
   /* a grey button with no reason sends the owner hunting: say exactly what is still missing */
-  const missing = [
-    !d.supplier && (d.supplierName ? `type the supplier's roll number, or tap “+ Add ${d.supplierName.trim().toUpperCase()}”` : "type the supplier's roll number"),
-    !d.rack && "choose the location",
-    !d.billNo.trim() && "enter the supplier bill no.",
-    validation && validation.replace(/\.$/, "").replace(/^./, c => c.toLowerCase()),
-    !reviewed && "tick the box above",
+  const missing = [validation && validation.replace(/\.$/, "").replace(/^./, c => c.toLowerCase())].filter(Boolean) as string[];
+  /* what Approve will fill in by itself, said plainly so nothing is a surprise */
+  const autoFill = [
+    !d.supplier && `supplier: ${d.supplierName && !OWN_SHOP.test(d.supplierName) ? d.supplierName.trim().toUpperCase() : NO_SUPPLIER}`,
+    !d.rack && "rack: the last one used (or Receiving)",
+    !d.billNo.trim() && "bill no.: today's date",
+    d.rows.some(r => !r.rate.trim()) && "selling rates: shop pricing",
   ].filter(Boolean) as string[];
 
   const notReady = !!connection && !connection.startsWith("Ready");
@@ -525,7 +566,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       </div>}
       <div className="grid g3">
         <div className="f"><SupplierNo suppliers={suppliers} id={d.supplier} onPick={s => set({ supplier: s?.id || "" })} />
-          {!d.supplier && !!d.supplierName && <button type="button" className="linkbtn xs" style={{ textAlign: "left" }} onClick={async () => {
+          {!d.supplier && !!d.supplierName && !OWN_SHOP.test(d.supplierName) && <button type="button" className="linkbtn xs" style={{ textAlign: "left" }} onClick={async () => {
             const name = d.supplierName!.trim().toUpperCase();
             const sup = { ...newParty(name), kind: "supplier" as const };
             await put("parties", sup); set({ supplier: sup.id }); toast(`${name} added as a supplier`);
@@ -635,8 +676,9 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
 
       {/* stays in view at the bottom of the full-window review, so approving needs no scrolling */}
       <div className="approve-bar stack">
+      {!!autoFill.length && <div className="xs mut">Approve fills in by itself — {autoFill.join(" · ")}. Change any of them above if you like.</div>}
       <label className="row"><input type="checkbox" checked={reviewed} onChange={e => setReviewed(e.target.checked)} />
-        {d.check?.ok ? "The lines add up to the bill. I checked the highlighted cells and the selling rates." : "I checked quantities, units, costs, selling rates and tax/freight differences."}</label>
+        {d.check?.ok ? "The lines add up to the bill. I checked the highlighted cells and the selling rates." : "I checked quantities, units, costs, selling rates and tax/freight differences."} <span className="xs mut">(optional)</span></label>
       <button className="btn p" disabled={!ready4} onClick={approve}>
         {busy ? "Working…" : `Approve: draft ${d.rows.length} product${d.rows.length === 1 ? "" : "s"}${labelCount ? ` & print ${labelCount} label${labelCount === 1 ? "" : "s"}` : " & save purchase"}`}
       </button>

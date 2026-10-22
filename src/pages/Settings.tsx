@@ -273,6 +273,8 @@ export function WhoAreYou() {
   const [reset, setReset] = useState(false);
   const needsName = persons.length === 1 && persons[0].name === "Owner" && persons[0].role === "owner" && !persons[0].pin;
   const stage = unlocked ? "identity" : "shop";
+  // the sign-in screen is a safe moment for the Windows app to switch to a waiting new version
+  useEffect(() => { document.documentElement.dataset.locked = "1"; return () => { delete document.documentElement.dataset.locked; }; }, []);
   /* A new computer, browser or app: bring the shop's people (and stock) from the cloud BEFORE offering to
      set up an owner, so the owner signs in with the PIN he already has instead of starting a new shop. */
   const [joining, setJoining] = useState(false);

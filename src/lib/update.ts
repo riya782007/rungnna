@@ -42,7 +42,8 @@ function startAppUpdates() {
 let idleSet = false;
 function scheduleIdle() {
   if (idleSet) return; idleSet = true;
-  const idle = () => { if (waiting && !updating && (document.hidden || location.hash === "" || location.hash === "#/home")) void applyUpdate(); };
+  // also on the sign-in screen: nobody is typing a bill there (owner's computer stayed on an old version, 22 Oct)
+  const idle = () => { if (waiting && !updating && (document.hidden || location.hash === "" || location.hash === "#/home" || document.documentElement.dataset.locked === "1")) void applyUpdate(); };
   document.addEventListener("visibilitychange", idle);
   setInterval(idle, 60_000);
 }
