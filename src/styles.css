@@ -1102,3 +1102,5 @@ html{scrollbar-gutter:stable}
 .home-job small { display: block; opacity: .85; margin-top: 2px; }
 .home-job:hover { filter: brightness(1.06); }
 .purchase-shortcut { text-decoration: none; align-items: center; margin-bottom: 10px; }
+.sq-order { flex-wrap: wrap; }
+.sq-part { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--card, #fff); }

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { getSetting, setSetting } from "../lib/db";
 import { DEFAULT_LABEL_DENSITY } from "../lib/label-darkness";
 import type { LabelCfg } from "../pages/Labels";
+import { labelOrder, PART_NAMES, type LabelPart } from "../lib/label-order";
 
 /* ===========================================================================
    The sticker settings he actually changes, on the print screen itself.
@@ -15,7 +16,7 @@ import type { LabelCfg } from "../pages/Labels";
 =========================================================================== */
 
 const FIELDS: [keyof LabelCfg["show"], string][] = [
-  ["style", "Style"], ["color", "Colour"], ["cost_code", "Cost code"], ["line", "Line no."],
+  ["style", "Style"], ["ref", "Reference"], ["color", "Colour"], ["cost_code", "Cost code"], ["line", "Line no."],
   ["rate", "Rate"], ["qty", "X qty"], ["shop", "RUNGNNA"],
 ];
 
@@ -39,15 +40,36 @@ export function StickerQuickBar({ cfg, onChange }: { cfg: LabelCfg; onChange?: (
   const step = (key: "offX" | "offY" | "font", d: number, what: string, min = -20, max = 20) =>
     apply({ [key]: Math.max(min, Math.min(max, r2((Number(cfg[key]) || 0) + d))) } as Partial<LabelCfg>, what);
   const direct = cfg.output === "qz" || cfg.output === "tspl";
+  const on = (k: LabelPart) => k === "item" ? cfg.show.item : k === "ref" ? (cfg.show.ref ?? cfg.show.style) : k === "style" ? cfg.show.style : k === "color" ? cfg.show.color
+    : k === "tk" ? cfg.show.tk : k === "cost" ? cfg.show.cost_code || !!cfg.show.line : cfg.show.code;
+  const order = labelOrder(cfg.order), shown = order.filter(on);
+  // jump over hidden parts, so one tap always visibly moves it past its visible neighbour
+  const shift = (k: LabelPart, by: -1 | 1): LabelPart[] => {
+    const target = shown[shown.indexOf(k) + by]; if (!target) return order;
+    const o = order.filter(x => x !== k), t = o.indexOf(target);
+    o.splice(by < 0 ? t : t + 1, 0, k); return o;
+  };
+  const up = (k: LabelPart) => shift(k, -1), down = (k: LabelPart) => shift(k, 1);
   const dark = cfg.density ?? DEFAULT_LABEL_DENSITY;
   return (
     <div className="sticker-quick" aria-label="Sticker settings">
       <div className="sq-row">
         <span className="sq-h">On the sticker</span>
         {FIELDS.map(([k, label]) => (
-          <button key={k} type="button" className="chip" aria-pressed={!!cfg.show[k]}
-            onClick={() => void apply({ show: { ...cfg.show, [k]: !cfg.show[k] } }, `${label} ${cfg.show[k] ? "off" : "on"}`)}>{label}</button>))}
+          <button key={k} type="button" className="chip" aria-pressed={k === "ref" ? !!(cfg.show.ref ?? cfg.show.style) : !!cfg.show[k]}
+            onClick={() => { const on = k === "ref" ? (cfg.show.ref ?? cfg.show.style) : !!cfg.show[k]; void apply({ show: { ...cfg.show, [k]: !on } }, `${label} ${on ? "off" : "on"}`); }}>{label}</button>))}
       </div>
+      {/* where each thing sits, top to bottom (owner, 22 Oct) */}
+      <div className="sq-row sq-order">
+        <span className="sq-h">Order, top to bottom</span>
+        {shown.map((k, i) => <span key={k} className="sq-part">
+          <button type="button" className="btn sm" title={`Move ${PART_NAMES[k]} up`} disabled={i === 0} onClick={() => void apply({ order: up(k) }, `${PART_NAMES[k]} moved up`)}>‹</button>
+          <b className="xs">{i + 1}. {PART_NAMES[k]}</b>
+          <button type="button" className="btn sm" title={`Move ${PART_NAMES[k]} down`} disabled={i === shown.length - 1} onClick={() => void apply({ order: down(k) }, `${PART_NAMES[k]} moved down`)}>›</button>
+        </span>)}
+        {cfg.order && <button type="button" className="linkbtn xs" onClick={() => void apply({ order: undefined }, "Usual order")}>Usual order</button>}
+      </div>
+      {cfg.show.rate && <div className="xs mut">Big line at the bottom, e.g. <b className="mono">{cfg.cur ?? "₹"}426{cfg.show.qty ? "X1PCS" : ""}</b>: {cfg.cur === "9" ? <>“9” is only the old stickers’ mark, then </> : null}the selling rate ₹426 — the bill’s selling rate, or your shop pricing worked out from the cost (Settings › Prices){cfg.show.qty ? <>, then X and the pieces in each packet (the X column)</> : null}.</div>}
       <div className="sq-row">
         <span className="sq-h">Position</span>
         <span className="sq-pair"><button type="button" className="btn sm" title="Move the print left" onClick={() => void step("offX", -0.25, "Moved left")}>←</button>

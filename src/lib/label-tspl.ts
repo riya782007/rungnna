@@ -1,3 +1,4 @@
+import { orderedLines } from "./label-order";
 import { printedCostCode, type CostCodeLook } from "./label-cost-code";
 import type { Product } from "./db";
 import { qrSvg } from "./qr";
@@ -14,7 +15,7 @@ import { labelHeat, type LabelHeat } from "./label-darkness";
    Every number is millimetres; the printer is 203 dpi (8 dots per mm).
 =========================================================================== */
 
-export type LabelShow = { shop: boolean; item: boolean; style: boolean; color: boolean; rate: boolean; tk: boolean; code: boolean; qty: boolean; cost_code: boolean };
+export type LabelShow = { shop: boolean; item: boolean; style: boolean; color: boolean; rate: boolean; tk: boolean; code: boolean; qty: boolean; cost_code: boolean; ref?: boolean };
 export type LabelLook = LabelHeat & CostCodeLook & { w: number; h: number; qr: number; font: number; pad: number; offX: number; offY: number; gapY: number; shop: string; layout?: "shop" | "stack"; show: LabelShow; cur?: string };
 export type LabelLine = { text: string; big?: boolean; bold?: boolean; small?: boolean; optional?: boolean };   // optional = may be left off a crowded label (the QR carries it anyway)
 
@@ -24,19 +25,28 @@ export const labelRate = (paise: number) => { const r = Math.round(paise) / 100;
 /** The words on one sticker, top to bottom, exactly as LabelView shows them. `pack` is the quantity on this label. */
 /** What goes before the rate. The shop's old stickers print "9" there ("9320X1PCS" = ₹320): their own code. */
 export const rateMark = (look: { cur?: string }) => look.cur ?? "₹";
-export function labelLines(look: Pick<LabelLook, "shop" | "layout" | "show" | "cur" | "compactCostCode" | "fakeLetters" | "labelIndex">, p: Product & { entry_code?: string }, pack: number, rupee = rateMark(look)): LabelLine[] {
+export function labelLines(look: Pick<LabelLook, "shop" | "layout" | "show" | "cur" | "compactCostCode" | "fakeLetters" | "labelIndex"> & { order?: string[] }, p: Product & { entry_code?: string }, pack: number, rupee = rateMark(look)): LabelLine[] {
   const s = look.show, out: LabelLine[] = [];
   const push = (on: boolean, text: string | undefined | false, o: Omit<LabelLine, "text"> = {}) => { if (on && text) out.push({ text, ...o, bold: true }); };
-  if ((look.layout || "shop") === "shop") {
-    push(s.item, p.item); push(s.style, [p.entry_code, p.style].filter(Boolean).join(" ")); push(s.color, p.color); push(s.tk, p.tk && "TK " + p.tk);
-    push(s.rate && p.rate > 0, `${rupee}${labelRate(p.rate)}${s.qty ? `X${pack}${p.type || "PCS"}` : ""}`, { big: true, bold: true });
-    push(s.cost_code, printedCostCode(p.cost_code, look), { bold: true }); push(s.code, p.code, { small: true, optional: true });
-  } else {
-    push(s.shop, look.shop, { bold: true, small: true }); push(s.item, p.item, { bold: true }); push(s.style, [p.entry_code, p.style].filter(Boolean).join(" ")); push(s.color, p.color);
-    push(s.tk, p.tk && "TK " + p.tk); push(s.qty, `${pack} ${p.type || "PCS"}`);
-    push(s.rate && p.rate > 0, `${rupee}${labelRate(p.rate)}`, { big: true, bold: true });
-    push(s.cost_code, printedCostCode(p.cost_code, look), { bold: true }); push(s.code, p.code, { small: true, optional: true });
+  const row = (look.layout || "shop") === "shop";
+  if (!row) push(s.shop, look.shop, { bold: true, small: true });
+  // the words in the owner's chosen order (lib/label-order); the price goes just above the cost code / code
+  const lines = orderedLines(look.order, {
+    item: s.item ? p.item : "", ref: (s.ref ?? s.style) ? p.entry_code : "", style: s.style ? p.style : "", color: s.color ? p.color : "",
+    tk: s.tk && p.tk ? "TK " + p.tk : "", cost: s.cost_code ? printedCostCode(p.cost_code, look) : "", code: s.code ? p.code : "",
+  }, false);
+  let priced = false;
+  const price = () => {
+    if (priced) return; priced = true;
+    if (row) push(s.rate && p.rate > 0, `${rupee}${labelRate(p.rate)}${s.qty ? `X${pack}${p.type || "PCS"}` : ""}`, { big: true, bold: true });
+    else { push(s.qty, `${pack} ${p.type || "PCS"}`); push(s.rate && p.rate > 0, `${rupee}${labelRate(p.rate)}`, { big: true, bold: true }); }
+  };
+  for (const l of lines) {
+    if (l.parts[0] === "cost") { price(); push(true, l.text, { bold: true }); continue; }
+    if (l.parts[0] === "code") { price(); push(true, l.text, { small: true, optional: true }); continue; }
+    push(true, l.text, l.parts[0] === "item" && !row ? { bold: true } : {});
   }
+  price();
   return out;
 }
 

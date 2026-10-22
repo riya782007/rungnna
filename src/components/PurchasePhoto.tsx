@@ -470,7 +470,8 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
   } catch (e: any) { validation = e.message; }
 
   const preview = useMemo(
-    () => (pricing && d.rows.length ? draftLabelProducts(d.rows, by, pricing) : []),
+    // the preview shows what Approve will print, blank rates already worked out by shop pricing
+    () => (pricing && d.rows.length ? draftLabelProducts(fillGaps(d.rows, pricing), by, pricing) : []),
     [d.rows, pricing, by]);
 
   const ready4 = !busy && !validation;
@@ -502,7 +503,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         <div className="xs mut">{probe.some(r => r.ok) ? "Bills are read by the first working AI, in this order." : "No AI can read a bill right now: fix one of the accounts above."}</div>
       </div>}
     </div>}
-    {!!d.rows.length && <div className="row"><b className="grow">{d.supplierName || "Purchase bill"}{d.billNo ? <span className="xs mut"> · {d.billNo}</span> : null}</b>
+    {!!d.rows.length && <div className="row"><b className="grow">{(d.supplierName && !OWN_SHOP.test(d.supplierName) && d.supplierName) || "Purchase bill"}{d.billNo ? <span className="xs mut"> · {d.billNo}</span> : null}</b>
       <button className="btn sm" disabled={busy} onClick={() => setCam(true)}><Camera size={15} />Add next page</button>
       <button className="btn sm" disabled={busy} title="Adds a blank line at the top" onClick={() => {
         set({ rows: [blank(packetDefault), ...d.rows] });

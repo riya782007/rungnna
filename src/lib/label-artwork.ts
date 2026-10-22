@@ -7,6 +7,7 @@ import type { Product } from "./db";
 import { ownPayload } from "./parse";
 import { productForLabel } from "./purchase-labels";
 import { labelRate, rateMark } from "./label-tspl";
+import { orderedLines } from "./label-order";
 
 /** A 203 dpi TSC head has eight addressable dots per millimetre. */
 export const LABEL_DOTS_PER_MM = 8;
@@ -86,27 +87,30 @@ export function renderLabelSvg(cfg: LabelCfg, p: Product & { entry_code?: string
   type Detail = { text: string; scale?: number; weight?: number; line?: number | string; mono?: boolean };
   const details: Detail[] = [];
   if (stack && s.shop && cfg.shop) details.push({ text: cfg.shop, scale: 0.9, weight: 800 });
-  if (s.item && p.item) details.push({ text: p.item, weight: stack ? 700 : 500 });
-  // Preserve the shop's revised three-line layout: style/color share a line,
-  // followed by the encrypted cost and the supplier bill's boxed line number.
-  const referenceStyle = [p.entry_code, p.style].filter(Boolean).join(" ");
-  if (stack) {
-    if (s.style && referenceStyle) details.push({ text: referenceStyle });
-    if (s.color && p.color) details.push({ text: p.color });
-  } else {
-    const styleColor = [s.style && referenceStyle, s.color && p.color].filter(Boolean).join(" ");
-    if (styleColor) details.push({ text: styleColor });
-  }
-  if (s.tk && p.tk) details.push({ text: `TK ${p.tk}` });
   const rate = s.rate && pp.rate > 0 ? `${rateMark(cfg)}${labelRate(pp.rate)}` : "";
   const quantity = s.qty ? `${pp.pack}${p.type || "PCS"}` : "";
-  if (stack && quantity) details.push({ text: `${pp.pack} ${p.type || "PCS"}` });
-  if (stack && rate) details.push({ text: rate, scale: 1.25, weight: 800 });
   // the box: the supplier bill's own serial ("1-10", "4+13") when it was read, else the line's position
   const lineOk = typeof line === "string" ? /^[0-9A-Za-z+\-/]{1,9}$/.test(line.trim()) : !!line && Number.isSafeInteger(line) && line > 0;
   const billLine = (s.line ?? true) && lineOk ? (typeof line === "string" ? line.trim() : line) : undefined;
-  if ((s.cost_code && pp.cost_code) || billLine) details.push({ text: s.cost_code ? printedCostCode(pp.cost_code, cfg, labelIndex) : "", line: billLine, scale: stack ? 0.95 : 1, weight: stack ? 700 : 500, mono: stack });
-  if (s.code && p.code) details.push({ text: p.code, scale: 0.85, mono: stack });
+  const costText = s.cost_code && pp.cost_code ? printedCostCode(pp.cost_code, cfg, labelIndex) : "";
+  const hasCost = !!costText || !!billLine;
+  // the words in the owner's chosen order (Settings on the print screen); Reference / Style (/ Colour) share a line
+  const lines = orderedLines(cfg.order, {
+    item: s.item ? p.item : "", ref: (s.ref ?? s.style) ? p.entry_code : "", style: s.style ? p.style : "", color: s.color ? p.color : "",
+    tk: s.tk && p.tk ? `TK ${p.tk}` : "", cost: hasCost ? " " : "", code: s.code ? p.code : "",
+  }, !stack);
+  let extrasDone = !stack;
+  const extras = () => {          // the stacked sticker's quantity and price, just above the cost code / code
+    if (extrasDone) return; extrasDone = true;
+    if (quantity) details.push({ text: `${pp.pack} ${p.type || "PCS"}` });
+    if (rate) details.push({ text: rate, scale: 1.25, weight: 800 });
+  };
+  for (const l of lines) {
+    if (l.parts[0] === "cost") { extras(); details.push({ text: costText, line: billLine, scale: stack ? 0.95 : 1, weight: stack ? 700 : 500, mono: stack }); continue; }
+    if (l.parts[0] === "code") { extras(); details.push({ text: l.text, scale: 0.85, mono: stack }); continue; }
+    details.push({ text: l.text, weight: l.parts[0] === "item" ? (stack ? 700 : 500) : undefined });
+  }
+  extras();
   const bottom = stack ? "" : rate ? `${rate}${quantity ? `X${quantity}` : ""}` : quantity;
   const bottomSize = font * (cfg.rateScale ?? 1.75);
   // Expanded QR symbols can reach the rate's band; never let their white quiet
