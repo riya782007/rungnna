@@ -20,10 +20,13 @@ const qrCache = new Map<string, { modules: number; moduleDots: number; sizeDots:
 export function labelQr(text: string, requestedMm: number, roomMm = requestedMm) {
   const key = `${requestedMm}\u0000${roomMm}\u0000${text}`, hit = qrCache.get(key);
   if (hit) return hit;
-  const qr = qrcode(0, "M");
-  // capitals, digits and - . / : use the QR's compact alphanumeric mode: the short sticker QR then fits the
-  // smallest QR there is (21 × 21), so each square can be 3 printer dots instead of 2
-  qr.addData(text, /^[0-9A-Z $%*+\-./:]+$/.test(text) ? "Alphanumeric" : "Byte"); qr.make();
+  // The shop's short sticker QR (capitals, digits, "-") uses the QR's compact alphanumeric mode and its
+  // strongest error correction (H: still read with ~30% of squares smudged). That makes it 25 × 25 squares,
+  // 6.25 mm at 2 printer dots each: the size of the old software's QR, which the owner asked for (22 Oct),
+  // and sturdier than it. Other QRs keep level M.
+  const alnum = /^[0-9A-Z $%*+\-./:]+$/.test(text);
+  const qr = qrcode(0, alnum ? "H" : "M");
+  qr.addData(text, alnum ? "Alphanumeric" : "Byte"); qr.make();
   const modules = qr.getModuleCount(), cells = modules + QR_QUIET_MODULES * 2;
   // 2 printer dots per square is the bare minimum, and a thermal head's heat spreads it: such QRs scanned only
   // sometimes (owner, 22 Oct). When a 3-dot QR still fits the sticker, use it, even a little past the set size.
