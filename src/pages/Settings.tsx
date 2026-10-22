@@ -2,10 +2,10 @@ import { DeleteButton } from "../components/DeleteButton";
 import { confirmDelete } from "../lib/confirm-delete";
 import { useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db, put, getSetting, setSetting, deviceId, type Staff } from "../lib/db";
+import { db, put, getSetting, setSetting, deviceId, uid, type Staff } from "../lib/db";
 import { Head } from "../components/common";
-import { useApp, toast, newStaff } from "../lib/app";
-import { onSync, signIn, signOut, syncNow, exportAll, importAll, createShopLogin, sb, type SyncState } from "../lib/sync";
+import { useApp, toast, newStaff, SEED_OWNER } from "../lib/app";
+import { onSync, signIn, signOut, syncNow, exportAll, importAll, createShopLogin, sb, ensureSession, markShopDevice, type SyncState } from "../lib/sync";
 import type { Pattern } from "../lib/parse";
 import { when } from "../lib/format";
 import { getShop, saveShop, counterCode, DEFAULT_SHOP, type Shop } from "../lib/billing";
@@ -194,49 +194,62 @@ function OperationsCard({ by }: { by: string }) {
   );
 }
 
-export function ShopLogin({ onDone }: { onDone?: () => void }) {
+export function ShopLogin({ onDone, emailOnly }: { onDone?: () => void; emailOnly?: boolean }) {
   // no made-up default: Supabase only accepts an address that can really receive mail
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
   const [busy, setBusy] = useState(false);
-  /* The shop login has to be made once before any of this works. Until it exists,
-     signing in can only ever answer "Invalid login credentials", which reads like a
-     typed-wrong password and sends the owner looking in the wrong place. */
+  const [joining, setJoining] = useState(false);
   const [first, setFirst] = useState(false);
+  /* Owner, 22 Oct: "it keeps asking me to create the company again". This form used to be the only way
+     to connect, and a wrong password ticked "First time" by itself, so every computer made a brand-new
+     login. A computer now connects with one tap (and by itself after the entry code); the email login
+     is folded away for the owner's own use. */
+  const connect = async () => {
+    setJoining(true);
+    try {
+      await markShopDevice();
+      if (await ensureSession()) { await syncNow(); toast("This computer is connected — stock, bills and the bill reader are on"); onDone?.(); }
+      else toast(!navigator.onLine ? "No internet — it will connect by itself when the internet is back" : "The cloud did not let this computer in by itself. Use the owner's email login below.", true);
+    } finally { setJoining(false); }
+  };
   return (
-    <form className="stack" onSubmit={async e => {
-      e.preventDefault(); setBusy(true);
-      try {
-        if (first) {
-          const r = await createShopLogin(email.trim(), pw);
-          toast(r === "confirm"
-            ? "Login made — open the confirmation e-mail, then sign in here"
-            : "Shop login made and this device is connected — stock, photos and the bill reader are on", r === "confirm");
-        } else {
-          await signIn(email.trim(), pw);
-          toast("Device connected — stock will back up automatically");
-        }
-        onDone?.();
-      }
-      catch (x: any) {
-        const m = String(x?.message || "");
-        toast(!navigator.onLine ? "No internet — you can connect later"
-          : /invalid login credentials/i.test(m) && !first ? "No login yet with that e-mail. Tick “First time” below to make it."
-          : m || "Could not sign in", true);
-        if (/invalid login credentials/i.test(m) && !first) setFirst(true);
-      }
-      finally { setBusy(false); }
-    }}>
-      <div className="xs mut">The shop's cloud account, made once by the owner. It keeps all three floors and every device on the same stock and bills, backs everything up, puts product photos online, and lets the AI read purchase bills. The AI checks it so nobody outside the shop can spend the AI credit.</div>
-      <label className="f">Owner's email<input className="in" type="email" inputMode="email" autoComplete="username" placeholder="a real address, e.g. the owner's Gmail" value={email} onChange={e => setEmail(e.target.value)} /></label>
-      <label className="f">Password<input className="in" type="password" value={pw} onChange={e => setPw(e.target.value)} autoComplete={first ? "new-password" : "current-password"} /></label>
-      <label className="row sm" style={{ gap: 8 }}>
-        <input type="checkbox" checked={first} onChange={e => setFirst(e.target.checked)} />
-        <span>First time — make the shop login now</span>
-      </label>
-      {first && <div className="xs mut">Choose a password of at least 8 characters and keep it with the shop papers. Every device and the bill reader use this one login.</div>}
-      <button className="btn p" disabled={busy || !pw || !/^\S+@\S+\.\S+$/.test(email.trim())}>{busy ? (first ? "Making…" : "Connecting…") : first ? "Make the shop login" : "Connect this device"}</button>
-    </form>
+    <div className="stack">
+      <div className="xs mut">Connects this computer to the shop's cloud: the same stock and bills as the other floors, the backup, product photos and the purchase-bill reader.</div>
+      {!emailOnly && <button type="button" className="btn p" disabled={joining} onClick={() => void connect()}>{joining ? "Connecting…" : "Connect this computer"}</button>}
+      <details open={emailOnly}>
+        <summary className="sm">Use the owner's email login instead</summary>
+        <form className="stack" style={{ marginTop: 8 }} onSubmit={async e => {
+          e.preventDefault(); setBusy(true);
+          try {
+            if (first) {
+              const r = await createShopLogin(email.trim(), pw);
+              toast(r === "confirm" ? "Login made — open the confirmation e-mail, then sign in here" : "Shop login made and this computer is connected", r === "confirm");
+            } else {
+              await signIn(email.trim(), pw);
+              toast("Computer connected — stock will back up automatically");
+            }
+            await markShopDevice();
+            onDone?.();
+          }
+          catch (x: any) {
+            const m = String(x?.message || "");
+            toast(!navigator.onLine ? "No internet — you can connect later"
+              : /invalid login credentials/i.test(m) && !first ? "Email or password is not right. Use the same email as on the other computers — you don't need a new login."
+              : m || "Could not sign in", true);
+          }
+          finally { setBusy(false); }
+        }}>
+          <label className="f">Owner's email<input className="in" type="email" inputMode="email" autoComplete="username" placeholder="the same email as on the other computers" value={email} onChange={e => setEmail(e.target.value)} /></label>
+          <label className="f">Password<input className="in" type="password" value={pw} onChange={e => setPw(e.target.value)} autoComplete={first ? "new-password" : "current-password"} /></label>
+          <label className="row sm" style={{ gap: 8 }}>
+            <input type="checkbox" checked={first} onChange={e => setFirst(e.target.checked)} />
+            <span>Make a new email login (not needed if the shop already has one)</span>
+          </label>
+          <button className="btn" disabled={busy || !pw || !/^\S+@\S+\.\S+$/.test(email.trim())}>{busy ? (first ? "Making…" : "Connecting…") : first ? "Make the login" : "Sign in"}</button>
+        </form>
+      </details>
+    </div>
   );
 }
 
@@ -244,7 +257,10 @@ export function ShopLogin({ onDone }: { onDone?: () => void }) {
 export function WhoAreYou() {
   const { setMe } = useApp();
   const staff = useLiveQuery(() => db.staff.filter(s => !s.deleted && !!s.active).toArray(), [], []);
-  const persons = staff.filter(s => !isRoleLogin(s));
+  // the blank "Owner" every new install starts with is only a placeholder: once the shop's real owner has
+  // arrived from the cloud it is not offered (picking it is what "made the company again", 22 Oct)
+  const realOwner = staff.some(s => s.role === "owner" && s.id !== SEED_OWNER && !isRoleLogin(s));
+  const persons = staff.filter(s => !isRoleLogin(s) && !(realOwner && s.id === SEED_OWNER && !s.pin));
   const [unlocked, setUnlocked] = useState(false);
   const [code, setCode] = useState("");
   const [bad, setBad] = useState("");
@@ -257,6 +273,21 @@ export function WhoAreYou() {
   const [reset, setReset] = useState(false);
   const needsName = persons.length === 1 && persons[0].name === "Owner" && persons[0].role === "owner" && !persons[0].pin;
   const stage = unlocked ? "identity" : "shop";
+  /* A new computer, browser or app: bring the shop's people (and stock) from the cloud BEFORE offering to
+     set up an owner, so the owner signs in with the PIN he already has instead of starting a new shop. */
+  const [joining, setJoining] = useState(false);
+  useEffect(() => {
+    if (!unlocked) return;
+    let live = true;
+    (async () => {
+      await markShopDevice();
+      if (!needsName || !navigator.onLine) { void ensureSession().then(ok => { if (ok) void syncNow(); }); return; }
+      setJoining(true);
+      const stop = setTimeout(() => live && setJoining(false), 25_000);
+      try { if (await ensureSession()) await syncNow(); } finally { clearTimeout(stop); if (live) setJoining(false); }
+    })();
+    return () => { live = false; };
+  }, [unlocked]);
   useEffect(() => { entryWait(stage).then(setWait); }, [stage]);
   useEffect(() => { if (wait <= 0) return; const timer = setTimeout(() => setWait(w => Math.max(0, w - 1000)), 1000); return () => clearTimeout(timer); }, [wait]);
 
@@ -285,7 +316,12 @@ export function WhoAreYou() {
     try {
       const current = await db.staff.get(person.id);
       if (!current || current.pin || !current.active || current.deleted || current.role !== "owner") throw new Error("Owner setup changed. Lock and sign in again.");
-      const saved = { ...current, name: name.trim(), pin: newPin }; await put("staff", saved); setMe(saved);
+      /* The placeholder has the same id on every install, so saving it as the owner replaced the shop's
+         real owner in the cloud (22 Oct: "karan" became "m"). A new owner gets an id of its own. */
+      const saved = current.id === SEED_OWNER ? { ...current, id: uid(), name: name.trim(), pin: newPin } : { ...current, name: name.trim(), pin: newPin };
+      await put("staff", saved);
+      if (current.id === SEED_OWNER) await db.staff.delete(SEED_OWNER);
+      setMe(saved);
     } catch (e: any) { setBad(e.message); } finally { setBusy(false); }
   };
 
@@ -296,6 +332,11 @@ export function WhoAreYou() {
       <div className="pad stack">
         {unlocked && reset ? <OwnerPinReset onDone={person => { setReset(false); if (person) setMe(person); }}
             onUseCloud={o => { setReset(false); setPick(o); setPin(""); setCode(""); setBad(""); }} />
+        : unlocked && joining ? <div className="stack" role="status">
+          <div className="b sm">Getting the shop from the cloud…</div>
+          <div className="xs mut">Names, PINs, stock and bills are coming to this computer. Then sign in with your usual PIN — no new setup needed.</div>
+          <button type="button" className="linkbtn" onClick={() => setJoining(false)}>This is a new shop — set it up here</button>
+        </div>
         : unlocked && (needsName || (pick?.role === "owner" && !pick.pin)) ? <form className="stack" onSubmit={e => { e.preventDefault(); void setupOwner(needsName ? persons[0] : pick!, needsName ? owner : pick!.name); }}>
           <div className="b sm">Set up the owner's personal PIN</div>
           <div className="xs mut">One-time setup for an owner who has no PIN yet. Keep this PIN private; staff use their own access.</div>

@@ -155,6 +155,9 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
   const printer = useLabelPrint(cfg, setCfg);
   const [saved, setSaved] = useState<Purchase | null>(null);
   const lock = useRef(false), file = useRef<HTMLInputElement>(null);
+  /* every line the AI has read for this bill so far, pages in order, so a later page's ditto marks and the
+     bill's Net are checked against the whole bill */
+  const readSoFar = useRef<any[]>([]);
   const [cam, setCam] = useState(camera);
   useEffect(() => {
     const open = () => { (window as any).__rjBillCamera = false; setCam(true); };
@@ -213,52 +216,73 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
     catch (e: any) { setConnection(e.message); } finally { setChecking(false); }
   };
 
+  /* Owner, 22 Oct (voice note): "I scanned a bill with AI, it had more lines but it took only 15 —
+     when all the pictures were scanned, only 15 items came." "Photo of another page" READ the new page
+     in place of the first one, so page 1's lines disappeared. Now a page read while a bill is open is
+     ADDED below its lines, and more than three photos are read three at a time. The bill's own serial
+     numbers carry on from page to page; lines without one are numbered on after the last line. */
   const read = async (files: File[]) => {
     if (!files.length || lock.current) return;
-    if (files.length > 3) return setError("Choose up to three pages of one bill");
+    if (files.length > 12) return setError("Choose up to twelve pages of one bill");
     if (!(await getSetting<boolean>("bill_ai_ok", false))) {
       if (!confirm("Bill photos are sent to the AI (OpenAI, then Gemini, then Groq) to be read. Nothing is saved until you approve.\n\nAllow this from now on, on this device?")) return;
       await setSetting("bill_ai_ok", true);
     }
-    lock.current = true; setBusy(true); setError(""); setJobs([]); setSaved(null); setBulkQty(""); setBulkRef(""); setQuantityNote("");
+    const adding = d.rows.length > 0;
+    lock.current = true; setBusy(true); setError(""); setJobs([]); setSaved(null);
+    if (!adding) { setBulkQty(""); setBulkRef(""); setQuantityNote(""); readSoFar.current = []; }
     try {
-      const images = [];
-      for (const f of files) { const { blob } = await compress(f, 2200, 800000); images.push({ data: await blobToB64(blob), mime: blob.type }); }
-      const out = await api<any>("purchase-photo", { images });
-      const rule = await getRule(); setPricing(rule);
-      const text = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v) : "");
-      const raw = out.rows.map((r: any) => ({
-        item: text(r.item), style: text(r.style), color: text(r.color), unit: text(r.unit) || "PCS",
-        hsn: text(r.hsn), qty: readCount(r.qty), pack: text(r.pack),
-        cost: text(r.cost), rate: text(r.rate), amount: text(r.amount), box: text(r.box),
-        sr: text(r.sr).trim().replace(/\s+/g, "").slice(0, 9).replace(/[^0-9A-Za-z+\-/]/g, ""),
-      }));
-      // the bill checked against itself: ditto marks written out, each line's amount, the Net
-      const checked = checkBill(raw, text(out.invoice_total));
-      // keep the bill's own cost on each line; a "selling rate" equal to the cost is just the supplier's price
-      // read twice (owner's bill, 18 Oct: rate 170 = cost 170), so it is left for shop pricing to fill
-      const read: PhotoRow[] = checked.rows.map(({ amount: _a, box: _b, ...r }) => ({ ...r, stickers: "", billCost: r.cost, rate: r.rate && Number(r.rate) === Number(r.cost) ? "" : r.rate }));
-      // bills that print no article get one built from item + rate, so the lines neither collide nor merge
-      const supplier = matchSupplier(text(out.supplier).trim(), suppliers)?.id || "";
-      const rows = await preparePhotoRows(pricePhotoRows(autoArticle(read), rule), supplier, packetDefault);
-      const boxes = out.rows.filter((r: any) => r?.box && String(r.box).trim() && String(r.box).trim() !== "0").length;
-      const readBy = out.read_by ? String(out.read_by) : "";
-      const fellBack = Array.isArray(out.attempts) && out.attempts.some((a: any) => a && a.ok === false && !a.skipped);
-      const supplierName = text(out.supplier).trim();
-      const printedNo = text(out.bill_no).trim();
-      set({
-        rows, supplier, supplierName, total: text(out.invoice_total),
-        billNo: printedNo || fallbackBillNo(text(out.bill_date), checked.net),
-        autoBillNo: !printedNo,
-        check: { summary: checkSummary(checked), ok: checked.addsUp === true && !checked.doubts.length, fixes: checked.fixes, doubts: checked.doubts },
-        warnings: [
-          ...(Array.isArray(out.warnings) ? out.warnings.map(String) : []),
-          boxes ? `${boxes} line(s) showed a box/packet count. Printed packet sizes, known articles, or your saved packet default fill X automatically; check the quantities below.` : "",
-          fellBack && readBy ? `Read by ${readBy} — an earlier provider was unavailable, so check these lines a little harder than usual.` : "",
-        ].filter(Boolean).join("\n"),
-        photoId: await savePhoto(files[0]),
-      });
-      setDone({});   // a new bill: nothing has been applied to it yet
+      let current = adding ? d : { ...d, rows: [] as PhotoRow[], warnings: "", total: "" };
+      for (let at = 0; at < files.length; at += 3) {
+        const part = files.slice(at, at + 3);
+        const images = [];
+        for (const f of part) { const { blob } = await compress(f, 2200, 800000); images.push({ data: await blobToB64(blob), mime: blob.type }); }
+        const out = await api<any>("purchase-photo", { images });
+        const rule = await getRule(); setPricing(rule);
+        const text = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v) : "");
+        const raw = out.rows.map((r: any) => ({
+          item: text(r.item), style: text(r.style), color: text(r.color), unit: text(r.unit) || "PCS",
+          hsn: text(r.hsn), qty: readCount(r.qty), pack: text(r.pack),
+          cost: text(r.cost), rate: text(r.rate), amount: text(r.amount), box: text(r.box),
+          sr: text(r.sr).trim().replace(/\s+/g, "").slice(0, 9).replace(/[^0-9A-Za-z+\-/]/g, ""),
+        }));
+        const before = readSoFar.current.length;
+        readSoFar.current = [...readSoFar.current, ...raw];
+        const total = text(out.invoice_total) || current.total || "";
+        // the bill checked against itself (all pages so far): ditto marks written out, each line's amount, the Net
+        const checked = checkBill(readSoFar.current, total);
+        // keep the bill's own cost on each line; a "selling rate" equal to the cost is just the supplier's price
+        // read twice (owner's bill, 18 Oct: rate 170 = cost 170), so it is left for shop pricing to fill
+        const read: PhotoRow[] = checked.rows.slice(before).map(({ amount: _a, box: _b, ...r }) => ({ ...r, stickers: "", billCost: r.cost, rate: r.rate && Number(r.rate) === Number(r.cost) ? "" : r.rate }));
+        // bills that print no article get one built from item + rate, so the lines neither collide nor merge
+        const supplier = current.supplier || matchSupplier(text(out.supplier).trim(), suppliers)?.id || "";
+        const rows = await preparePhotoRows(pricePhotoRows(autoArticle(read), rule), supplier, packetDefault);
+        const boxes = out.rows.filter((r: any) => r?.box && String(r.box).trim() && String(r.box).trim() !== "0").length;
+        const readBy = out.read_by ? String(out.read_by) : "";
+        const fellBack = Array.isArray(out.attempts) && out.attempts.some((a: any) => a && a.ok === false && !a.skipped);
+        const supplierName = current.supplierName || text(out.supplier).trim();
+        const printedNo = text(out.bill_no).trim();
+        const counted = Number(text(out.lines_on_bill)) || 0;
+        const keepNo = !!current.billNo && !current.autoBillNo;
+        current = {
+          ...current,
+          rows: [...current.rows, ...rows], supplier, supplierName, total,
+          billNo: keepNo ? current.billNo : printedNo || fallbackBillNo(text(out.bill_date), checked.net),
+          autoBillNo: keepNo ? false : !printedNo,
+          check: { summary: checkSummary(checked), ok: checked.addsUp === true && !checked.doubts.length, fixes: checked.fixes, doubts: checked.doubts },
+          warnings: [
+            current.warnings,
+            ...(Array.isArray(out.warnings) ? out.warnings.map(String) : []),
+            counted > raw.length ? `The AI counted ${counted} lines on ${part.length > 1 ? "these pages" : "this page"} but read only ${raw.length}. Take the photo again (closer, one page at a time) or add the missing lines with + Line.` : "",
+            boxes ? `${boxes} line(s) showed a box/packet count. Printed packet sizes, known articles, or your saved packet default fill X automatically; check the quantities below.` : "",
+            fellBack && readBy ? `Read by ${readBy} — an earlier provider was unavailable, so check these lines a little harder than usual.` : "",
+          ].filter(Boolean).join("\n"),
+          photoId: current.photoId || await savePhoto(files[0]),
+        };
+        set(current);
+        if (adding || at > 0) toast(`Page added: ${rows.length} more line${rows.length === 1 ? "" : "s"} — this bill now has ${current.rows.length}`);
+      }
+      if (!adding) setDone({});   // a new bill: nothing has been applied to it yet
     } catch (e: any) { setError(e.message); } finally { lock.current = false; setBusy(false); }
   };
 
@@ -438,7 +462,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       </div>}
     </div>}
     {!!d.rows.length && <div className="row"><b className="grow">{d.supplierName || "Purchase bill"}{d.billNo ? <span className="xs mut"> · {d.billNo}</span> : null}</b>
-      <button className="btn sm" disabled={busy} onClick={() => setCam(true)}><Camera size={15} />Photo of another page</button>
+      <button className="btn sm" disabled={busy} onClick={() => setCam(true)}><Camera size={15} />Add next page</button>
       <button className="btn sm" disabled={busy} title="Adds a blank line at the top" onClick={() => {
         set({ rows: [blank(packetDefault), ...d.rows] });
         setTimeout(() => (document.querySelector('input[aria-label="item line 1"]') as HTMLInputElement | null)?.focus(), 50);
@@ -446,6 +470,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       <button type="button" className="linkbtn" disabled={busy} onClick={async () => {
         if (busy || lock.current || !await confirmDelete("Clear this bill and start again? Nothing has been saved.")) return;
         set({ rows: [], supplier: "", billNo: "", total: "", warnings: "", check: undefined, supplierName: "", photoId: undefined, autoBillNo: undefined });
+        readSoFar.current = [];
         setDone({}); setSelection(new Set()); setError("");
         setBulkQty(""); setBulkPack(packetDefault); setBulkRef(""); setQuantityNote("");
       }}>Start over</button></div>}
@@ -469,6 +494,10 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         {saved.items.map((l, i) => <tr key={i}><td>{l.item}</td><td className="mono">{l.style}</td><td>{l.color}</td><td className="r">{l.pack > 1 ? l.pkts * l.pack : l.qty}</td><td className="r">{l.rate ? (l.rate / 100).toFixed(2) : "—"}</td></tr>)}
       </tbody></table></div>
     </div>}
+    {!d.rows.length && !saved && <details className="note" open>
+      <summary><b>Sticker settings</b> <span className="xs mut">— what prints on each sticker, its position and text size. Saved on this computer.</span></summary>
+      <StickerQuickBar cfg={cfg} onChange={setCfg} />
+    </details>}
     {!d.rows.length && recent.filter(p => p.id !== saved?.id).length > 0 && <details className="note">
       <summary><b>Recent purchases</b> <span className="xs mut">— print their labels again without re-reading the bill</span></summary>
       <div className="stack" style={{ gap: 6, marginTop: 6 }}>{recent.filter(p => p.id !== saved?.id).map(p => <div key={p.id} className="row" style={{ flexWrap: "wrap", gap: 8 }}>
@@ -479,6 +508,16 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
     </details>}
 
     {!!d.rows.length && <>
+      {/* Sticker settings and the sticker preview sit at the TOP of the bill (owner, 22 Oct): under a long
+          bill they were below every line, so he scrolled past 20+ lines and thought they had been removed. */}
+      <div className="stack sticker-top">
+        <StickerQuickBar cfg={cfg} onChange={setCfg} />
+        {!!preview.length && <>
+          <div className="row"><b>{labelCount} labels</b><span className="xs mut">Stickers: grey means one per packet; enter an exact count, or 0 for none. X is the quantity in each packet. · {cfg.w}×{cfg.h}mm · {cfg.output === "tspl" && directPrintSupported() ? "straight to the TSC printer" : "browser print sheet"}</span></div>
+          <div className="label-preview">{preview.map((p, i) => <LabelView key={i} cfg={cfg} p={p} qtyOnLabel={p.pack || 1} line={d.rows[i]?.sr?.trim() || i + 1} />)}
+            {d.rows.length > preview.length && <span className="xs mut">+{d.rows.length - preview.length} more designs</span>}</div>
+        </>}
+      </div>
       {d.check && <div className={"note " + (d.check.ok ? "ok" : "warn")} role="status">
         <b>{d.check.ok ? "✓ " : ""}{d.check.summary}</b>
         {d.check.fixes.map(f => <div key={"f" + f.line} className="sm">Line {f.line}: {f.field === "qty" ? "quantity" : "cost"} read as {f.from}, set to <b>{f.to}</b>, because {f.why}.</div>)}
@@ -590,12 +629,6 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       {done.pricing && done.pricingSig === costSig(d.rows) && <div className="note ok applied-note sm" role="status">✓ {done.pricing}</div>}
       {pricing && <div className="row sm"><span>Pricing: {pricing.margin.mode === "percent" ? `+${pricing.margin.percent}%` : `${pricing.margin.mode === "divide" ? "÷" : "×"}${pricing.margin.factor}`} · round ₹{pricing.margin.round_to} {pricing.margin.round_dir}</span><a href="#/settings/prices">Pricing settings</a></div>}
 
-      {!!preview.length && <div className="stack">
-        <StickerQuickBar cfg={cfg} onChange={setCfg} />
-        <div className="row"><b>{labelCount} labels</b><span className="xs mut">Stickers: grey means one per packet; enter an exact count, or 0 for none. X is the quantity in each packet. · {cfg.w}×{cfg.h}mm · {cfg.output === "tspl" && directPrintSupported() ? "straight to the TSC printer" : "browser print sheet"}</span></div>
-        <div className="label-preview">{preview.map((p, i) => <LabelView key={i} cfg={cfg} p={p} qtyOnLabel={p.pack || 1} line={d.rows[i]?.sr?.trim() || i + 1} />)}
-          {d.rows.length > preview.length && <span className="xs mut">+{d.rows.length - preview.length} more designs</span>}</div>
-      </div>}
 
       {validation && <div className="note warn" role="status">{validation}</div>}
       {d.warnings && <div className="note warn" style={{ whiteSpace: "pre-wrap" }}>{d.warnings}</div>}

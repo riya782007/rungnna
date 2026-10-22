@@ -99,10 +99,13 @@ async function firstRun() {
   }
   // local placeholder only (epoch timestamp, not queued): a real owner row from the cloud always wins
   if ((await db.staff.count()) === 0)
-    await db.staff.put({ id: "00000000-0000-4000-8000-00000000a001", name: "Owner", role: "owner", phone: "", pin: "", active: 1, updated_at: "1970-01-01T00:00:00.000Z" } as Staff);
+    await db.staff.put({ id: SEED_OWNER, name: "Owner", role: "owner", phone: "", pin: "", active: 1, updated_at: "1970-01-01T00:00:00.000Z" } as Staff);
   await setSetting("seeded", true);
   try { await navigator.storage?.persist?.(); } catch { /* browser may refuse */ }
 }
+
+/** The blank owner every new install starts with (same id everywhere; never saved to the cloud as the owner). */
+export const SEED_OWNER = "00000000-0000-4000-8000-00000000a001";
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [me, setMeS] = useState<Staff | null>(null);

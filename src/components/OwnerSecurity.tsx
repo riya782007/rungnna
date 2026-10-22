@@ -11,7 +11,7 @@ export function OwnerGate({ children }: { children: ReactNode }) {
   useEffect(() => { setOk(null); if (me) ownerVerified(me).then(setOk); else setOk(true); }, [me?.id, cfg?.updated_at]);
   if (ok === null) return <div className="pad">Checking device…</div>;
   if (ok) return <>{children}</>;
-  return <div className="security-gate stack"><h2>Owner verification</h2><ShopLogin /><label className="f">Authenticator code<input className="in" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ""))} /></label>
+  return <div className="security-gate stack"><h2>Owner verification</h2><ShopLogin emailOnly /><label className="f">Authenticator code<input className="in" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ""))} /></label>
     <button className="btn p" disabled={busy || code.length !== 6} onClick={async () => { setBusy(true); try { await verifyOwner(code, me!); setOk(true); } catch (e: any) { toast(e.message, true); } finally { setBusy(false); } }}>Verify this device</button><button className="btn" onClick={() => setMe(null)}>Switch person</button></div>;
 }
 export function SecuritySettings() {

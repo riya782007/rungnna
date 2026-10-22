@@ -1,4 +1,4 @@
-import { sb, signOut } from "./sync";
+import { sb, ensureSession } from "./sync";
 import { apiUrl } from "./platform";
 import { db } from "./db";
 
@@ -9,18 +9,26 @@ async function token() {
 }
 export async function api<T = any>(path: string, body?: unknown): Promise<T> {
   if (!navigator.onLine) throw new Error("AI needs internet — everything else keeps working offline");
-  const r = await fetch(apiUrl(path), {
+  await ensureSession().catch(() => false);   // a shop device connects itself: no email or password to type
+  const call = async () => fetch(apiUrl(path), {
     method: body ? "POST" : "GET",
     headers: { "content-type": "application/json", authorization: "Bearer " + (await token()) },
     body: body ? JSON.stringify(body) : undefined,
   });
+  let r = await call();
+  /* An expired or replaced login used to sign the device OUT here, which sent the owner back to
+     Settings to type the email and password again. Now the login is renewed quietly and the call
+     tried once more; the device stays connected. */
+  if (r.status === 401) {
+    const c = await sb();
+    const renewed = await c?.auth.refreshSession().then(x => !!x.data.session).catch(() => false);
+    if (!renewed) { await c?.auth.signOut({ scope: "local" }).catch(() => {}); await ensureSession().catch(() => false); }
+    r = await call();
+  }
   // a page that is not JSON (an HTML fallback, a proxy error) is never an answer, even with a 200:
   // treating it as one turned "the server is unreachable" into "no AI key yet"
   const j = await r.json().catch(() => null);
   if (!j || typeof j !== "object") throw new Error(`The AI service did not answer (server ${r.status}). Check the internet, or that the latest version is deployed.`);
-  /* A login the server rejects (an old token, or one from before this Supabase project) would
-     otherwise keep Settings saying "Connected", which hides the very form that fixes it. */
-  if (r.status === 401 && /no longer valid/i.test(String(j.error || ""))) await signOut().catch(() => {});
   if (!r.ok) throw new Error(j.error || "Failed");
   return j as T;
 }

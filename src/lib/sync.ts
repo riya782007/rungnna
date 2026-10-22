@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { apiUrl } from "./platform";
-import { db, getSetting, setSetting, rebuildStock, now } from "./db";
+import { db, getSetting, setSetting, rebuildStock, now, put } from "./db";
 import { rfidDefaults } from "./rfid";
 import { ownerOnly } from "./scope";
 import { COLUMNS } from "./columns";
@@ -58,7 +58,33 @@ export async function signIn(email: string, password: string) {
   if (error) throw new Error(authHelp(error.message) || error.message);
   syncNow();
 }
-export async function signOut() { const c = await sb(); await c?.auth.signOut(); emit({ user: undefined }); }
+export async function signOut() { const c = await sb(); await setSetting("shop_device", false); await c?.auth.signOut(); emit({ user: undefined }); }
+
+/* Owner, 22 Oct (voice note): "it keeps asking me to create the company again and again — three times now".
+   Every new computer, browser or app install started empty, asked for the owner's name and PIN, and then
+   for an email and password in Settings › Cloud backup. He made a new login each time (six logins in the
+   cloud today), and the new computer's blank "Owner" replaced his real owner in the cloud.
+
+   Now a device that has passed the shop's entry code connects itself: an old session is refreshed, and a
+   device with none signs in as an unnamed shop device (Supabase anonymous sign-in). Nobody types an email
+   or password to sync, read purchase bills or print their stickers. The owner's email login still works
+   and is still what proves the owner (owner PIN reset, GST). */
+const SHOP_DEVICE = "shop_device";
+export const markShopDevice = () => setSetting(SHOP_DEVICE, true);
+let anonRefused = 0;   // the project has anonymous sign-ins switched off: don't ask again for 10 minutes
+export async function ensureSession(): Promise<boolean> {
+  const c = await sb(); if (!c || !navigator.onLine) return false;
+  if ((await c.auth.getSession()).data.session) return true;
+  if (!await getSetting<boolean>(SHOP_DEVICE, false)) return false;   // only after this device passed the entry code
+  if (Date.now() - anonRefused < 600_000) return false;
+  try {
+    const { data, error } = await c.auth.signInAnonymously();
+    if (error || !data.session) { anonRefused = Date.now(); return false; }
+    return true;
+  } catch { anonRefused = Date.now(); return false; }
+}
+/** Who this device is connected as, in words for the screen. */
+export const deviceLabel = (u?: { email?: string | null; is_anonymous?: boolean } | null) => u?.email || (u ? "this shop device" : "");
 
 /* The shop's cloud login has to exist before anything can sync, and before the AI
    can read a purchase bill — the bill reader checks this session before it spends a
@@ -192,6 +218,7 @@ async function push(c: SupabaseClient) {
         await assertCloudSyncEnabled();
         const e = (await c.from(t).upsert([r], { onConflict: "id" })).error;
         const mine = items.filter(i => i.row_id === r.id);
+        if (e && t === "products" && isCodeClash(e) && await adoptCloudProduct(c, r.id, r.code)) { done.push(...mine.map(i => i.seq!)); continue; }
         if (!e) done.push(...mine.map(i => i.seq!));
         else for (const i of mine) { skip.add(i.seq!); await db.outbox.update(i.seq!, { tries: (i.tries || 0) + 1, last_error: e.message }); }
       }
@@ -203,6 +230,36 @@ async function push(c: SupabaseClient) {
     await pendingCount();
   }
   if (skip.size) throw new Error(`${skip.size} change${skip.size > 1 ? "s" : ""} could not be saved to the cloud — see Settings › Sync`);
+}
+
+/* The same product made on two devices (22 Oct: the new Windows app had 17 products whose codes were
+   already in the cloud under other ids, so "Sync problem · 20" never cleared and their stock movements
+   were refused too). A product code is the product — it is on its printed stickers — so this device takes
+   the cloud's product and moves its own stock, bills and purchases onto it. Nothing is lost: this device's
+   newer details are kept on the cloud's row. */
+export const isCodeClash = (e: { code?: string; message?: string }) => /products_code_uq/i.test(e.message || "");
+export async function adoptCloudProduct(c: SupabaseClient, localId: string, code: string): Promise<boolean> {
+  if (!code) return false;
+  const { data, error } = await c.from("products").select("*").eq("code", code).limit(1);
+  const cloud: any = !error && data?.[0];
+  if (!cloud || cloud.id === localId) return false;
+  const local: any = await db.products.get(localId);
+  const newer = !!local && local.updated_at > cloud.updated_at;
+  const swap = (row: any) => JSON.parse(JSON.stringify(row).split(localId).join(cloud.id));
+  for (const t of TABLES) {
+    if (t === "products") continue;
+    const table = (db as any)[t];
+    const rows = await table.filter((r: any) => JSON.stringify(r).includes(localId)).toArray();
+    for (const r of rows) await put(t as any, swap(r));
+  }
+  await db.transaction("rw", db.products, db.outbox, async () => {
+    await db.products.delete(localId);
+    await db.outbox.where("table").equals("products").filter(x => x.row_id === localId).delete();
+  });
+  if (newer) await put("products", { ...cloud, ...local, id: cloud.id, code: cloud.code, created_at: cloud.created_at });
+  else await db.products.put({ ...cloud, photo_id: local?.photo_id || cloud.photo_id || undefined });
+  await rebuildStock();
+  return true;
 }
 
 /* ---------- pull ---------- */
@@ -260,9 +317,10 @@ export async function syncNow() {
     if (!navigator.onLine) { emit({ status: "offline", error: undefined }); return; }
     const c = await sb();
     if (!c) { emit({ status: "local", error: undefined }); return; }
-    const { data } = await c.auth.getSession();
+    let { data } = await c.auth.getSession();
+    if (!data.session && await ensureSession()) data = (await c.auth.getSession()).data;
     if (!data.session) { emit({ status: "idle", error: "Sign in to sync", user: undefined }); return; }
-    emit({ status: "syncing", error: undefined, user: data.session.user.email || "" });
+    emit({ status: "syncing", error: undefined, user: deviceLabel(data.session.user) });
     await assertCloudSyncEnabled();
     await uploadPhotos(c);
     await uploadVoice(c).catch(() => { /* voice bucket missing must never block stock sync */ });
