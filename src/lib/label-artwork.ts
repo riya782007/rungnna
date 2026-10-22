@@ -17,13 +17,18 @@ const clean = (s: string) => s.replace(/[\u0000-\u001f\u007f]/g, " ").trim();
 const qrCache = new Map<string, { modules: number; moduleDots: number; sizeDots: number; path: string }>();
 
 /** QR paths use integer printer dots, including the full four-module quiet zone. */
-export function labelQr(text: string, requestedMm: number) {
-  const key = `${requestedMm}\u0000${text}`, hit = qrCache.get(key);
+export function labelQr(text: string, requestedMm: number, roomMm = requestedMm) {
+  const key = `${requestedMm}\u0000${roomMm}\u0000${text}`, hit = qrCache.get(key);
   if (hit) return hit;
   const qr = qrcode(0, "M");
-  qr.addData(text, "Byte"); qr.make();
+  // capitals, digits and - . / : use the QR's compact alphanumeric mode: the short sticker QR then fits the
+  // smallest QR there is (21 × 21), so each square can be 3 printer dots instead of 2
+  qr.addData(text, /^[0-9A-Z $%*+\-./:]+$/.test(text) ? "Alphanumeric" : "Byte"); qr.make();
   const modules = qr.getModuleCount(), cells = modules + QR_QUIET_MODULES * 2;
-  const moduleDots = Math.max(2, Math.floor(dot(requestedMm) / cells));
+  // 2 printer dots per square is the bare minimum, and a thermal head's heat spreads it: such QRs scanned only
+  // sometimes (owner, 22 Oct). When a 3-dot QR still fits the sticker, use it, even a little past the set size.
+  let moduleDots = Math.max(2, Math.floor(dot(requestedMm) / cells));
+  if (moduleDots < 3 && cells * 3 <= dot(roomMm)) moduleDots = 3;
   const sizeDots = cells * moduleDots;
   let path = "";
   for (let r = 0; r < modules; r++) {
@@ -58,7 +63,7 @@ export function labelArtworkGeometry(cfg: LabelCfg, p: Product, qtyOnLabel: numb
   // An exact old-label copy keeps its printed price as well as its QR, including odd rates.
   const copied = qrText ? parseLabel(qrText) : undefined;
   if (copied?.how === "shop label") pp.rate = toPaise(copied.rate || "0");
-  const qr = labelQr(qrText ?? ownPayload(pp, cfg.format || "shop"), cfg.qr);
+  const qr = labelQr(qrText ?? ownPayload(pp, cfg.format || "shop"), cfg.qr, Math.min(cfg.qr + 3, cfg.h - cfg.pad * 2));
   const font = cfg.font * 25.4 / 72 * LABEL_DOTS_PER_MM;
   const brand = cfg.layout !== "stack" && cfg.show.shop && cfg.shop.trim() ? Math.ceil(font * 1.1) : 0;
   if (qr.sizeDots > height - pad * 2 || qr.sizeDots + brand + pad * 4 + 8 > width) {

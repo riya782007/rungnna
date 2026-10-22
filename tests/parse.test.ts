@@ -2,11 +2,16 @@ import { describe, it, expect } from "vitest";
 import { parseLabel, ownPayload, type Pattern } from "../src/lib/parse";
 
 describe("label decoder", () => {
-  it("reads our own QR", () => {
-    const raw = ownPayload({ code: "RAB12CD3EF", item: "CHAIN", type: "PCS", style: "K5209/59SH", color: "K/GBN", tk: "", rate: 9600 });
+  it("reads our own QR (the long Rungnna-only format)", () => {
+    const raw = ownPayload({ code: "RAB12CD3EF", item: "CHAIN", type: "PCS", style: "K5209/59SH", color: "K/GBN", tk: "", rate: 9600 }, "rungnna");
     const p = parseLabel(raw);
     expect(p.how).toBe("rungnna");
     expect(p).toMatchObject({ code: "RAB12CD3EF", item: "CHAIN", type: "PCS", style: "K5209/59SH", color: "K/GBN", rate: "96" });
+  });
+  it("shop stickers carry a short QR: the code and the pieces on that sticker (owner, 22 Oct)", () => {
+    const raw = ownPayload({ code: "RLYI848MOV2", item: "BANGLES", type: "PCS", style: "25061", color: "MIX", tk: "", rate: 39600, pack: 6 });
+    expect(raw).toBe("RJ2-RLYI848MOV2-6");
+    for (const typed of [raw, raw.toLowerCase(), "RJ2/RLYI848MOV2/6", "RJ2ßRLYI848MOV2ß6"]) expect(parseLabel(typed)).toMatchObject({ how: "rungnna", code: "RLYI848MOV2", qty: "6" });
   });
   it("reads key:value labels", () => {
     const p = parseLabel("ITEM:CHAIN TYPE:PCS STYLE:K5209/59SH COLOR:K/GBN RATE:96");
@@ -34,5 +39,17 @@ describe("label decoder", () => {
   });
   it("treats a single token as a code", () => {
     expect(parseLabel("  BR108696 ")).toMatchObject({ how: "code", code: "BR108696" });
+  });
+});
+
+import { labelArtworkGeometry } from "../src/lib/label-artwork";
+import { DEFAULT_CFG } from "../src/pages/Labels";
+describe("sticker QR is printable (owner, 22 Oct: some scanned only after many tries, some never)", () => {
+  it("the shop sticker's QR is the smallest kind, with 3-dot squares, on the 33 × 15 mm sticker", () => {
+    const p: any = { id: "x", code: "RLYI848MOV2", item: "BANGLES", type: "PCS", style: "25061", color: "MIX", tk: "", rate: 39600, pack: 1, barcodes: [] };
+    const g = labelArtworkGeometry(DEFAULT_CFG, p, 1);
+    expect(g.qr.modules).toBe(21);
+    expect(g.qr.moduleDots).toBe(3);                       // was 2 dots (0.25 mm) with the long RJ1 QR
+    expect(g.qr.sizeDots).toBeLessThanOrEqual(g.height - g.pad * 2);
   });
 });

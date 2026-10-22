@@ -18,8 +18,8 @@ beforeEach(async () => {
 });
 const row = (o: Partial<PhotoRow> = {}): PhotoRow => ({ item: "F-RING", style: "K5210/11/P", color: "W/XZ/13", unit: "PCS", hsn: "7117", qty: "3", cost: "58", rate: "146", ...o });
 const mangle: Record<string, (q: string) => string> = {
-  exact: q => q, backslash: q => q.replace(/\|/g, "\\"), hash: q => q.replace(/\|/g, "#"), dash: q => q.replace(/\|/g, "-"),
-  tilde: q => q.replace(/\|/g, "~"), lower: q => q.toLowerCase(), noShift: q => q.replace(/\|/g, "\\").toLowerCase(),
+  exact: q => q, backslash: q => q.replace(/[|-]/g, "\\"), hash: q => q.replace(/[|-]/g, "#"), slash: q => q.replace(/[|-]/g, "/"),
+  tilde: q => q.replace(/[|-]/g, "~"), lower: q => q.toLowerCase(), noShift: q => q.replace(/[|-]/g, "\\").toLowerCase(),
 };
 
 describe("purchase-bill stickers scan at billing, whatever the scanner's keyboard does", () => {
@@ -28,7 +28,7 @@ describe("purchase-bill stickers scan at billing, whatever the scanner's keyboar
     const prods = await db.products.toArray();
     for (const j of purchaseLabelJobs(pur, prods)) {
       const qr = ownPayload(productForLabel(j.p, j.qtyOnLabel), "shop");
-      expect(qr.startsWith("RJ1|")).toBe(true);
+      expect(qr).toMatch(/^RJ2-[A-Z0-9]+-1$/);   // short QR since 22 Oct; stickers already printed carry RJ1|… (tested below)
       for (const [how, f] of Object.entries(mangle)) {
         const p = await resolveBillingScan(f(qr), "o");
         expect(p?.id, how).toBe(j.p.id);
