@@ -33,7 +33,16 @@ function contradicts(q: Product, x: Parsed, labelName: string): boolean {
   if (up(x.color) && up(q.color) && up(q.color) !== up(x.color)) return true;
   return false;
 }
+/* Stickers a biller matched by hand after they failed to read (lib/scan-learn): the person's choice is final. */
+export const TAUGHT = "scan_taught";
+export async function taughtProduct(raw: string): Promise<Product | undefined> {
+  const id = ((await db.config.get(TAUGHT))?.value as Record<string, string> | undefined)?.[raw.trim()];
+  const p = id ? await db.products.get(id) : undefined;
+  return p && !p.deleted ? p : undefined;
+}
 async function findStoredScan(raw: string, x: Parsed): Promise<Product | undefined> {
+  const taught = await taughtProduct(raw);
+  if (taught) return taught;
   const r = isRfidTag(raw) ? normTag(raw) : raw.trim();   // RFID tags are stored in one canonical form
   const labelName = x.icode ? up((await itemInfoFor(x.icode))?.name) : "";
   // the exact sticker, or the same old-format QR typed with "-" / "`" / lower case by the scanner
@@ -71,6 +80,15 @@ async function findStoredScan(raw: string, x: Parsed): Promise<Product | undefin
     // an old-format sticker of a product that was deleted after printing: bring that product back
     if (!gone && x.how === "shop label") gone = (await db.products.where("style").equals(up(x.style)).toArray())
       .find(q => q.deleted && (!x.color || up(q.color) === up(x.color)) && !contradicts(q, x, labelName) && (!x.icode || q.item_code === x.icode || aliasFor(q.item) === x.icode));
+  }
+  // an old sticker with no style (or whose style the scanner garbled): the same old item at the printed rate
+  if (!x.style && x.how === "shop label" && x.icode && x.rate) {
+    const rate = toPaise(x.rate);
+    const same = (await db.products.filter(q => q.rate === rate && !q.deleted).toArray()).filter(q => !contradicts(q, x, labelName)
+      && (q.item_code === x.icode || (!q.item_code && aliasFor(q.item) === x.icode) || (!q.item_code && !!labelName && up(q.item) === labelName))
+      && (!x.color || !q.color || up(q.color) === up(x.color)));
+    const hit = same.find(q => !q.style?.trim()) || (same.length === 1 ? same[0] : undefined);
+    if (hit) return hit;
   }
   if (gone) {
     const back = { ...gone, deleted: 0 } as Product;
@@ -118,7 +136,7 @@ export async function findByScan(raw: string, parsed?: Parsed): Promise<Product 
     if (!found) return undefined;
     const p = await scannedDetails(found, x, rules);
     if (!["code", "unknown"].includes(x.how) && x.raw && !(p.barcodes || []).includes(x.raw)) p.barcodes = [...(p.barcodes || []), x.raw];
-    const saved = JSON.stringify(p) !== JSON.stringify(found) ? await saveProduct(p) : p;
+    const saved = JSON.stringify(p) !== JSON.stringify(found) ? await saveProduct(p, true) : p;
     return scannedPacket(saved, x);
   });
 }
@@ -129,11 +147,11 @@ export async function resolveProductScan(raw: string, by: string): Promise<{ pro
   const rules = await patterns(), parsed = parseLabel(raw, rules);
   return db.transaction("rw", [db.products, db.config, db.outbox], async () => {
     const found = await findStoredScan(raw, parsed);
-    if (!found && (["code", "unknown"].includes(parsed.how) || !(parsed.style || parsed.item))) return {};
+    if (!found && (["code", "unknown"].includes(parsed.how) || !(parsed.style || parsed.item || (parsed.how === "shop label" && parsed.icode && parsed.rate)))) return {};
     const source = found || fromParsed(parsed, by);
     const p = await scannedDetails(source, parsed, rules);
     if (parsed.raw && !(p.barcodes || []).includes(parsed.raw)) p.barcodes = [...(p.barcodes || []), parsed.raw];
-    const saved = !found || JSON.stringify(p) !== JSON.stringify(found) ? await saveProduct(p) : p;
+    const saved = !found || JSON.stringify(p) !== JSON.stringify(found) ? await saveProduct(p, true) : p;
     return { product: scannedPacket(saved, parsed), created: !found };
   });
 }
@@ -392,8 +410,10 @@ export async function showProducts(ids: string[]) {
   });
 }
 
-export async function saveProduct(p: Product) {
-  requirePerm("products.edit", "adding or editing products");
+/** fromScan: the app remembering a sticker it just read at the counter (its QR, or the product a printed old
+    sticker stands for). That is part of billing, not editing products, so it needs no products permission. */
+export async function saveProduct(p: Product, fromScan = false) {
+  if (!fromScan) requirePerm("products.edit", "adding or editing products");
   p.item = p.item.trim().toUpperCase(); p.style = p.style.trim().toUpperCase(); p.color = p.color.trim().toUpperCase();
   p.type = (p.type || "PCS").trim().toUpperCase();
   if (p.size != null) p.size = p.size.trim().toUpperCase() || undefined;   // same key as lib/inventory normSize, incl. legacy rows

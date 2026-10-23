@@ -15,6 +15,7 @@ import type { CalcTarget } from "../components/PosTools";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, type Bill, type BillLine, type Party, type Payment, type Product } from "../lib/db";
 import { findByScan, fillFromItemCode, label, readItemMap, codeInfo } from "../lib/products";
+import { noteMiss, clearMiss, learnFromPick } from "../lib/scan-learn";
 import { NameItemCodes, unnamedCodes } from "../components/NameItemCodes";
 import { isRfidTag, normTag, soldBill, TagSet, Recent } from "../lib/rfid";
 import { discError, newBill, lineFrom, priceFor, totals, gstLabel, fixLine, finalize, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
@@ -443,7 +444,13 @@ export default function Billing({ args }: { args: string[] }) {
       if (hits.length === 1) p = await fillFromItemCode(hits[0]);
     }
     if (!p && parsed.how === "rungnna" && parsed.code && !parsed.item) { beep(false); toast(`This sticker's item (${parsed.code}) isn't on this counter yet. Check the internet / cloud sync, then scan again.`, true); return "Not on this counter yet"; }
-    if (!p) { beep(false); toast(scannedLabel ? `Couldn't read this label — nothing added. Scan it again, or add it by hand (F8). The scanner sent: ${r.length > 48 ? r.slice(0, 48) + "…" : r}` : "Not found — scan the label or record it in Scan & record", true); return "Not found"; }
+    if (!p) {
+      beep(false);
+      if (scannedLabel) void noteMiss(r, me?.name || "");
+      toast(scannedLabel ? `This sticker didn't read. Type its style or name above and pick the item once — after that this sticker scans by itself. (Scanner sent: ${r.length > 40 ? r.slice(0, 40) + "…" : r})` : "Not found — scan the label or record it in Scan & record", true);
+      return "Not found";
+    }
+    clearMiss();
     if (!addProduct(p, 1, 0, 0, destination)) { beep(false); toast("Bill changed or saving — scan this label again", true); return "Bill changed or saving — scan again"; }
     // The sticker's printed rate is the operator's check: say so when the bill differs.
     const printed = parsed.rate && ["shop label", "rungnna"].includes(parsed.how) ? toPaise(parsed.rate) : 0;
@@ -584,6 +591,7 @@ export default function Billing({ args }: { args: string[] }) {
   const lastScan = t.items.find(l => l.id === lastScanId);
   const itemEditor = <Suspense fallback={<div className="pos-entry-loading" role="status">Loading items…</div>}><ManualItems key={b.id} inline persistent focusRequest={entryFocus} products={products} box={box} level={b.price_level || "wholesale"} canRates={can(me, "billing.rates")} onClose={() => {}}
     onProduct={(p, count, pieces, rate) => {
+      void learnFromPick(p).then(ok => ok && toast(`Learnt: this sticker now scans as ${label(p)}`));
       const line = fixLine({ ...lineFrom(p, box, pieces ? 0 : count, b.price_level || "wholesale"), ...(pieces ? { qty: count, pkts: 0 } : {}), rate });
       if (savingRef.current) throw new Error("Wait for the bill to finish saving");
       const repeated = repeatedPosLine(b.items, line);
@@ -647,7 +655,7 @@ export default function Billing({ args }: { args: string[] }) {
                   onKeyDown={e => { if (e.key === "Tab" && isRfidTag(q)) { e.preventDefault(); onCode(q); return; } if (e.key === "Enter") { e.preventDefault(); onCode(q); } }} />
                 {suggestions.length > 0 && q.length < 25 && (
                   <div className="sugg">{suggestions.map(p => (
-                    <button key={p.id} onClick={() => { addProduct(p); setQ(""); scanRef.current?.focus(); }}>
+                    <button key={p.id} onClick={() => { addProduct(p); setQ(""); scanRef.current?.focus(); void learnFromPick(p).then(ok => ok && toast(`Learnt: this sticker now scans as ${label(p)}`)); }}>
                       <Thumb photo_id={p.photo_id} url={p.photo_url} text={p.item} size={34} />
                       <span className="grow"><b>{p.style || p.code}</b> <span className="mut">{p.item} · {p.color}</span></span>
                       <span className="mono">{p.rate ? billAmount(p.rate) : ""}{p.pack ? " ×" + p.pack : ""}</span></button>))}</div>)}

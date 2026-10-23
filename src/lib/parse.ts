@@ -59,8 +59,17 @@ export function guessSep(raw: string): string {
 const clean = (v: unknown) => String(v ?? "").trim();
 const num = (v: string) => { const m = v.replace(/[, ₹]/g, "").match(/-?\d+(\.\d+)?/); return m ? m[0] : ""; };
 
+/* Owner, 25 Oct (phone call): "the stickers our previous software printed don't scan in your billing". Those
+   stickers are read by the same scanner as ours, so what differs is what the scanner TYPES for them: a scanner
+   on an "international" keyboard turns "~" + A/N/O into one letter (Ã Ñ Õ), one set to a UK keyboard types
+   "~" as "|" or "¬". This puts the old label's "~" back before anything else reads it. */
+const DEAD: Record<string, string> = { "Ã": "~A", "ã": "~a", "Ñ": "~N", "ñ": "~n", "Õ": "~O", "õ": "~o" };
+export function undoDeadKeys(raw: string): string {
+  return /^\d+/.test(raw) && /[ÃãÑñÕõ]/.test(raw) ? raw.replace(/[ÃãÑñÕõ]/g, c => DEAD[c]) : raw;
+}
+
 export function parseLabel(rawIn: string, patterns: Pattern[] = []): Parsed {
-  const raw = rawIn.replace(/\r/g, "").replace(/[\u0000-\u0008\u000b\u001d\u001e]/g, "").trim();
+  const raw = undoDeadKeys(rawIn.replace(/\r/g, "").replace(/[\u0000-\u0008\u000b\u001d\u001e]/g, "").trim());
   const base: Parsed = { raw, how: "code", tokens: [raw] };
   if (!raw) return base;
 
@@ -86,10 +95,12 @@ export function parseLabel(rawIn: string, patterns: Pattern[] = []): Parsed {
   // 1b. the shop's existing labels (old billing software):
   //     ITEMCODE~RATE~PACKQTY~REF~TK~STYLE~COLOR   e.g. 202~24~12~183~~K5208/K-LT~W/LP/B
   //     printed as  F-RING / K5208/K-LT / W/LP/B / ₹24X12PCS
+  //     Some old stickers have no style (…~183~~~KXZ), and a style may itself hold a "~": the colour is always
+  //     the last piece and the style everything between TK and colour.
   const tl = raw.split("~");
-  if (tl.length === 7 && /^\d+$/.test(tl[0].trim()) && tl[5].trim()) {
-    const [icode, rate, qty, ref, tk, style, color] = tl.map(t => t.trim());
-    return { raw, how: "shop label", tokens: tl, icode, rate: num(rate), qty: num(qty), ref, tk, style, color };
+  if (tl.length >= 7 && /^\d+$/.test(tl[0].trim()) && /^\d+(\.\d+)?$/.test(tl[1].trim()) && (tl.slice(5).join("").trim())) {
+    const t = tl.map(x => x.trim()), [icode, rate, qty, ref, tk] = t, color = t[t.length - 1], style = t.slice(5, -1).join("~");
+    return { raw, how: "shop label", tokens: [icode, rate, qty, ref, tk, style, color], icode, rate: num(rate), qty: num(qty), ref, tk, style, color };
   }
   // 1c. the same old label typed by a scanner on the wrong keyboard layout, which turns
   //     "~" into "-", "`" or "^":  255-224-1-183--K5208/2T-KXZ. Styles can contain "-",
@@ -99,9 +110,14 @@ export function parseLabel(rawIn: string, patterns: Pattern[] = []): Parsed {
     const t = raw.split(alt[2]).map(x => x.trim());
     if (t.length >= 7) {
       const [icode, rate, qty, ref, tk] = t, color = t[t.length - 1], style = t.slice(5, -1).join(alt[2]);
-      if (style && !/[|{}]/.test(raw)) return { raw, how: "shop label", tokens: [icode, rate, qty, ref, tk, style, color], icode, rate: num(rate), qty: num(qty), ref, tk, style, color };
+      // "|" is what a scanner set to a UK keyboard types for "~" (our own RJ1| labels were read above)
+      if ((style || color) && !/[{}]/.test(raw)) return { raw, how: "shop label", tokens: [icode, rate, qty, ref, tk, style, color], icode, rate: num(rate), qty: num(qty), ref, tk, style, color };
     }
   }
+  // 1d. an old label whose end the scanner garbled: the item code, rate and packet at the start are enough to
+  //     bill it (the item's name comes from its code), so the counter never stops for it.
+  const head = /^(\d{1,6})([^A-Za-z0-9\s./])(\d{1,6}(?:\.\d{1,2})?)\2(\d{1,5})(?:\2|$)/.exec(raw);
+  if (head && !/^RJ/i.test(raw) && Number(head[3]) > 0 && raw.split(head[2]).length >= 5) return { raw, how: "shop label", tokens: [head[1], head[3], head[4]], icode: head[1], rate: num(head[3]), qty: num(head[4]) };
 
   // 2. JSON
   if (/^[\[{]/.test(raw)) {
