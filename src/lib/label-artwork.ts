@@ -78,7 +78,7 @@ export function labelArtworkGeometry(cfg: LabelCfg, p: Product, qtyOnLabel: numb
   if (copied?.how === "shop label") pp.rate = toPaise(copied.rate || "0");
   // 3-dot squares whenever they fit the sticker's height, even into its margin: a QR that scans first time
   // matters more than a millimetre of words (owner, 24 Oct)
-  const qr = labelQr(qrText ?? ownPayload(pp, cfg.format || "shop"), cfg.qr, Math.min(cfg.qr + 5, cfg.h - 0.6));
+  const qr = labelQr(qrText ?? ownPayload(pp, cfg.format || "shop"), cfg.qr, cfg.h - 0.6);
   const font = cfg.font * 25.4 / 72 * LABEL_DOTS_PER_MM;
   const brand = cfg.layout !== "stack" && cfg.show.shop && cfg.shop.trim() ? Math.ceil(font * 1.1) : 0;
   if (qr.sizeDots > height - 4 || qr.sizeDots + brand + pad * 4 + 8 > width) {

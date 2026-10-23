@@ -10,7 +10,8 @@ import { ViewCodeGate } from "./components/ViewCodeGate";
 import { CompanyPicker } from "./components/CompanyPicker";
 import { companiesFor, companyKind } from "./lib/stores";
 import { setCompanyKind } from "./lib/scope";
-import { setCompanyOpen } from "./lib/privacy";
+import { setCompanyOpen, getPrivate } from "./lib/privacy";
+import { exitCompany, watchIdle } from "./lib/companyLock";
 import type { Store } from "./lib/db";
 import { VIEW_ROUTES, setViewOpen, useViewOpen } from "./lib/viewCode";
 import { can, roleName } from "./lib/roles";
@@ -112,6 +113,16 @@ function Shell() {
   // one company at sign-in: nothing to choose (and making a second one later doesn't interrupt the work)
   useEffect(() => { if (me && companiesQ && companiesQ.length <= 1) setPicked(me.id); }, [me?.id, companiesQ?.length]);
   useEffect(() => { void companyKind(store).then(k => { setCompanyKind(k); setCompanyOpen(k === "estimate"); }); }, [store, stores]);
+  // the estimate company closes itself after the idle minutes and the app returns to the tax-invoice company (owner, 23 Oct)
+  useEffect(() => {
+    const back = exitCompany(companiesQ || [], store);
+    if (!back) return;
+    let stop = () => {}, live = true;
+    void getPrivate().then(c => { if (live) stop = watchIdle(c?.minutes || 10, () => {
+      void switchStore(back).then(() => { toast("Estimates closed — back to " + ((companiesQ || []).find(x => x.id === back)?.name || "tax invoices")); go("bill"); }).catch(e => toast(e.message, true));
+    }); });
+    return () => { live = false; stop(); };
+  }, [store, companiesQ]);
   useEffect(() => { setViewOpen(false); }, [me?.id]);   // the view code is asked again for the next person
   useEffect(() => {
     startSync(); warmScanner();

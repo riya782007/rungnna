@@ -106,7 +106,8 @@ function PartyView({ id }: { id: string }) {
       </div>
 
       <div className="tabs" style={{ marginBottom: 14 }}>
-        {(["account", "profit", "bills", "details"] as const).map(t => <a key={t} href={"#/customers/" + id} className={tab === t ? "on" : ""} onClick={e => { e.preventDefault(); setTab(t); }}>{t === "account" ? "Khata (journal)" : t === "profit" ? "Profit & pattern" : t === "bills" ? "Bills" : "Details"}</a>)}
+        {/* owner, 23 Oct (voice): the customer's profit is for the owner only; staff see the khata (payments, receipts) */}
+        {(["account", "profit", "bills", "details"] as const).filter(t => t !== "profit" || me?.role === "owner").map(t => <a key={t} href={"#/customers/" + id} className={tab === t ? "on" : ""} onClick={e => { e.preventDefault(); setTab(t); }}>{t === "account" ? "Khata (journal)" : t === "profit" ? "Profit & pattern" : t === "bills" ? "Bills" : "Details"}</a>)}
       </div>
 
       {tab === "account" && <div className="split">
@@ -135,7 +136,7 @@ function PartyView({ id }: { id: string }) {
           </tbody></table></div>
       </div>}
 
-      {tab === "profit" && (pl ? <div className="split">
+      {tab === "profit" && me?.role === "owner" && (pl ? <div className="split">
         <div className="card pad stack">
           <b>What the shop sees in {p.name}</b>
           <ul className="stack" style={{ margin: 0, paddingLeft: 18 }}>{pl.advice.map((a, i) => <li key={i} className="sm">{a}</li>)}</ul>

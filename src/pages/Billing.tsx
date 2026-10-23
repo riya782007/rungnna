@@ -322,7 +322,9 @@ export default function Billing({ args }: { args: string[] }) {
     finally { switchingRef.current = false; setSwitching(false); }
   }
   const press = useRef<any>(0);
-  const hintProps = {
+  /* owner, 23 Oct: "double-click for estimates is not needed when the companies are separate" — in the
+     tax-invoice company estimates live in the other company, so the title does nothing there */
+  const hintProps = companyKindNow() === "gst" ? {} : {
     onDoubleClick: () => !priv && setAskCode(true),
     onPointerDown: () => { press.current = setTimeout(() => !priv && setAskCode(true), 700); },
     onPointerUp: () => clearTimeout(press.current), onPointerLeave: () => clearTimeout(press.current),
@@ -407,7 +409,7 @@ export default function Billing({ args }: { args: string[] }) {
       const next = ++boxCountRef.current; boxRef.current = next; setBox(next); set({ box_count: next }); setQ("");
       beep(); toast("Box " + next); return "Box " + next;
     }
-    if (r.startsWith("#") && r.length > 1) { // typed code in the scan box
+    if (r.startsWith("#") && r.length > 1 && companyKindNow() !== "gst") { // typed code in the scan box (not in the tax-invoice company)
       setQ("");
       if (await unlock(r.slice(1))) { await openDocument("estimate"); beep(); } else { beep(false); toast("Not found", true); }
       return "";

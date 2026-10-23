@@ -75,7 +75,7 @@ export function labelTSPL(look: LabelLook, p: Product, pack: number, copies: num
   const qrMm = Math.min(look.qr, h - pad * 2), qrDots = dots(qrMm);
   const modules = qrSvg(qrText).modules + 2;           // + 1-module quiet zone each side
   // 3-dot squares when the sticker's height allows, as on the screen/browser sticker (owner, 24 Oct: one scan, every time)
-  const room = dots(Math.min(look.qr + 5, h - 0.6));
+  const room = dots(h - 0.6);   // owner, 23 Oct: "a bigger QR is no problem", so it may use the sticker's full height
   const cell = Math.min(Math.floor(room / modules), Math.max(3, Math.floor(qrDots / modules)));
   if (cell < 2) throw new Error("QR is too small for a 203 dpi printer — make the QR size bigger in label settings");
   const qrReal = cell * modules;
