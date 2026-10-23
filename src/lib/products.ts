@@ -1,5 +1,6 @@
 import { db, put, uid, now, deviceId, getSetting, type Product } from "./db";
-import { parseLabel, newCode, type Parsed, type Pattern } from "./parse";
+import { parseLabel, newCode, ownPayload, type Parsed, type Pattern } from "./parse";
+import { productForLabel } from "./purchase-labels";
 import { toPaise } from "./format";
 import { isRfidTag, normTag } from "./rfid";
 import { VERIFIED_ITEM_CODES } from "./verified-labels";
@@ -35,7 +36,9 @@ function contradicts(q: Product, x: Parsed, labelName: string): boolean {
 async function findStoredScan(raw: string, x: Parsed): Promise<Product | undefined> {
   const r = isRfidTag(raw) ? normTag(raw) : raw.trim();   // RFID tags are stored in one canonical form
   const labelName = x.icode ? up((await itemInfoFor(x.icode))?.name) : "";
-  const byRaw = await db.products.where("barcodes").equals(r).filter(q => !q.deleted).toArray();
+  // the exact sticker, or the same old-format QR typed with "-" / "`" / lower case by the scanner
+  const canon = canonicalQr(x);
+  const byRaw = await db.products.where("barcodes").anyOf(canon && canon !== r ? [r, canon] : [r]).filter(q => !q.deleted).toArray();
   for (const q of byRaw) if (!contradicts(q, x, labelName)) return q;
   // repair: this exact label was linked to the wrong product by an earlier loose match
   for (const q of byRaw) await put("products", { ...q, barcodes: (q.barcodes || []).filter(b => b !== r) });
@@ -65,6 +68,9 @@ async function findStoredScan(raw: string, x: Parsed): Promise<Product | undefin
     const rate = x.rate ? toPaise(x.rate) : 0;
     const hit = fits.find(q => rate && q.rate === rate) || fits[0];
     if (hit) return hit;
+    // an old-format sticker of a product that was deleted after printing: bring that product back
+    if (!gone && x.how === "shop label") gone = (await db.products.where("style").equals(up(x.style)).toArray())
+      .find(q => q.deleted && (!x.color || up(q.color) === up(x.color)) && !contradicts(q, x, labelName) && (!x.icode || q.item_code === x.icode || aliasFor(q.item) === x.icode));
   }
   if (gone) {
     const back = { ...gone, deleted: 0 } as Product;
@@ -414,3 +420,27 @@ export async function distinct(field: "item" | "type" | "color" | "category") {
 }
 export const DEFAULT_ITEMS = ["CHAIN", "NECKLACE SET", "CHOKER", "EARRING", "JHUMKI", "BALI", "TOPS", "MAANG TIKKA", "BANGLE", "KADA", "BRACELET", "RING", "PAYAL", "ANKLET", "PENDANT SET", "MANGALSUTRA", "NATH", "HAIR ACCESSORY", "BINDI", "BROOCH", "KAMARBANDH", "HATHPHOOL"];
 export const DEFAULT_TYPES = ["PCS", "PAIR", "SET", "DOZEN", "BOX", "CARD", "PACKET"];
+
+/* Owner, 24 Oct: "every sticker must scan in one scan, without a single failure". The old software's QR carries
+   no product code, only the item number, rate, packing, style and colour, so two products could look alike.
+   Every old-format QR this app prints is therefore written onto its product: scanning that exact sticker
+   then finds exactly that product, first time. A scanner that types "~" as "-" or "`" gives the same QR back
+   in the shop's own form (canonicalQr). */
+export const canonicalQr = (x: Parsed) => x.how === "shop label" ? x.raw.trim().toUpperCase().replace(/[~\-`^\\|#¬°'"]/g, "~") : "";
+export async function rememberPrintedQrs(jobs: { p: Product; qtyOnLabel: number; bag?: unknown; sourceQr?: string }[], format: "shop" | "rungnna" = "shop") {
+  const add = new Map<string, Set<string>>();
+  for (const j of jobs) {
+    if (j.bag || !j.p?.id) continue;
+    let raw = "";
+    try { raw = j.sourceQr ?? ownPayload(productForLabel(j.p, j.qtyOnLabel), format); } catch { continue; }
+    const key = canonicalQr(parseLabel(raw));
+    if (!key) continue;
+    (add.get(j.p.id) || add.set(j.p.id, new Set()).get(j.p.id)!).add(key);
+  }
+  for (const [id, keys] of add) {
+    const p = await db.products.get(id);
+    if (!p || p.deleted) continue;
+    const have = new Set(p.barcodes || []), fresh = [...keys].filter(k => !have.has(k));
+    if (fresh.length) await put("products", { ...p, barcodes: [...(p.barcodes || []), ...fresh] });
+  }
+}

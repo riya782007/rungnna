@@ -51,7 +51,7 @@ describe("TSPL for the TSC printer", () => {
     xy(b).forEach(([x, y], i) => { expect(x - xy(a)[i][0]).toBe(8); expect(y - xy(a)[i][1]).toBe(8); });
   });
   it("refuses jobs it would print wrong", () => {
-    expect(() => job({ ...DEFAULT_CFG, qr: 4 })).toThrow(/QR/);
+    expect(() => job({ ...DEFAULT_CFG, h: 8, pad: 0.5, qr: 4 })).toThrow(/QR/);
     expect(() => job(DEFAULT_CFG, 0)).toThrow(/quantity/);
     expect(() => labelTSPL(DEFAULT_CFG, { ...p, item: "अंगूठी" }, 1, 1, "x")).toThrow(/Hindi/);
   });

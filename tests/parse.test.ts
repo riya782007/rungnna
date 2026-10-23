@@ -45,11 +45,10 @@ describe("label decoder", () => {
 import { labelArtworkGeometry } from "../src/lib/label-artwork";
 import { DEFAULT_CFG } from "../src/pages/Labels";
 describe("sticker QR is printable (owner, 22 Oct: some scanned only after many tries, some never)", () => {
-  it("the shop sticker's QR is the old software's size (6.25 mm), with the strongest error correction", () => {
+  it("the shop sticker's QR prints with 3-dot squares that fit the 15 mm sticker (24 Oct: one scan, every time)", () => {
     const p: any = { id: "x", code: "RLYI848MOV2", item: "BANGLES", type: "PCS", style: "25061", color: "MIX", tk: "", rate: 39600, pack: 1, barcodes: [] };
     const g = labelArtworkGeometry(DEFAULT_CFG, p, 1);
-    expect(g.qr.modules).toBe(25);                         // was 33 × 33 with the long RJ1 QR
-    expect(g.qr.modules * g.qr.moduleDots / 8).toBe(6.25); // the black square, as on his old stickers
-    expect(g.qr.sizeDots).toBeLessThanOrEqual(g.height - g.pad * 2);
+    expect(g.qr.moduleDots).toBe(3);                        // 2-dot squares smudged by the heat read only sometimes
+    expect(g.qr.sizeDots).toBeLessThanOrEqual(g.height - 4);
   });
 });

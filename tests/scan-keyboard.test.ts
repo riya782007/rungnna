@@ -22,14 +22,20 @@ const mangle: Record<string, (q: string) => string> = {
   tilde: q => q.replace(/[|-]/g, "~"), lower: q => q.toLowerCase(), noShift: q => q.replace(/[|-]/g, "\\").toLowerCase(),
 };
 
+const oldMangle: Record<string, (q: string) => string> = {
+  exact: q => q, dash: q => q.replace(/~/g, "-"), backtick: q => q.replace(/~/g, "`"), caret: q => q.replace(/~/g, "^"),
+  backslash: q => q.replace(/~/g, "\\"), hash: q => q.replace(/~/g, "#"), lower: q => q.toLowerCase(), dashLower: q => q.replace(/~/g, "-").toLowerCase(),
+};
 describe("purchase-bill stickers scan at billing, whatever the scanner's keyboard does", () => {
   it("finds the item for every variant", async () => {
     const pur = await savePhotoPurchase([row(), row({ item: "01 PIK DAMMI", style: "104208", color: "", rate: "229" })], { by: "o", rack: "rack", supplierId: "s", billNo: "B1", note: "" });
     const prods = await db.products.toArray();
     for (const j of purchaseLabelJobs(pur, prods)) {
       const qr = ownPayload(productForLabel(j.p, j.qtyOnLabel), "shop");
-      expect(qr).toMatch(/^RJ2-[A-Z0-9]+-1$/);   // short QR since 22 Oct; stickers already printed carry RJ1|… (tested below)
-      for (const [how, f] of Object.entries(mangle)) {
+      // since 24 Oct every sticker carries the old software's QR (unmatched names as 508 · IM-JWELRY), so both
+      // softwares read it; the scanner's keyboard may turn its "~" into "-", "`", "^", "\\" or "#", or lose shift
+      expect(qr).toMatch(/^\d+~\d+(\.\d+)?~1~183~~/);
+      for (const [how, f] of Object.entries(oldMangle)) {
         const p = await resolveBillingScan(f(qr), "o");
         expect(p?.id, how).toBe(j.p.id);
       }
@@ -51,7 +57,7 @@ describe("a sticker whose product was deleted", () => {
     const pur = await savePhotoPurchase([row({ item: "BANGLES", style: "24610", color: "", unit: "PAIR", rate: "98" })], { by: "o", rack: "rack", supplierId: "s", billNo: "B9", note: "" });
     const [p] = await db.products.toArray();
     await db.products.put({ ...p, deleted: 1 });                     // the list was deleted after printing (21 Oct)
-    const qr = ownPayload(productForLabel(p, 1), "shop").replace(/\|/g, "-");
+    const qr = ownPayload(productForLabel(p, 1), "shop").replace(/[|~]/g, "-");
     const back = await resolveBillingScan(qr, "o");
     expect(back).toMatchObject({ id: p.id, cost: p.cost, vendor_id: "s", deleted: 0 });
     expect((await db.products.get(p.id))!.deleted).toBe(0);

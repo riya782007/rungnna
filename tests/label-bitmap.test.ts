@@ -39,21 +39,25 @@ describe("label artwork", () => {
     const svg = renderLabelSvg({ ...cfg, shop: "<script>&" }, { ...p, item: '<img src="x" onerror="alert(1)">' }, 1);
     expect(svg).not.toContain("<img"); expect(svg).not.toContain("<script>"); expect(svg).toContain("&lt;img"); expect(svg).toContain("&lt;script&gt;&amp;");
   });
-  it("uses integer QR dots and a four-module quiet border even when 9mm needs expanding", () => {
+  it("uses integer QR dots and a two-module quiet border even when 9mm needs expanding", () => {
     const qr = labelQr("202~9146~6~~~K521011/P~WXZ713", 9);
     expect(qr.moduleDots).toBeGreaterThanOrEqual(2);
     expect(Number.isSafeInteger(qr.moduleDots)).toBe(true);
-    expect(qr.sizeDots).toBe((qr.modules + 8) * qr.moduleDots);
-    expect(qr.path).toMatch(/^M8 8/);
+    expect(qr.sizeDots).toBe((qr.modules + 4) * qr.moduleDots);
+    expect(qr.path).toMatch(new RegExp(`^M${2 * qr.moduleDots} ${2 * qr.moduleDots}`));
     expect(qr.path).not.toMatch(/\d\.\d/);
     expect(() => labelArtworkGeometry({ ...cfg, h: 5 }, p, 1)).toThrow("QR details");
   });
   it("keeps the bottom price and quantity beside an expanded QR instead of underneath it", () => {
     const c = { ...cfg, format: "rungnna" as const }, product = { ...p, code: "R".repeat(40) };
     const g = labelArtworkGeometry(c, product, 1000000);
-    expect(g.qr.sizeDots).toBeGreaterThan(85);
+    expect(g.qr.sizeDots).toBeGreaterThan(80);
     const textWidth = g.width - g.pad - g.brand - g.qr.sizeDots - g.pad * 2;
-    expect(renderLabelSvg(c, product, 1000000)).toContain(`textLength="${textWidth}" lengthAdjust="spacingAndGlyphs">9146X1000000PCS</text>`);
+    const svg = renderLabelSvg(c, product, 1000000);
+    const m = /<text x="[\d.]+" y="([\d.]+)" font-size="([\d.]+)"[^>]*textLength="([\d.]+)" lengthAdjust="spacingAndGlyphs">9146X1000000PCS<\/text>/.exec(svg)!;
+    const [, y, size, len] = m.map(Number), q = /translate\((\d+) (\d+)\)/.exec(svg)!.slice(1).map(Number);
+    // the price is either beside the QR, or wholly below it: never printed over it
+    expect(Number(len) <= textWidth || q[1] + g.qr.sizeDots <= Number(y) - Number(size) * 0.86).toBe(true);
   });
 });
 

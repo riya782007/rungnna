@@ -11,7 +11,10 @@ import { orderedLines } from "./label-order";
 
 /** A 203 dpi TSC head has eight addressable dots per millimetre. */
 export const LABEL_DOTS_PER_MM = 8;
-export const QR_QUIET_MODULES = 4;
+/* 2 white squares round the QR: the sticker's own margin and the gap to the words add the rest. With 4 the QR
+   could not use 3-dot squares on the shop's 15 mm sticker; 2-dot squares smudged by the heat stopped scanning
+   in one go (owner, 24 Oct: "all must scan in one scan"). */
+export const QR_QUIET_MODULES = 2;
 const dot = (mm: number) => Math.round(mm * LABEL_DOTS_PER_MM);
 const escapeXml = (s: string) => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" }[c]!));
 const clean = (s: string) => s.replace(/[\u0000-\u001f\u007f]/g, " ").trim();
@@ -26,12 +29,13 @@ export function labelQr(text: string, requestedMm: number, roomMm = requestedMm)
   // 6.25 mm at 2 printer dots each: the size of the old software's QR, which the owner asked for (22 Oct),
   // and sturdier than it. Other QRs keep level M.
   const alnum = /^[0-9A-Z $%*+\-./:]+$/.test(text);
-  let qr = qrcode(0, alnum ? "H" : "M");
-  qr.addData(text, alnum ? "Alphanumeric" : "Byte"); qr.make();
-  // the old software's own QR (ITEMCODE~RATE~…) is 25 × 25 at level L; ours for it is the same size when it fits
-  if (!alnum && text.includes("~") && qr.getModuleCount() > 25) {
-    const low = qrcode(0, "L"); low.addData(text, "Byte"); low.make();
-    if (low.getModuleCount() < qr.getModuleCount()) qr = low;
+  // The strongest error correction whose QR still prints with 3-dot squares in the room there is (owner, 24 Oct:
+  // every sticker must scan first time); if none fits, the smallest QR.
+  const make = (ecc: "H" | "Q" | "M" | "L") => { const q = qrcode(0, ecc); q.addData(text, alnum ? "Alphanumeric" : "Byte"); q.make(); return q; };
+  let qr = make("L");
+  for (const ecc of ["H", "Q", "M"] as const) {
+    const q = make(ecc);
+    if ((q.getModuleCount() + QR_QUIET_MODULES * 2) * 3 <= dot(roomMm)) { qr = q; break; }
   }
   const modules = qr.getModuleCount(), cells = modules + QR_QUIET_MODULES * 2;
   // 2 printer dots per square is the bare minimum, and a thermal head's heat spreads it: such QRs scanned only
@@ -72,10 +76,12 @@ export function labelArtworkGeometry(cfg: LabelCfg, p: Product, qtyOnLabel: numb
   // An exact old-label copy keeps its printed price as well as its QR, including odd rates.
   const copied = qrText ? parseLabel(qrText) : undefined;
   if (copied?.how === "shop label") pp.rate = toPaise(copied.rate || "0");
-  const qr = labelQr(qrText ?? ownPayload(pp, cfg.format || "shop"), cfg.qr, Math.min(cfg.qr + 3, cfg.h - cfg.pad * 2));
+  // 3-dot squares whenever they fit the sticker's height, even into its margin: a QR that scans first time
+  // matters more than a millimetre of words (owner, 24 Oct)
+  const qr = labelQr(qrText ?? ownPayload(pp, cfg.format || "shop"), cfg.qr, Math.min(cfg.qr + 5, cfg.h - 0.6));
   const font = cfg.font * 25.4 / 72 * LABEL_DOTS_PER_MM;
   const brand = cfg.layout !== "stack" && cfg.show.shop && cfg.shop.trim() ? Math.ceil(font * 1.1) : 0;
-  if (qr.sizeDots > height - pad * 2 || qr.sizeDots + brand + pad * 4 + 8 > width) {
+  if (qr.sizeDots > height - 4 || qr.sizeDots + brand + pad * 4 + 8 > width) {
     throw new Error("QR details need more room. Increase the sticker size or use the shorter old-software QR content.");
   }
   return { width, height, pad, pp, qr, font, brand };
@@ -86,7 +92,7 @@ export function renderLabelSvg(cfg: LabelCfg, p: Product & { entry_code?: string
   const { width, height, pad, pp, qr, font, brand } = labelArtworkGeometry(cfg, p, qtyOnLabel, qrText);
   const s = cfg.show, stack = cfg.layout === "stack";
   const qx = stack ? pad : width - pad - brand - qr.sizeDots;
-  const qy = pad;
+  const qy = qr.sizeDots > height - pad * 2 ? Math.round((height - qr.sizeDots) / 2) : pad;   // a big QR sits centred in the margin
   const tx = stack ? qx + qr.sizeDots + pad : pad;
   const textWidth = stack ? width - tx - pad : qx - pad * 2;
   type Detail = { text: string; scale?: number; weight?: number; line?: number | string; mono?: boolean };

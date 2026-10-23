@@ -9,7 +9,7 @@ import { createPortal } from "react-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, getSetting, setSetting, recordMovement, type Product } from "../lib/db";
 import { ownPayload, parseLabel } from "../lib/parse";
-import { blankProduct, saveProduct, findByScan, fromParsed, fillFromItemCode, distinct, DEFAULT_ITEMS, DEFAULT_TYPES, label, itemCodeFor, labelCodeProblem, itemMap } from "../lib/products";
+import { blankProduct, saveProduct, findByScan, fromParsed, fillFromItemCode, distinct, DEFAULT_ITEMS, DEFAULT_TYPES, label, itemCodeFor, labelCodeProblem, itemMap, rememberPrintedQrs } from "../lib/products";
 import { VERIFIED_ITEM_CODES, verifiedCodeFor } from "../lib/verified-labels";
 import { Head, DeadToggle , MoneyInput } from "../components/common";
 import { RackPicker } from "../components/RackPicker";
@@ -564,6 +564,8 @@ export function useLabelPrint(cfg: LabelCfg, onConfig?: (config: LabelCfg) => vo
         validateLabelBitmapJob(config, queue);
       } else if (raw) tscCommands(config, queue.slice(0, 1));
     } catch (e: any) { return rejectStart(e.message || "Review printer settings and sticker quantities"); }
+    // each old-format QR printed is written onto its product, so billing finds that product in one scan
+    void rememberPrintedQrs(queue, config.format || "shop").catch(() => {});
     const unit = config.mode === "roll" ? config.cols : config.cols * config.rows;
     const blank = config.mode === "sheet" && queue.length % unit ? unit - queue.length % unit : 0;
     if (blank && !confirm(`The printer feeds a whole page of ${unit} stickers at a time.\n\n${queue.length} labels leave ${blank} stickers blank on the last page.\n\nPrint anyway?`)) return rejectStart("Printing was cancelled. The labels remain ready to print.", true);
