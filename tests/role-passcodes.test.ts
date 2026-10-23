@@ -75,7 +75,7 @@ describe("the sign-in behind each passcode", () => {
     const [saved] = await saveRoles([role({ perms: ["stock.view", "labels.print"] })]);
     setRolesCache([saved]);
     const row = (await db.staff.get(saved.login_id!))!;
-    expect([...permsOf(row)].sort()).toEqual(["labels.print", "stock.view"]);
+    expect([...permsOf(row)].sort()).toEqual(["labels.print", "printers.manage", "stock.view"]);   // a role saved before the printer switch keeps printer settings
     expect(permsOf(row).has("billing.void")).toBe(false);
   });
 

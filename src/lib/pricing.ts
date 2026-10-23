@@ -38,7 +38,7 @@ export interface MarginRule {
 
 /* How the cost is encrypted into the human-visible code on the label. */
 export interface CodeRule {
-  method: "letters" | "shift" | "plain";
+  method: "letters" | "shift" | "shift_letters" | "plain";
   /* letters: each digit 0-9 → a letter of a 10-letter secret key. This is the
               classic jewellery "code word" trick. key must be 10 distinct chars.
               Digit d maps to key[d]. e.g. key "MONEYBAGSX" → 0=M 1=O 2=N …
@@ -57,6 +57,8 @@ export interface PricingRule {
   code: CodeRule;
   /** sticker rates are whole even rupees (975 → 976) so half, the wholesale rate, has no paise. On unless the owner turns it off. */
   even_rate?: boolean;
+  /** retail rate = sticker rate + this % (owner, 22 Oct: "I can't find the formula for the retail rate"). 0 = the sticker rate itself. */
+  retail_pct?: number;
   updated_at?: string;
 }
 
@@ -121,11 +123,19 @@ function normalizeRule(r: PricingRule): PricingRule {
       suffix_pack: c.suffix_pack !== false,
     },
     even_rate: r.even_rate !== false,
+    retail_pct: Math.max(0, Number(r.retail_pct) || 0),
     updated_at: r.updated_at,
   };
 }
 
 /* ----------------------------- the maths -------------------------------- */
+/** Retail rate from the sticker (wholesale) rate: + the shop's retail %, rounded the shop's way. 0 when no % is set. */
+export function retailFromRate(ratePaise: number, rule: PricingRule): number {
+  const pct = rule.retail_pct || 0;
+  if (!(ratePaise > 0) || !pct) return 0;
+  return Math.round(roundRupees(ratePaise / 100 * (1 + pct / 100), rule.margin.round_to || 1, "up") * 100);
+}
+
 /* All money in paise, as everywhere else in the app. */
 
 function roundRupees(rupees: number, to: RoundTo, dir: "nearest" | "up"): number {
@@ -171,9 +181,11 @@ export function costCode(costPaise: number, rule: PricingRule, pack = 1, type = 
     const key = (c.key || DEFAULT_RULE.code.key).toUpperCase();
     // spell each digit of the cost as its keyed letter
     core = String(costRupees).split("").map(d => key[Number(d)] ?? d).join("");
-  } else if (c.method === "shift") {
+  } else if (c.method === "shift" || c.method === "shift_letters") {
     const shifted = Math.round(costRupees * (c.mult || 1) + (c.add || 0));
-    core = String(shifted);
+    // shift_letters (owner, 22 Oct: "double the number, then the code letters"): the shifted number spelt in the code word
+    const key = (c.key || DEFAULT_RULE.code.key).toUpperCase();
+    core = c.method === "shift" ? String(shifted) : String(shifted).split("").map(d => key[Number(d)] ?? d).join("");
   } else {
     core = String(costRupees);
   }
@@ -199,6 +211,13 @@ export function decodeCostCode(code: string, rule: PricingRule): number | null {
     let digits = "";
     for (const ch of s) { if (inv[ch] == null) return null; digits += inv[ch]; }
     return digits ? parseInt(digits, 10) * 100 : null;
+  }
+  if (c.method === "shift_letters") {
+    const key = (c.key || DEFAULT_RULE.code.key).toUpperCase();
+    let digits = "";
+    for (const ch of s) { const d = key.indexOf(ch); if (d < 0) return null; digits += d; }
+    if (!digits) return null;
+    return Math.round((parseInt(digits, 10) - (c.add || 0)) / (c.mult || 1)) * 100;
   }
   if (c.method === "shift") {
     const n = parseInt(s.replace(/\D/g, ""), 10);

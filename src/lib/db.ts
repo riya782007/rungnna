@@ -133,6 +133,7 @@ export interface Bill extends Row {
   rfid_tags?: string[];    // RFID tags read onto this bill — each counts once, marked sold on save
   merged_into?: string; merged_into_no?: string; // this bill/challan was combined into another invoice
   merged_from?: string[];  // the bills / challans this invoice was made from
+  inv_no?: string;         // estimate: the tax invoice number written after the estimate number (owner, 23 Oct)
   return_of?: string; return_of_no?: string;     // credit note: the bill the goods came back from
   src_type?: BillType;     // credit note: type of that bill (an estimate's return stays private)
   prev_due?: number;       // the party's balance before this bill, frozen when it was first saved (printed as "Previous balance")

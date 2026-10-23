@@ -1,3 +1,4 @@
+import { askText } from "../components/AskHost";
 import { parkBillingDraft, resumeBillingDraft } from "../lib/billing-drafts";
 import { publicOrigin } from "../lib/platform";
 import { DeleteButton } from "../components/DeleteButton";
@@ -499,7 +500,7 @@ export default function Billing({ args }: { args: string[] }) {
     const list = t.items.reduce((a, l) => a + l.qty * l.rate, 0);
     const offPct = list ? ((list - t.gross + t.discount) / list) * 100 : 0;
     if (offPct > (shop.max_disc ?? 10) + 0.01 && !can(me, "discount")) {
-      const pin = prompt(`Discount is ${offPct.toFixed(1)}% — above the ${shop.max_disc ?? 10}% limit. Owner or manager PIN:`);
+      const pin = await askText(`Discount is ${offPct.toFixed(1)}% — above the ${shop.max_disc ?? 10}% limit. Owner or manager PIN:`);
       const ok = pin && (await db.staff.filter(x => !!x.active && !x.deleted && x.login !== "role" && !!x.pin && x.pin === pin && can(x, "billing.discount_over")).count());
       if (!ok) return toast("Discount not approved", true);
     }
@@ -611,7 +612,8 @@ export default function Billing({ args }: { args: string[] }) {
             <button aria-pressed={b.bill_type !== "challan"} onClick={() => void openDocument("gst")}>Invoice</button>
             <button aria-pressed={b.bill_type === "challan"} onClick={() => void openDocument("challan")} title="Send goods now, invoice later">Challan</button>
           </div></div>}
-        <div className="pos-no"><span className="xs mut">{b.no ? "Bill no" : "Next no"}</span><b className="mono">{b.no || nextNo}</b></div>
+        <div className="pos-no"><span className="xs mut">{b.no ? "Bill no" : "Next no"}</span><b className="mono">{b.no || nextNo}</b>
+          {b.bill_type === "estimate" && <input className="in xs mono" style={{ marginTop: 4, maxWidth: 170 }} aria-label="Invoice no. for this estimate" placeholder="Invoice no. (optional)" value={b.inv_no || ""} onChange={e => set({ inv_no: e.target.value.toUpperCase().slice(0, 24) })} />}</div>
         <button className="pos-cust" onClick={() => setCustOpen(true)}>
           <span className="xs mut">Client name</span>
           <b>{b.party_name || "Walk-in / cash"}</b>
@@ -801,8 +803,8 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
   const pick = (p: Party) => onPick({ party_id: p.id, party_name: p.name, party_phone: p.phone, party_gstin: p.gstin, party_state: p.state, party_address: [p.address, p.city, p.pin].filter(Boolean).join(", "), price_level: p.tier });
   const create = async () => {
     const isPhone = /^\+?\d[\d\s]{7,}$/.test(q.trim());
-    const name = isPhone ? prompt("Customer name") || "" : q.trim();
-    const phone = isPhone ? q.replace(/\D/g, "") : prompt("Mobile number (for WhatsApp)")?.replace(/\D/g, "") || "";
+    const name = isPhone ? await askText("Customer name") || "" : q.trim();
+    const phone = isPhone ? q.replace(/\D/g, "") : (await askText("Mobile number (for WhatsApp)", "", { numeric: true }))?.replace(/\D/g, "") || "";
     if (!name) return;
     const p = { ...newParty(name.toUpperCase(), phone), photo_id: photo };
     await put("parties", p); pick(p);

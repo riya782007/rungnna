@@ -1,3 +1,4 @@
+import { locCode } from "../lib/stock-adjustment";
 import { DeleteButton } from "../components/DeleteButton";
 import { confirmDelete } from "../lib/confirm-delete";
 import { useEffect, useState } from "react";
@@ -110,7 +111,7 @@ export default function Move({ args }: { args: string[] }) {
               <div key={l.p.id} className="item">
                 <Thumb photo_id={l.p.photo_id} url={l.p.photo_url} text={l.p.item} size={40} />
                 <div className="grow sm"><div className="b">{label(l.p)}</div>
-                  <div className="xs mut">{l.stock.map(s => `${locs.find(x => x.id === s.loc_id)?.code || "?"}: ${s.qty}`).join(" · ") || "no stock recorded"}</div></div>
+                  <div className="xs mut">{l.stock.map(s => `${locCode(locs.find(x => x.id === s.loc_id)) || "?"}: ${s.qty}`).join(" · ") || "no stock recorded"}</div></div>
                 <input className="in mono" style={{ width: 70 }} inputMode="numeric" value={l.qty}
                   onChange={e => setLines(ls => ls.map((x, k) => k === i ? { ...x, qty: parseInt(e.target.value.replace(/[^\d-]/g, "")) || 0 } : x))} />
                 <DeleteButton className="btn sm bad" aria-label="Remove movement line" onDelete={async () => { if (await confirmDelete("Remove this movement line?")) setLines(ls => ls.filter(x => x.p.id !== l.p.id)); }}>✕</DeleteButton>

@@ -5,6 +5,7 @@ import { startSync, onSync, type SyncState } from "./lib/sync";
 import { warmScanner } from "./components/Scanner";
 import { SearchPalette } from "./components/Search";
 import { Icon } from "./components/Icon";
+import { AskHost } from "./components/AskHost";
 import { can, roleName } from "./lib/roles";
 import { t, initLang, onLang } from "./lib/i18n";
 import Home from "./pages/Home";
@@ -16,6 +17,7 @@ import { OwnerGate } from "./components/OwnerSecurity";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { getSetting, setSetting } from "./lib/db";
 import { getRule } from "./lib/pricing";
+import { loadOldCodes } from "./lib/old-codes";
 
 /* Pages load on first visit (fast start); the service worker keeps every piece for offline use. */
 const Billing = lazy(() => import("./pages/Billing"));
@@ -88,7 +90,7 @@ function Shell() {
   const stores = useLiveQuery(() => db.stores.filter(s => !s.deleted && !!s.active).toArray(), [], []);
   const [route, args] = useRoute();
   // the owner's pricing switches (e.g. even sticker rates) apply on this counter as soon as they sync in
-  useLiveQuery(async () => { try { await getRule(); } catch { /* keeps the last known rule */ } return 0; }, [], 0);
+  useLiveQuery(async () => { try { await getRule(); await loadOldCodes(); } catch { /* keeps the last known rule */ } return 0; }, [], 0);
   const [pal, setPal] = useState(false);
   const [compact, setCompact] = useState(true);
   useEffect(() => { getSetting("compact_menu", true).then(setCompact); }, []);
@@ -260,5 +262,5 @@ function NoAccess() {
 }
 
 export default function App() {
-  return <AppProvider><OwnerGate><Shell /></OwnerGate><Toasts /></AppProvider>;
+  return <AppProvider><OwnerGate><Shell /></OwnerGate><Toasts /><AskHost /></AppProvider>;
 }

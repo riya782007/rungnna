@@ -22,6 +22,7 @@ import { currentStore } from "../lib/scope";
 import { toast } from "../lib/app";
 import { RackPicker } from "./RackPicker";
 import { StickerQuickBar } from "./StickerQuickBar";
+import { OldCodesCard } from "./OldCodesCard";
 import { SupplierNo } from "./SupplierNo";
 import { checkBill, checkSummary, matchSupplier, fallbackBillNo, type LineFix } from "../lib/billCheck";
 import { newParty } from "../lib/billing";
@@ -255,11 +256,20 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
     if (!adding) { setBulkQty(""); setBulkRef(""); setQuantityNote(""); readSoFar.current = []; }
     try {
       let current = adding ? d : { ...d, rows: [] as PhotoRow[], warnings: "", total: "" };
-      for (let at = 0; at < files.length; at += 3) {
-        const part = files.slice(at, at + 3);
+      /* One page per reading, sharper photos, and a page read short is read again (owner, 23 Oct: "a bill of
+         30 lines reads only 15 or 20; Google Lens reads every line"). */
+      for (let at = 0; at < files.length; at += 1) {
+        const part = files.slice(at, at + 1);
         const images = [];
-        for (const f of part) { const { blob } = await compress(f, 2200, 800000); images.push({ data: await blobToB64(blob), mime: blob.type }); }
-        const out = await api<any>("purchase-photo", { images });
+        for (const f of part) { const { blob } = await compress(f, 2800, 1050000); images.push({ data: await blobToB64(blob), mime: blob.type }); }
+        if (files.length > 1) toast(`Reading page ${at + 1} of ${files.length}…`);
+        let out = await api<any>("purchase-photo", { images });
+        const seen = Number(out?.lines_on_bill) || 0, first = Array.isArray(out?.rows) ? out.rows.length : 0;
+        if (seen > first) {
+          toast(`The AI read ${first} of about ${seen} lines — reading the page again…`);
+          const second = await api<any>("purchase-photo", { images, retry: { counted: seen, got: first } }).catch(() => null);
+          if (second && Array.isArray(second.rows) && second.rows.length > first) out = second;
+        }
         const rule = await getRule(); setPricing(rule);
         const text = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v) : "");
         const raw = out.rows.map((r: any) => ({
@@ -554,6 +564,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
           bill they were below every line, so he scrolled past 20+ lines and thought they had been removed. */}
       <div className="stack sticker-top">
         <StickerQuickBar cfg={cfg} onChange={setCfg} />
+        {cfg.format !== "rungnna" && <OldCodesCard names={d.rows.map(r => r.item)} open={false} />}
         {!!preview.length && <>
           <div className="row"><b>{labelCount} labels</b><span className="xs mut">Stickers: grey means one per packet; enter an exact count, or 0 for none. X is the quantity in each packet. · {cfg.w}×{cfg.h}mm · {cfg.output === "tspl" && directPrintSupported() ? "straight to the TSC printer" : "browser print sheet"}</span></div>
           <div className="label-preview">{preview.map((p, i) => <LabelView key={i} cfg={cfg} p={p} qtyOnLabel={p.pack || 1} line={d.rows[i]?.sr?.trim() || i + 1} />)}

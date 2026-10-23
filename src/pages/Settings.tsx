@@ -1,3 +1,4 @@
+import { askText } from "../components/AskHost";
 import { DeleteButton } from "../components/DeleteButton";
 import { confirmDelete } from "../lib/confirm-delete";
 import { useEffect, useRef, useState } from "react";
@@ -21,6 +22,7 @@ import { initLang, setLang, type Lang } from "../lib/i18n";
 import { closeFinancialYear, lockedUpto, setVoucherLock } from "../lib/finance";
 import { SecuritySettings } from "../components/OwnerSecurity";
 import { CloudSyncControl } from "../components/CloudSyncControl";
+import { OldCodesCard } from "../components/OldCodesCard";
 import { PricingCard, StickerLookCard, SupplierTermsCard, PrintingCard, GstCard, SaveState } from "../components/SettingsCards";
 
 /* Settings in five plain groups, one at a time (owner, 18 Oct: the long page left half the screen empty and
@@ -55,7 +57,7 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
         <button className="btn sm" onClick={() => setMe(null)}>Switch person</button></div>
       {me && isRoleLogin(me) && <div className="xs mut">Signed in with this role's passcode. The owner changes it on Roles &amp; Permissions.</div>}
       {me && !isRoleLogin(me) && <button className="btn sm" onClick={async () => {
-        const p = prompt(me.pin ? "New 4-digit personal PIN" : "Set a 4-digit PIN so nobody else can use your name") ?? null;
+        const p = await askText(me.pin ? "New 4-digit personal PIN" : "Set a 4-digit PIN so nobody else can use your name", "", { secret: true, numeric: true });
         if (p === null) return; if (!/^\d{4}$/.test(p)) return toast("PIN must be 4 digits", true);
         const u = { ...me, pin: p }; await put("staff", u); setMe(u); toast(p ? "PIN saved" : "PIN removed");
       }}>{me.pin ? "Change my PIN" : "Set my PIN"}</button>}
@@ -72,7 +74,7 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
 
       {tab === "shop" && <div className="set-grid">
         {admin && <ShopProfile />}
-        {admin && <PrintingCard />}
+        {can(me, "printers.manage") && <PrintingCard />}
         {boss && <GstCard />}
         {can(me, "lock") && <OperationsCard by={me?.id || ""} />}
         <div className="card"><header><h3>Elsewhere</h3></header><div className="pad stack">
@@ -84,6 +86,7 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
       {tab === "prices" && admin && <div className="set-grid">
         <PricingCard />
         <StickerLookCard />
+        <AllOldCodes />
         <TaxonomyCard />
       </div>}
 
@@ -108,11 +111,11 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
                 <RoleSelect value={s} allowOwner={me?.role === "owner"} disabled={s.id === me?.id || (s.role === "owner" && me?.role !== "owner")}
                   onChange={async v => { await put("staff", { ...s, ...v }); toast("Role changed"); }} />
                 {(s.role !== "owner" || me?.role === "owner") && <button className="btn sm" onClick={async () => {
-                  const value = prompt(`New 4-digit PIN for ${s.name}`); if (value === null) return;
+                  const value = await askText(`New 4-digit PIN for ${s.name}`, "", { secret: true, numeric: true }); if (value === null) return;
                   if (!/^\d{4}$/.test(value)) return toast("PIN must be 4 digits", true);
                   const changed = { ...s, pin: value }; await put("staff", changed); if (s.id === me?.id) setMe(changed); toast("Personal PIN saved");
                 }}>Set PIN</button>}
-                <button className="btn sm" onClick={async () => { const n = prompt("Name", s.name); if (n) await put("staff", { ...s, name: n }); }}>Rename</button>
+                <button className="btn sm" onClick={async () => { const n = await askText("Name", s.name); if (n?.trim()) { await put("staff", { ...s, name: n.trim() }); toast(`Renamed to ${n.trim()}`); } }}>Rename</button>
                 {s.id !== me?.id && <button className="btn sm" onClick={async () => { await put("staff", { ...s, active: s.active ? 0 : 1 }); }}>{s.active ? "Disable" : "Enable"}</button>}
                 </div>
               </div>))}
@@ -504,7 +507,7 @@ function ShopProfile() {
           <label className="f">This counter's code (in bill numbers)<input className="in mono" value={cc} maxLength={4} onChange={e => setCc(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))} onBlur={() => cc && setSetting("counter_code", cc)} /></label>
           <label className="f">New bills start as<select className="in" value={def} onChange={e => { setDef(e.target.value); setSetting("default_bill_type", e.target.value); }}><option value="estimate">Estimate</option><option value="gst">GST invoice</option></select></label>
         </div>
-        <div className="xs mut">Each counter numbers its own bills (e.g. RJ/26-27/C1-0001), so two counters can bill offline at the same time without ever clashing. Give every counter a different code.</div>
+        <div className="xs mut">Each counter numbers its own bills (e.g. INV/26C10001, EST/26C10001), so two counters can bill offline at the same time without ever clashing. Give every counter a different code.</div>
       </div></div>
   );
 }
@@ -633,4 +636,10 @@ function StuckChanges() {
   if (!rows.length) return null;
   return <div className="note warn"><b>{rows.length} change{rows.length > 1 ? "s" : ""} not yet in the cloud</b>
     {rows.map(r => <div key={r.seq} className="xs mono">{r.table} · {r.row_id.slice(0, 8)} · tried {r.tries}× · {r.last_error}</div>)}</div>;
+}
+
+/** Every item name in the shop, matched to the old software's items (owner, 23 Oct). */
+function AllOldCodes() {
+  const names = useLiveQuery(async () => [...new Set((await db.products.filter(p => !p.deleted).toArray()).map(p => p.item))], [], [] as string[]);
+  return <div className="card"><div className="pad stack"><OldCodesCard names={names} title="Old software item for each name" /></div></div>;
 }

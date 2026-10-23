@@ -48,9 +48,9 @@ export async function counterCode(): Promise<string> {
   const store = await db.stores.get(currentStore());
   return store && store.code !== "MAIN" ? store.code + c : c;
 }
-/* RJ = tax invoice, EST = estimate, CH = delivery challan, CN = credit note (ECN when it returns an estimate, so it stays private) */
+/* INV = tax invoice (owner, 23 Oct: "estimate from EST, invoice from INV"; older invoices keep RJ/…), EST = estimate, CH = delivery challan, CN = credit note (ECN when it returns an estimate, so it stays private) */
 export const seriesOf = (t: BillType, src?: BillType) =>
-  t === "gst" ? "RJ" : t === "challan" ? "CH" : t === "return" ? (src === "estimate" ? "ECN" : "CN") : "EST";
+  t === "gst" ? "INV" : t === "challan" ? "CH" : t === "return" ? (src === "estimate" ? "ECN" : "CN") : "EST";
 export const isSale = (b: Pick<Bill, "bill_type">) => b.bill_type === "gst" || b.bill_type === "estimate";
 export const isChallan = (b: Pick<Bill, "bill_type">) => b.bill_type === "challan";
 export const isReturn = (b: Pick<Bill, "bill_type">) => b.bill_type === "return";

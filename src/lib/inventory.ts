@@ -1,7 +1,7 @@
 import { db, type Product, type Purchase, type PurchaseLine } from "./db";
 import { blankProduct, saveProduct } from "./products";
 import { newPurchase, finalizePurchase } from "./stockin";
-import { getRule, priceFromCost } from "./pricing";
+import { getRule, priceFromCost, retailFromRate } from "./pricing";
 import { requirePerm } from "./scope";
 import { assertLocation } from "./stores";
 import { assertUnlocked } from "./finance";
@@ -100,7 +100,7 @@ export async function createDesign(d: DesignInput): Promise<{ products: Product[
         vendor_id: d.vendor_id || undefined, vendor_name: d.vendor_name || undefined,
         category: d.category ?? base.category, collection: d.collection || base.collection, material: d.material || base.material,
         hsn: d.hsn?.trim() || base.hsn, ...(d.gst_rate != null ? { gst_rate: d.gst_rate } : {}),
-        pack: d.pack, rate, wholesale_rate: rate, retail_rate: d.retail_rate || base.retail_rate, mrp: d.mrp || base.mrp || 0,
+        pack: d.pack, rate, wholesale_rate: rate, retail_rate: d.retail_rate || base.retail_rate || retailFromRate(rate, rule) || undefined, mrp: d.mrp || base.mrp || 0,
         cost: d.cost || base.cost, cost_code: d.cost ? priceFromCost(d.cost, rule, d.pack, d.type).cost_code : base.cost_code,
         price_locked: typed ? 1 : base.price_locked,
         photo_id: base.photo_id || d.photo_id,

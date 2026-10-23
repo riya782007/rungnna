@@ -74,7 +74,7 @@ describe("estimate → GST invoice", () => {
   it("marks the estimate converted in the same save and refuses a second conversion", async () => {
     const est = await finalize({ ...newBill("o", DEFAULT_SHOP, "estimate"), items: [line({ qty: 2 })] }, "Delhi");
     const g = await convertToGst(est, DEFAULT_SHOP, "o");
-    expect(g.bill_type).toBe("gst"); expect(g.no).toMatch(/^RJ\//);
+    expect(g.bill_type).toBe("gst"); expect(g.no).toMatch(/^INV\//);
     expect((await db.bills.get(est.id))?.status).toBe("converted");
     await expect(convertToGst(est, DEFAULT_SHOP, "o")).rejects.toThrow(/already converted/);
     expect((await db.bills.toArray()).filter(b => b.bill_type === "gst")).toHaveLength(1);

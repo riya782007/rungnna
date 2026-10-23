@@ -1,3 +1,4 @@
+import { askText } from "../components/AskHost";
 import { byRollNo } from "../components/SupplierNo";
 import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { useEffect, useMemo, useState } from "react";
@@ -34,7 +35,7 @@ function SupplierList() {
   return <div>
     <Head title="Suppliers" sub={`${suppliers.length} suppliers · ${rupees(total)} payable`}>
       <button className="btn" onClick={async () => { if (!confirm(`Load the shop vendor list (${parseVendorList(vendorText).length} vendors)? Vendors already loaded are updated, not duplicated.`)) return; const r = await importVendors(parseVendorList(vendorText)); toast(`Vendor list loaded · ${r.added} new, ${r.updated} already there`); }}>Load vendor list</button>
-      <button className="btn p" onClick={async () => { const n = prompt("Supplier name"); if (!n) return; const p = { ...newParty(n.toUpperCase()), kind: "supplier" as const }; await put("parties", p); go("suppliers/" + p.id); }}><Icon n="plus" size={18} />Add</button>
+      <button className="btn p" onClick={async () => { const n = await askText("Supplier name"); if (!n) return; const p = { ...newParty(n.toUpperCase()), kind: "supplier" as const }; await put("parties", p); go("suppliers/" + p.id); }}><Icon n="plus" size={18} />Add</button>
     </Head>
     <input className="in" style={{ marginBottom: 12 }} placeholder="Search supplier" value={q} onChange={e => setQ(e.target.value)} />
     <div className="list">{list.map(p => {

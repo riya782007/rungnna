@@ -3,6 +3,7 @@ import { parseLabel, newCode, type Parsed, type Pattern } from "./parse";
 import { toPaise } from "./format";
 import { isRfidTag, normTag } from "./rfid";
 import { VERIFIED_ITEM_CODES } from "./verified-labels";
+import { aliasFor } from "./old-codes";
 import { requirePerm } from "./scope";
 
 export async function patterns(): Promise<Pattern[]> { return getSetting<Pattern[]>("patterns", []); }
@@ -22,9 +23,11 @@ function contradicts(q: Product, x: Parsed, labelName: string): boolean {
   if (!DETAILED.includes(x.how)) return false;
   if (x.how === "rungnna" && x.code && q.code === x.code) return false;   // our own label: its product code is exact
   if (x.icode && q.item_code && q.item_code !== x.icode) return true;
+  // the owner billed this name as that old item (HALF DULHAN SET → 320 BRIDAL SET): our own sticker for it
+  const billedAs = !!x.icode && !q.item_code && aliasFor(q.item) === x.icode;
   // same item code: the owner's own name for it wins; no code on file: names must agree
   const name = up(x.item) || labelName;
-  if (name && !(x.icode && q.item_code === x.icode) && hasProductName(q.item) && up(q.item) !== name) return true;
+  if (name && !billedAs && !(x.icode && q.item_code === x.icode) && hasProductName(q.item) && up(q.item) !== name) return true;
   if (up(x.style) && up(q.style) && up(q.style) !== up(x.style)) return true;
   if (up(x.color) && up(q.color) && up(q.color) !== up(x.color)) return true;
   return false;
@@ -54,6 +57,7 @@ async function findStoredScan(raw: string, x: Parsed): Promise<Product | undefin
       if (x.how !== "shop label") return !x.item || up(q.item) === up(x.item) || needsName(q) || !q.item?.trim();
       if (x.icode && q.item_code === x.icode) return true;
       if (q.item_code) return false;
+      if (x.icode && aliasFor(q.item) === x.icode) return true;
       // no code on file: accept only when its name is the label's name, or it has no name yet
       return labelName ? up(q.item) === labelName || !hasProductName(q.item) : !hasProductName(q.item);
     });
@@ -196,10 +200,11 @@ export function readItemMap(value: unknown): ItemMap {
   const out: ItemMap = {};
   if (!value || typeof value !== "object") return out;
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof v === "string") { if (v.trim()) out[k] = { name: v.trim().toUpperCase(), unit: "" }; }
+    // a whole scanned QR saved as a name (22 Oct: "252~20~3~183~~K5210/11P~LKQR") is not a name
+    if (typeof v === "string") { if (v.trim() && !v.includes("~")) out[k] = { name: v.trim().toUpperCase(), unit: "" }; }
     else if (v && typeof v === "object") {
       const o = v as Partial<ItemInfo>;
-      const name = String(o.name || "").trim().toUpperCase(), unit = normUnit(o.unit);
+      const name0 = String(o.name || "").trim().toUpperCase(), name = name0.includes("~") ? "" : name0, unit = normUnit(o.unit);
       if (name || unit) out[k] = o.owner ? { name, unit, owner: true } : { name, unit };
     }
   }
@@ -224,7 +229,7 @@ export function codeInfo(code?: string, learned: ItemMap = learnedCache): ItemIn
    EARING while every scanner (ours and the old software) reads BALI. */
 export function labelCodeProblem(item: string, code?: string): string {
   const name = (item || "").trim().toUpperCase(), means = codeInfo(code)?.name;
-  if (!name || !code || !means || means === name) return "";
+  if (!name || !code || !means || means === name || aliasFor(name) === code) return "";   // the owner chose: this name is billed as that item
   const right = Object.entries(resolvedItemMap(learnedCache)).filter(([, v]) => v.name === name).map(([c]) => c);
   return `This label would say ${name}, but its QR carries item code ${code}, which is ${means}. ` +
     (right.length === 1 ? `${name} is code ${right[0]} — fix the ITEM CODE before printing.` : `Fix the ITEM CODE (or the item name) before printing.`);

@@ -7,6 +7,8 @@ import { getRule, saveRule, validateKey, priceSteps, costCode, DEFAULT_RULE, typ
 import { blankProduct } from "../lib/products";
 import { DEFAULT_CFG, LabelView, loadLabelCfg, type LabelCfg } from "../pages/Labels";
 import { rateMark } from "../lib/label-tspl";
+import { saveLabelPatch } from "./StickerQuickBar";
+import { printedCostCode } from "../lib/label-cost-code";
 import { byRollNo } from "./SupplierNo";
 import { RECEIPT_CUTS, receiptCut, receiptCutSetup, type ReceiptCut } from "../lib/printing";
 import { gstRequest } from "../lib/compliance";
@@ -73,9 +75,9 @@ export function PricingCard() {
               <option value="percent">+ a percent markup</option>
             </select></Help>
           {m.mode === "percent"
-            ? <Help label="Markup %" help={`150 means a ₹100 cost sells at ₹250.`}><input className="in mono" inputMode="decimal" value={m.percent} onChange={e => setM({ percent: Number(e.target.value) || 0 })} /></Help>
+            ? <Help label="Markup %" help={`150 means a ₹100 cost sells at ₹250.`}><NumberText value={m.percent} fallback={0} onValue={v => setM({ percent: v })} /></Help>
             : <Help label="Factor" help={m.mode === "divide" ? "0.4 means a ₹100 cost sells at ₹250." : `${m.factor || 2.5} means a ₹100 cost sells at ₹${Math.round(100 * (m.factor || 2.5))}.`}>
-                <input className="in mono" inputMode="decimal" value={m.factor} onChange={e => setM({ factor: Number(e.target.value) || 0 })} /></Help>}
+                <NumberText value={m.factor} fallback={0} onValue={v => setM({ factor: v })} /></Help>}
           <Help label="Round the rate to" help="So rates look like shop rates (₹245, not ₹243.75).">
             <select className="in" value={m.round_to} onChange={e => setM({ round_to: Number(e.target.value) as RoundTo })}>
               <option value={0}>Exact (paise)</option><option value={1}>₹1</option><option value={5}>₹5</option>
@@ -89,28 +91,43 @@ export function PricingCard() {
         <label className="set-switch"><input type="checkbox" checked={rule.even_rate !== false} onChange={e => { setJustSaved(false); setRule(r => ({ ...r, even_rate: e.target.checked })); }} />
           <span><b>Sticker rates are always even</b><span className="set-help">975 → 976, so half the rate (the wholesale rate) never has 50 paise. Applies to every sticker printed.</span></span></label>
 
+        <div className="grid g2">
+          <Help label="Retail rate = sticker rate +" help={rule.retail_pct ? `${rule.retail_pct}% means a ₹200 sticker rate is ₹${Math.ceil(200 * (1 + rule.retail_pct / 100))} for retail customers.` : "0 means retail customers pay the sticker rate. Type e.g. 20 for 20% more."}>
+            <NumberText value={rule.retail_pct || 0} fallback={0} onValue={v => { setJustSaved(false); setRule(r => ({ ...r, retail_pct: Math.max(0, v) })); }} /></Help>
+          <div className="set-help" style={{ alignSelf: "end" }}>Used for new products (Add inventory, purchase bills) when the retail rate is left blank, and on bills for retail customers.</div>
+        </div>
+
         <div className="set-sub">2 · How the cost is hidden on the sticker</div>
         <div className="grid g2">
           <Help label="Hide the cost as" help={c.method === "letters" ? "Each digit of the cost becomes a letter of your code word." : c.method === "shift" ? "The cost is multiplied and added to, so only you can read it." : "The cost prints as it is — anyone can read it."}>
-            <select className="in" value={c.method} onChange={e => { setC({ method: e.target.value as any }); setKeyErr(e.target.value === "letters" ? validateKey(c.key) : null); }}>
+            <select className="in" value={c.method} onChange={e => { setC({ method: e.target.value as any }); setKeyErr(e.target.value === "letters" || e.target.value === "shift_letters" ? validateKey(c.key) : null); }}>
               <option value="letters">Code word (letters)</option>
               <option value="shift">Maths shift (× / +)</option>
+              <option value="shift_letters">Maths shift, then code word letters</option>
               <option value="plain">Plain number (no hiding)</option>
             </select></Help>
           <Help label="Letters before the code (optional)" help={c.prefix ? `Every code starts with “${c.prefix}”.` : "Leave empty if you don't want any."}>
             <input className="in mono" value={c.prefix} maxLength={4} onChange={e => setC({ prefix: e.target.value.toUpperCase() })} /></Help>
-          {c.method === "letters" && (
+          {(c.method === "letters" || c.method === "shift_letters") && (
             <Help wide label="Secret code word — 10 different letters, one for each digit 0 to 9" help={keyErr ? <span className="bad">{keyErr}</span> : undefined}>
               <input className={"in mono" + (keyErr ? " bad" : "")} value={c.key} maxLength={10}
                 onChange={e => { const k = e.target.value.toUpperCase().replace(/[^A-Z]/g, ""); setC({ key: k }); setKeyErr(validateKey(k)); }} />
               {!keyErr && <span className="set-key">{c.key.split("").map((ch, i) => <span key={i}><small>{i}</small>{ch}</span>)}</span>}
             </Help>
           )}
-          {c.method === "shift" && <>
-            <Help label="Multiply the cost by"><input className="in mono" inputMode="decimal" value={c.mult} onChange={e => setC({ mult: Number(e.target.value) || 1 })} /></Help>
-            <Help label="Then add"><input className="in mono" inputMode="decimal" value={c.add} onChange={e => setC({ add: Number(e.target.value) || 0 })} /></Help>
+          {(c.method === "shift" || c.method === "shift_letters") && <>
+            <Help label="Multiply the cost by" help={`e.g. 2 doubles it, 1.5 adds half. ₹100 → ${Math.round(100 * (c.mult || 1) + (c.add || 0))}`}><NumberText value={c.mult} fallback={1} onValue={v => setC({ mult: v })} /></Help>
+            <Help label="Then add" help="e.g. 7 — or 0 for nothing. A minus works too."><NumberText value={c.add} fallback={0} onValue={v => setC({ add: v })} /></Help>
           </>}
         </div>
+        {/* moved here from printer settings (owner, 22 Oct: "printer settings only for the machine") */}
+        {cfg && <div className="grid g2">
+          <label className="set-switch"><input type="checkbox" checked={!!cfg.compactCostCode} onChange={async e => setCfg(await saveLabelPatch(cfg, { compactCostCode: e.target.checked }))} />
+            <span><b>Compact repeated letters</b><span className="set-help">A letter that repeats prints as a dash (RPP → RP-).</span></span></label>
+          <Help label="Fake letters mixed in" help="Any letters A–Z; one is mixed into each sticker's code so it can't be read. Empty = none.">
+            <input className="in mono" value={cfg.fakeLetters ?? "Z"} placeholder="e.g. ZYAB" onChange={async e => setCfg(await saveLabelPatch(cfg, { fakeLetters: e.target.value.toUpperCase().replace(/[^A-Z]/g, "") }))} /></Help>
+          <div className="sm mono" aria-label="Cost code examples">{[0, 1, 2].map(i => printedCostCode("RPPX1PCS", cfg, i)).join(" · ")}</div>
+        </div>}
         <label className="set-switch"><input type="checkbox" checked={c.suffix_pack} onChange={e => setC({ suffix_pack: e.target.checked })} />
           <span><b>Add the packing after the code</b><span className="set-help">e.g. RPPX1PCS — X1 means one piece, X12 a packet of twelve.</span></span></label>
 
@@ -264,4 +281,17 @@ export function GstCard() {
           : "Bills give you the e-way bill / e-invoice file (JSON) to upload on the government portal yourself. Sending it directly needs a GST provider account, which Riya connects for you."}</div>
       </div></div>
   );
+}
+
+/* A number box that lets you type "1.5", "0." or clear it first (owner, 22 Oct: "the point is not working" — every
+   key press was turned into a number at once, so the "." vanished). The number is taken when it is a number. */
+export function NumberText({ value, onValue, fallback = 0 }: { value: number; onValue: (v: number) => void; fallback?: number }) {
+  const [text, setText] = useState(String(value ?? ""));
+  useEffect(() => { if (Number(text) !== value && !(text.trim() === "" && value === fallback)) setText(String(value ?? "")); }, [value]);
+  return <input className="in mono" inputMode="decimal" value={text} onChange={e => {
+    const t = e.target.value.replace(/[^0-9.\-]/g, "");
+    setText(t);
+    const n = Number(t);
+    onValue(t.trim() === "" || t === "-" || t === "." || !Number.isFinite(n) ? fallback : n);
+  }} />;
 }

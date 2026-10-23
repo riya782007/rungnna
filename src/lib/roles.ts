@@ -69,7 +69,8 @@ export const PERMISSION_GROUPS: PermGroup[] = [
     { key: "bank.reconcile", label: "Bank reconciliation" },
   ]},
   { key: "control", label: "Control (sensitive)", perms: [
-    { key: "settings.manage", label: "Shop settings & printers" },
+    { key: "settings.manage", label: "Shop settings", desc: "bills, prices, GST, people's PINs" },
+    { key: "printers.manage", label: "Printer & sticker settings", desc: "label size, position, what prints — kept apart from shop settings (owner, 22 Oct)" },
     { key: "staff.manage", label: "Staff, roles & permissions" },
     { key: "ai.use", label: "Ask the shop (AI)" },
     { key: "import.data", label: "Import & bulk changes" },
@@ -77,11 +78,13 @@ export const PERMISSION_GROUPS: PermGroup[] = [
   ]},
 ];
 export const ALL_PERMS = PERMISSION_GROUPS.flatMap(g => g.perms.map(p => p.key));
+/** Kept in a saved role's list when its printer switch is OFF, so it is never mistaken for an older role. */
+export const PRINTERS_OFF = "printers.none";
 const LABELS = Object.fromEntries(PERMISSION_GROUPS.flatMap(g => g.perms.map(p => [p.key, p.label])));
 export const permLabel = (k: string) => LABELS[k] || k;
 
 /* Built-in roles: the app's original rules, written as permissions. Stock work was open to everyone, so it still is. */
-const STOCK = ["stock.view", "stock.in", "stock.move", "stock.count", "racks.manage", "stores.transfer", "products.edit", "labels.print", "catalogue.share"];
+const STOCK = ["stock.view", "stock.in", "stock.move", "stock.count", "racks.manage", "stores.transfer", "products.edit", "labels.print", "printers.manage", "catalogue.share"];
 const COUNTER = ["billing.sell", "billing.returns", "billing.merge", "customers.manage", "receipts.take", "money.vouchers"];
 export const BUILTIN_DEFAULT: Record<Staff["role"], string[]> = {
   owner: ALL_PERMS,
@@ -165,7 +168,11 @@ export function permsOf(me: Pick<Staff, "role"> & { role_id?: string } | null | 
   const custom = me.role_id ? ROLES.find(r => r.id === me.role_id) : undefined;
   // A missing custom role can be a deletion or a partial sync. Never silently grant the
   // broader built-in base while waiting for its permissions to arrive.
-  return new Set((me.role_id ? custom?.perms || [] : BUILTIN[me.role] || []).filter(p => ALL_PERMS.includes(p)));
+  const raw = me.role_id ? custom?.perms || [] : BUILTIN[me.role] || [];
+  const out = new Set(raw.filter(p => ALL_PERMS.includes(p)));
+  // a role saved before printers had their own switch (22 Oct) keeps the printer settings it could already change
+  if (!raw.includes("printers.manage") && !raw.includes(PRINTERS_OFF) && (out.has("labels.print") || out.has("settings.manage"))) out.add("printers.manage");
+  return out;
 }
 
 /** A retired role login must stop working as soon as the role configuration arrives,

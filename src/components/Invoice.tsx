@@ -75,7 +75,7 @@ export function InvoiceSheet({ b, shop, format, copy }: { b: Bill; shop: Shop; f
         <span>{estimate && <>ESTIMATE<br /></>}SALE NOT EXECUTED{!thermal && <><br />बिक्री निष्पादित नहीं</>}</span>
       </div>}
       <div className="inv-meta">
-        <div><b>{docName(b)} No:</b> {b.no || "(draft)"}<br /><b>Date:</b> {new Date(b.at).toLocaleString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+        <div><b>{docName(b)} No:</b> {b.no || "(draft)"}{b.bill_type === "estimate" && b.inv_no ? <> · <b>Invoice No:</b> {b.inv_no}</> : null}<br /><b>Date:</b> {new Date(b.at).toLocaleString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
           {b.salesman ? <><br /><b>Salesman:</b> {b.salesman}</> : null}{b.helper ? <><br /><b>Helper:</b> {b.helper}</> : null}{b.packed_by ? <><br /><b>Packed by:</b> {b.packed_by}</> : null}{b.checked_by ? <><br /><b>Rechecked by:</b> {b.checked_by}</> : null}
           {b.return_of_no ? <><br /><b>Against:</b> {b.return_of_no}</> : null}
           {b.merged_from?.length ? <><br /><b>Covers:</b> {b.merged_from.length} earlier {b.merged_from.length > 1 ? "documents" : "document"}</> : null}</div>

@@ -1,13 +1,16 @@
 import type { BagLabel } from "./bag-labels";
 import type { Product, Purchase } from "./db";
 import { evenRate } from "./pricing";
+import { aliasFor, defaultRef } from "./old-codes";
 
 /* `line` = the line of the supplier's bill these labels are for, printed small on each sticker so whoever is
    labelling knows which goods (which line of the bill) a sticker goes on. */
 export type PurchaseLabelJob = { p: Product; qtyOnLabel: number; copies: number; line?: number | string; labelIndex?: number; bag?: BagLabel; sourceQr?: string };
 export function productForLabel(p: Product, qtyOnLabel: number): Product {
   // every printed label (screen, TSC and the QR inside) carries the even rate
-  return { ...p, rate: evenRate(p.rate), pack: qtyOnLabel, cost_code: p.cost_code?.replace(/X\d+[A-Z]+$/i, `X${qtyOnLabel}${p.type || "PCS"}`) };
+  // the old software's item code and REF the owner chose for this name, so the old software reads the sticker too
+  const item_code = p.item_code?.trim() || aliasFor(p.item) || undefined, ref = p.ref?.trim() || (item_code ? defaultRef() : "") || p.ref;
+  return { ...p, item_code, ref, rate: evenRate(p.rate), pack: qtyOnLabel, cost_code: p.cost_code?.replace(/X\d+[A-Z]+$/i, `X${qtyOnLabel}${p.type || "PCS"}`) };
 }
 export function purchaseLabelJobs(purchase: Purchase, products: Product[]): PurchaseLabelJob[] {
   if (purchase.deleted || purchase.status !== "final") throw new Error("Save the purchase before printing labels");

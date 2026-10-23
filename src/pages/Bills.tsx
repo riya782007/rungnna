@@ -1,3 +1,4 @@
+import { askText } from "../components/AskHost";
 import { DeleteButton } from "../components/DeleteButton";
 import { confirmDelete } from "../lib/confirm-delete";
 import { SelectAll } from "../components/SelectAll";
@@ -203,7 +204,7 @@ function BillView({ id }: { id: string }) {
               {splittable(b) && b.items.length > 1 && can(me, "billing.merge") && <button className="btn" onClick={() => setSplit(true)}>Split — move lines to a new bill</button>}
               {b.status === "final" && (boss ? <DeleteButton className="btn bad" onDelete={async () => {
                 if (!await confirmDelete("Cancel this saved bill and reverse its stock movements?")) return;
-                const r = prompt(b.merged_from?.length ? "Reason for cancelling (the merged bills / challans come back as they were):" : "Reason for cancelling this bill (kept on record):"); if (!r) return;
+                const r = await askText(b.merged_from?.length ? "Reason for cancelling (the merged bills / challans come back as they were):" : "Reason for cancelling this bill (kept on record):"); if (!r) return;
                 await voidBill(b, r, me?.name || ""); toast(b.bill_type === "return" ? "Credit note cancelled — pieces taken off the racks again" : "Bill cancelled — pieces returned to their racks");
               }}>Cancel {b.bill_type === "return" ? "credit note" : "bill"} (void)</DeleteButton> : <div className="xs mut">Only the owner or a manager can cancel a bill.</div>)}
               <button className="btn" onClick={() => { navigator.clipboard?.writeText(billText(b, shop)); toast("Bill text copied"); }}>Copy bill text</button>

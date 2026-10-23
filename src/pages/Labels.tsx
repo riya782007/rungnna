@@ -25,6 +25,7 @@ import { labelTSPL, rateMark } from "../lib/label-tspl";
 import { labelBatches, runsOf, DEFAULT_BATCH, type LabelBatch } from "../lib/labelBatches";
 import { printTSPL, directPrintSupported, connectSerial, connectUSB, serialSupported, usbSupported, bluetoothSupported, connectBluetooth } from "../lib/tsc";
 import { renderLabelSvg } from "../lib/label-artwork";
+import { aliasFor } from "../lib/old-codes";
 import { buildLabelBitmapJob, validateLabelBitmapJob } from "../lib/label-bitmap";
 import { listQzPrinters, printQzTSPL } from "../lib/qz";
 import { labelHeat, DEFAULT_LABEL_DENSITY, DEFAULT_LABEL_SPEED } from "../lib/label-darkness";
@@ -153,7 +154,7 @@ export function validateLabelPrint(cfg: LabelCfg, jobs: Job[]) {
   // the printed name must match what the QR's item code means (old-software QR carries only the code)
   for (const j of jobs) {
     if (j.bag) continue;
-    const code = j.sourceQr ? parseLabel(j.sourceQr).icode : cfg.format !== "rungnna" && j.p.style ? j.p.item_code : undefined;
+    const code = j.sourceQr ? parseLabel(j.sourceQr).icode : cfg.format !== "rungnna" && j.p.style ? j.p.item_code || aliasFor(j.p.item) : undefined;
     const problem = labelCodeProblem(j.p.item, code);
     if (problem) throw new Error(problem);
   }
@@ -291,7 +292,7 @@ export default function Labels({ args }: { args: string[] }) {
       <div className="label-dock card" aria-label="Pinned sticker preview">
         <div className="labelprev"><LabelView cfg={cfg} p={oldCopy?.p || jobs[0]?.p || form} qtyOnLabel={oldCopy?.qtyOnLabel || jobs[0]?.qtyOnLabel || parseInt(qty) || 1} line={oldCopy ? undefined : jobs[0]?.line} sourceQr={oldCopy?.sourceQr || jobs[0]?.sourceQr} /></div>
         <div className="grow stack" style={{ gap: 3 }}><b>{oldCopy?.p.item || jobs[0]?.p.item || form.item || "Sticker preview"}</b><span className="sm">{oldCopy?.p.type || jobs[0]?.p.type || form.type} · {cfg.w} × {cfg.h} mm · all text bold</span><span className="xs">QR: {oldCopy || cfg.format === "shop" ? "Old software format" : "Rungnna only"}</span>{oldCopy && <span className="xs">Exact old QR copy — original price, packet and reference</span>}</div>
-        <button className="btn" aria-pressed={settingsOpen} onClick={() => setSettingsOpen(open => !open)}>{settingsOpen ? "Back to label workspace" : "Printer settings"}</button>
+        {can(me, "printers.manage") && <button className="btn" aria-pressed={settingsOpen} onClick={() => setSettingsOpen(open => !open)}>{settingsOpen ? "Back to label workspace" : "Printer settings"}</button>}
       </div>
       {settingsOpen ? <LabelSettings cfg={cfg} upd={upd} onTest={cfg.output === "qz" ? undefined : () => { if (!printer.busy) setAligning(true); }} sample={jobs[0]?.p || form} qty={jobs[0]?.qtyOnLabel || parseInt(qty) || 1} /> : <>
       {cfg.format === "rungnna" && !oldCopy && <div className="note warn row" role="status"><span className="grow sm"><b>These new QR codes are for Rungnna billing only.</b> For billing in the older software, use its QR format with the original item code and reference, or scan a working old sticker for an exact copy.</span><button className="btn" onClick={() => upd({ format: "shop" })}>Use old-software QR format</button></div>}
@@ -417,10 +418,7 @@ function LabelSettings({ cfg, upd, sample, qty, onTest }: { cfg: LabelCfg; upd: 
           <label className="f">Print speed (1–6)<input className="in mono" type="number" min={1} max={6} step={1} disabled={!cfg.output || cfg.output === "browser"} value={cfg.speed ?? DEFAULT_LABEL_SPEED} onChange={e => upd({ speed: Number(e.target.value) })} /></label>
         </div>
         {(!cfg.output || cfg.output === "browser") ? <div className="note warn" role="status"><b>Browser darkness is set in Windows.</b><div className="sm">On the printer computer open Windows Settings → Printers &amp; scanners → your label printer → Printing preferences. Set Darkness / Density to 10 and Speed to 2, then print one check row. If it is still pale, increase darkness a step and check the QR. These app controls are enabled with QZ Tray or Direct TSC, which send heat settings to the printer.</div></div> : <div className="xs mut">These darkness and speed values are sent to the TSC printer with every job. Print one check row after a change; too much heat can blur the QR.</div>}
-        <label className="row sm"><input type="checkbox" checked={!!cfg.compactCostCode} onChange={e => upd({ compactCostCode: e.target.checked })} /> Compact repeated letters in cost code</label>
-        <label className="f">Fake letter pool<input className="in mono" value={cfg.fakeLetters ?? "Z"} onChange={e => upd({ fakeLetters: e.target.value.toUpperCase().replace(/[^A-Z]/g, "") })} placeholder="e.g. ZYAB" /></label>
-        <div className="xs mut">Enter any letters A–Z, with no length limit. One fake letter is shuffled across stickers; repeated letters in the pool count once. Leave empty for no fake letter. Repeated code letters become dashes; price, quantity, reference and QR data stay the same.</div>
-        <div className="sm mono" aria-label="Cost code examples">{[0, 1, 2].map(i => printedCostCode("RPPX1PCS", cfg, i)).join(" · ")}</div>
+        <div className="xs mut">The cost code's compact letters and fake letters are set with the cost code: Settings › Prices &amp; stickers.</div>
         <label className="f">Sticker
           <select className="in" value={cfg.preset} onChange={e => { const p = PRESETS.find(x => x.key === e.target.value);
             // a preset is a whole sticker: settings only one preset uses (printer's own paper, right edge, rate size) go back to plain

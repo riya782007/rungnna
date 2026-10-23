@@ -56,3 +56,7 @@ export async function setStockQuantity(productId: string, target: number, reason
     return target;
   });
 }
+
+/** A location as people read it: the store's hidden "unassigned" place says just that (owner, 22 Oct: Activity showed
+    "UNASSIGNED/0000000000004000800000000000b001"). */
+export const locCode = (l?: { code?: string } | null) => !l ? "" : /^UNASSIGNED\//i.test(l.code || "") ? "Unassigned" : l.code || "";

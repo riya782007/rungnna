@@ -1,3 +1,4 @@
+import { askText } from "../components/AskHost";
 import { stateCode, GST_STATES } from "../lib/states";
 import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { useEffect, useMemo, useState } from "react";
@@ -37,7 +38,7 @@ function PartyList() {
   return (
     <div>
       <Head title="Customers" sub={`${parties.length} customers · ${rupees(toCollect)} to collect`}>
-        <button className="btn p" onClick={async () => { const n = prompt("Customer / shop name"); if (!n) return; const ph = prompt("Mobile number") || ""; const p = newParty(n.toUpperCase(), ph.replace(/\D/g, "")); await put("parties", p); go("customers/" + p.id); }}><Icon n="plus" size={18} />Add</button>
+        <button className="btn p" onClick={async () => { const n = await askText("Customer / shop name"); if (!n) return; const ph = await askText("Mobile number", "", { numeric: true }) || ""; const p = newParty(n.toUpperCase(), ph.replace(/\D/g, "")); await put("parties", p); go("customers/" + p.id); }}><Icon n="plus" size={18} />Add</button>
       </Head>
       <div className="row" style={{ marginBottom: 12, flexWrap: "nowrap" }}>
         <div className="wedge grow"><Icon n="search" size={18} /><input placeholder="Name, mobile or city" value={q} onChange={e => setQ(e.target.value)} /></div>

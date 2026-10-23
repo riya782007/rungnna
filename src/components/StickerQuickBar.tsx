@@ -1,3 +1,5 @@
+import { useApp } from "../lib/app";
+import { can } from "../lib/roles";
 import { useState } from "react";
 import { getSetting, setSetting } from "../lib/db";
 import { DEFAULT_LABEL_DENSITY } from "../lib/label-darkness";
@@ -17,7 +19,7 @@ import { labelOrder, PART_NAMES, type LabelPart } from "../lib/label-order";
 
 const FIELDS: [keyof LabelCfg["show"], string][] = [
   ["style", "Style"], ["ref", "Reference"], ["color", "Colour"], ["cost_code", "Cost code"], ["line", "Line no."],
-  ["rate", "Rate"], ["qty", "X qty"], ["shop", "RUNGNNA"],
+  ["rate", "Rate"], ["qty", "X qty"], ["code", "Product code"], ["shop", "RUNGNNA"],
 ];
 
 /** Save a change to this computer's sticker settings (merged into what is saved, so nothing else changes). */
@@ -29,6 +31,7 @@ export async function saveLabelPatch(base: LabelCfg, patch: Partial<LabelCfg>): 
 }
 
 export function StickerQuickBar({ cfg, onChange }: { cfg: LabelCfg; onChange?: (c: LabelCfg) => void }) {
+  const { me } = useApp();
   const [tick, setTick] = useState("");
   const apply = async (patch: Partial<LabelCfg>, what: string) => {
     const next = await saveLabelPatch(cfg, patch);
@@ -51,6 +54,7 @@ export function StickerQuickBar({ cfg, onChange }: { cfg: LabelCfg; onChange?: (
   };
   const up = (k: LabelPart) => shift(k, -1), down = (k: LabelPart) => shift(k, 1);
   const dark = cfg.density ?? DEFAULT_LABEL_DENSITY;
+  if (!can(me, "printers.manage")) return null;   // printer & sticker settings are their own permission (owner, 22 Oct)
   return (
     <div className="sticker-quick" aria-label="Sticker settings">
       <div className="sq-row">
@@ -69,6 +73,7 @@ export function StickerQuickBar({ cfg, onChange }: { cfg: LabelCfg; onChange?: (
         </span>)}
         {cfg.order && <button type="button" className="linkbtn xs" onClick={() => void apply({ order: undefined }, "Usual order")}>Usual order</button>}
       </div>
+      {cfg.show.code && <div className="xs mut">“Product code” (letters like RUCJJMEGSEY) is this app's own number for the product. The QR already carries it, so it can be switched off: tap <b>Product code</b>.</div>}
       {cfg.show.rate && <div className="xs mut">Big line at the bottom, e.g. <b className="mono">{cfg.cur ?? "₹"}426{cfg.show.qty ? "X1PCS" : ""}</b>: {cfg.cur === "9" ? <>“9” is only the old stickers’ mark, then </> : null}the selling rate ₹426 — the bill’s selling rate, or your shop pricing worked out from the cost (Settings › Prices){cfg.show.qty ? <>, then X and the pieces in each packet (the X column)</> : null}.</div>}
       <div className="sq-row">
         <span className="sq-h">Position</span>

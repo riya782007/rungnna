@@ -1,3 +1,4 @@
+import { SpeakText } from "../components/Voice";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../lib/db";
@@ -7,7 +8,7 @@ import { can } from "../lib/roles";
 import { rupees } from "../lib/format";
 import { DEFAULT_ITEMS, UNITS } from "../lib/products";
 import { getTaxonomy, addColour, addTo, type Taxonomy } from "../lib/taxonomy";
-import { getRule, priceFromCost, type PricingRule } from "../lib/pricing";
+import { getRule, priceFromCost, retailFromRate, type PricingRule } from "../lib/pricing";
 import { createDesign, validateDesign, variantGrid, type DesignInput, type Variant } from "../lib/inventory";
 
 /* Add inventory — a design and all its colours/sizes in one screen, priced by the shop's rule,
@@ -73,7 +74,7 @@ export default function AddInventory() {
         <section className="card"><header><h3>2 · Price</h3></header><div className="pad grid g3">
           {seeCost && <label className="f">Cost per piece ₹<MoneyInput className="in mono" paise={d.cost} onPaise={v => set({ cost: v })} /></label>}
           <label className="f">Wholesale rate ₹<MoneyInput className="in hi mono" paise={d.rate} onPaise={v => set({ rate: v })} placeholder={suggested ? (suggested.rate / 100).toFixed(2) + " (from rule)" : ""} /></label>
-          <label className="f">Retail rate ₹<MoneyInput className="in mono" paise={d.retail_rate || 0} onPaise={v => set({ retail_rate: v })} /></label>
+          <label className="f">Retail rate ₹<MoneyInput className="in mono" paise={d.retail_rate || 0} onPaise={v => set({ retail_rate: v })} placeholder={rule && retailFromRate(d.rate || suggested?.rate || 0, rule) ? (retailFromRate(d.rate || suggested?.rate || 0, rule) / 100).toFixed(2) + " (from rule)" : rule?.retail_pct ? "" : "sticker rate · set a retail % in Settings › Prices"} /></label>
           <label className="f">MRP ₹<MoneyInput className="in mono" paise={d.mrp || 0} onPaise={v => set({ mrp: v })} /></label>
           <label className="f">Pieces per packet<input className="in mono" inputMode="numeric" value={d.pack} onChange={e => set({ pack: Math.max(1, parseInt(e.target.value) || 1) })} /></label>
           {seeCost && suggested && <div className="f"><span>Cost code on sticker</span><b className="mono">{suggested.cost_code}</b></div>}
@@ -82,6 +83,14 @@ export default function AddInventory() {
         <section className="card"><header><h3>3 · Colours &amp; sizes</h3><span className="grow" /><span className="xs mut">pick all that you have — each becomes its own product</span></header><div className="pad stack">
           <div className="chips">{tax?.colours.map(c => <button key={c.name} className="chip" aria-pressed={colours.includes(c.name.toUpperCase())} onClick={() => toggle(colours, c.name.toUpperCase(), setColours)}>{c.name}</button>)}</div>
           <div className="row"><input className="in" style={{ maxWidth: 220 }} placeholder="Other colour, e.g. K/GBN" value={newColour} onChange={e => setNewColour(e.target.value)} />
+            <SpeakText label="Say colours" onText={t => {
+              // "red, green and rani pink" → the colour chips; anything unknown goes in the box to add
+              const said = t.toUpperCase().replace(/[.।]/g, "").split(/,|\bAND\b|\bAUR\b|\n/).map(x => x.trim()).filter(Boolean);
+              const known = (tax?.colours || []).map(c => c.name.toUpperCase());
+              const hit = said.filter(x => known.includes(x)), rest = said.filter(x => !known.includes(x));
+              if (hit.length) setColours(c => [...new Set([...c, ...hit])]);
+              if (rest.length) setNewColour(rest.join(" "));
+            }} />
             <button className="btn" disabled={!newColour.trim()} onClick={async () => { const n = newColour.trim().toUpperCase(); if (!colours.includes(n)) setColours([...colours, n]); if (!/\//.test(n)) setTax(await addColour(newColour.trim())); setNewColour(""); }}>Add colour</button></div>
           <div className="chips">{tax?.sizes.map(s => <button key={s} className="chip" aria-pressed={sizes.includes(s)} onClick={() => toggle(sizes, s, setSizes)}>{s}</button>)}</div>
           <div className="row"><input className="in" style={{ maxWidth: 220 }} placeholder="Other size" value={newSize} onChange={e => setNewSize(e.target.value)} />

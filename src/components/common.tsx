@@ -1,3 +1,4 @@
+import { locCode } from "../lib/stock-adjustment";
 import { DeleteButton } from "./DeleteButton";
 import { confirmDelete } from "../lib/confirm-delete";
 import React, { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
@@ -28,7 +29,7 @@ export function LocationSelect({ value, onChange, allowNone, label = "Location",
         <option value="">{allowNone || "— choose —"}</option>
         {floors.map(f => (
           <optgroup key={f} label={f === "G" ? "Ground floor" : f ? "Floor " + f : "Other"}>
-            {locs.filter(l => l.kind !== "bucket" && l.floor === f).map(l => <option key={l.id} value={l.id}>{l.code}{l.name ? " — " + l.name : ""}</option>)}
+            {locs.filter(l => l.kind !== "bucket" && l.floor === f).map(l => <option key={l.id} value={l.id}>{locCode(l)}{l.name && !/^UNASSIGNED\//i.test(l.code) ? " — " + l.name : ""}</option>)}
           </optgroup>
         ))}
         {buckets && <optgroup label="Status buckets">

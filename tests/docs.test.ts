@@ -17,7 +17,7 @@ const bill = (p: Partial<Bill>): Bill => totals({ id: "b" + ++n, no: "", series:
 
 describe("document types", () => {
   it("series per type; estimate returns get their own private series", () => {
-    expect(seriesOf("gst")).toBe("RJ"); expect(seriesOf("estimate")).toBe("EST"); expect(seriesOf("challan")).toBe("CH");
+    expect(seriesOf("gst")).toBe("INV"); expect(seriesOf("estimate")).toBe("EST"); expect(seriesOf("challan")).toBe("CH");
     expect(seriesOf("return", "gst")).toBe("CN"); expect(seriesOf("return", "estimate")).toBe("ECN");
     expect(isEstimate({ bill_type: "return", src_type: "estimate" })).toBe(true);
     expect(isEstimate({ bill_type: "return", src_type: "gst" })).toBe(false);

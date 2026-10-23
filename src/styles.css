@@ -1104,3 +1104,12 @@ html{scrollbar-gutter:stable}
 .purchase-shortcut { text-decoration: none; align-items: center; margin-bottom: 10px; }
 .sq-order { flex-wrap: wrap; }
 .sq-part { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--card, #fff); }
+.ask-back { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.35); display: grid; place-items: center; padding: 16px; }
+.ask-box { width: min(420px, 100%); }
+/* Activity colours (owner, 22 Oct): sale yellow, intake green, estimate red */
+tr.act-sale td { background: #fff8d6; }
+tr.act-intake td { background: #e6f6e9; }
+tr.act-estimate td { background: #fde8e8; }
+.pill.act-pill-sale { background: #f5d742; color: #3d3200; }
+.pill.act-pill-intake { background: #2e9d4f; color: #fff; }
+.pill.act-pill-estimate { background: #c62828; color: #fff; }

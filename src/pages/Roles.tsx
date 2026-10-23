@@ -6,7 +6,7 @@ import { Eye, EyeOff, Copy, RefreshCw } from "lucide-react";
 import { db, uid, type Staff } from "../lib/db";
 import { Head } from "../components/common";
 import { useApp, toast } from "../lib/app";
-import { PERMISSION_GROUPS, BUILTIN, BUILTIN_DEFAULT, ROLE_NOTE, permLabel, customRoles, isSensitive, isRoleLogin, can, builtinEdited, type CustomRole } from "../lib/roles";
+import { PERMISSION_GROUPS, BUILTIN, BUILTIN_DEFAULT, ROLE_NOTE, permLabel, customRoles, isSensitive, isRoleLogin, can, builtinEdited, PRINTERS_OFF, type CustomRole } from "../lib/roles";
 import { saveRoles, regenerated, saveBuiltinRole } from "../lib/roleLogins";
 
 /* ===========================================================================
@@ -164,7 +164,8 @@ export function RoleEditor({ role, onSave, submitLabel = "Save role", isNew, bui
   const { me } = useApp();
   const [name, setName] = useState(role.name);
   const [base, setBase] = useState<Staff["role"]>(role.base);
-  const [checked, setChecked] = useState(new Set(role.perms));
+  // an older role shows the printer switch as it works today (on when it could print labels or change settings)
+  const [checked, setChecked] = useState(() => { const c = new Set(role.perms); if (!c.has("printers.manage") && !c.has(PRINTERS_OFF) && (c.has("labels.print") || c.has("settings.manage"))) c.add("printers.manage"); return c; });
   const [find, setFind] = useState("");
   const toggle = (k: string) => setChecked(s => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const group = (keys: string[], on: boolean) => setChecked(s => { const n = new Set(s); keys.forEach(k => (on ? n.add(k) : n.delete(k))); return n; });
@@ -205,7 +206,7 @@ export function RoleEditor({ role, onSave, submitLabel = "Save role", isNew, bui
       </div>;
     })}</div>
     <div className="row">
-      <button className="btn p" onClick={() => onSave({ ...role, name, base, perms: [...checked] })}>{submitLabel}</button>
+      <button className="btn p" onClick={() => onSave({ ...role, name, base, perms: [...checked].filter(p => p !== PRINTERS_OFF).concat(checked.has("printers.manage") ? [] : [PRINTERS_OFF]) })}>{submitLabel}</button>
       <span className="xs mut">{checked.size} selected{added || dropped ? ` · +${added} / −${dropped} vs ${builtin ? "original " : ""}${base}` : ` · same as ${builtin ? "original " : ""}${base}`}</span>
     </div>
   </div>;

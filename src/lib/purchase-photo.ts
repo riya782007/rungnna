@@ -6,7 +6,7 @@ import { readCount, readPacketSize } from "./purchase-quantities";
 import { moneyInput } from "./pos";
 import { requirePerm } from "./scope";
 import { vendorCost } from "./vendors";
-import { getRule, priceFromCost, evenRate, type PricingRule } from "./pricing";
+import { getRule, priceFromCost, evenRate, retailFromRate, type PricingRule } from "./pricing";
 
 export type PhotoRow = { item: string; style: string; color: string; unit: string; hsn: string; qty: string; cost: string; rate: string;
   /** set when autoArticle() invented the article because the bill printed none */
@@ -212,7 +212,7 @@ export async function savePhotoPurchase(rows: PhotoRow[], input: { by: string; r
       const old = await findByKey({ model: row.style, style: row.style, color: row.color, vendor_id: supplier.id });
       if (old && old.type !== row.unit.toUpperCase()) throw new Error("Unit differs from the existing article. Review before saving.");
       const code = priceFromCost(row.cost, rule, row.pack, row.unit).cost_code;
-      const p: Product = old ? { ...old, item: row.item, hsn: row.hsn || old.hsn, cost: row.cost, rate: row.rate, price_locked: 1, cost_code: code, pack: row.pack, item_code: row.item_code || old.item_code, ref: row.ref ?? old.ref } : { ...blankProduct(input.by), item: row.item, style: row.style, model: row.style, color: row.color, item_code: row.item_code, ref: row.ref, type: row.unit, hsn: row.hsn, rate: row.rate, cost: row.cost, cost_code: code, price_locked: 1, vendor_id: supplier.id, vendor_name: supplier.name, pack: row.pack };
+      const p: Product = old ? { ...old, item: row.item, hsn: row.hsn || old.hsn, cost: row.cost, rate: row.rate, retail_rate: old.retail_rate || retailFromRate(row.rate, rule) || undefined, price_locked: 1, cost_code: code, pack: row.pack, item_code: row.item_code || old.item_code, ref: row.ref ?? old.ref } : { ...blankProduct(input.by), item: row.item, style: row.style, model: row.style, color: row.color, item_code: row.item_code, ref: row.ref, type: row.unit, hsn: row.hsn, rate: row.rate, retail_rate: retailFromRate(row.rate, rule) || undefined, cost: row.cost, cost_code: code, price_locked: 1, vendor_id: supplier.id, vendor_name: supplier.name, pack: row.pack };
       const saved = await saveProduct(p);
       // Packet-entry totals are recomputed as pkts × pack by stock-in. A partial
       // packet keeps the supplier's exact unit total; label_pack retains its sticker size.

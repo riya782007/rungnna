@@ -104,3 +104,15 @@ function NoteRow({ n, busy, onText, canDelete }: { n: VoiceNote; busy: boolean; 
     </div>
   );
 }
+
+/* Speak instead of typing (owner, 22 Oct: daily tasks from a voice note; colours "by just speaking").
+   Records, sends the clip to the shop's AI to write it down, and hands back the words. Needs internet. */
+export function SpeakText({ onText, label = "Speak" }: { onText: (text: string) => void; label?: string }) {
+  const [busy, setBusy] = useState(false);
+  return <MicButton busy={busy} label={label} onAudio={async a => {
+    setBusy(true);
+    try { const t = (await transcribe(a)).split("\nSummary:")[0].trim(); if (t) onText(t); else toast("Didn't catch that — try again", true); }
+    catch (e: any) { toast(e.message || "Could not write the voice down", true); }
+    finally { setBusy(false); }
+  }} />;
+}

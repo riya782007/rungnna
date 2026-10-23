@@ -30,7 +30,7 @@ describe("challan → invoice", () => {
     const ch = await finalize(doc("challan", [pcs(ring, 10)]), "Delhi");
     expect(ch.no).toMatch(/^CH\//); expect(await stock("ring")).toBe(90);
     const inv = await mergeBills([ch], "gst", shop, "t");
-    expect(inv.no).toMatch(/^RJ\//); expect(await stock("ring")).toBe(90);
+    expect(inv.no).toMatch(/^INV\//); expect(await stock("ring")).toBe(90);
     expect((await db.bills.get(ch.id))).toMatchObject({ status: "merged", merged_into: inv.id, merged_into_no: inv.no });
     expect(await partyDue("ravi")).toBe(inv.net);                    // the invoice is owed, the challan never was
     await voidBill(inv, "wrong rate", "owner");
@@ -93,7 +93,7 @@ describe("split", () => {
   it("moved lines take their sale movements with them; each bill cancels only its own pieces", async () => {
     const inv = await finalize(doc("gst", [pcs(ring, 10), pcs(chain, 3)]), "Delhi");
     const { original, split } = await splitBill(inv, [inv.items[1].id], shop, "t");
-    expect(split.no).toMatch(/^RJ\//); expect(split.no).not.toBe(inv.no); expect(original.no).toBe(inv.no);
+    expect(split.no).toMatch(/^INV\//); expect(split.no).not.toBe(inv.no); expect(original.no).toBe(inv.no);
     expect(await stock("chain")).toBe(47);                           // nothing deducted twice
     expect((await db.movements.where("ref_bill").equals(split.id).toArray()).map(m => m.product_id)).toEqual(["chain"]);
     await voidBill(split, "x", "owner");

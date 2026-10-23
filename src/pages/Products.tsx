@@ -1,3 +1,4 @@
+import { locCode } from "../lib/stock-adjustment";
 import { DeleteButton } from "../components/DeleteButton";
 import { SelectAll } from "../components/SelectAll";
 import { confirmDelete } from "../lib/confirm-delete";
@@ -56,12 +57,12 @@ function ProductList() {
         <input className="in" placeholder="Search style, colour, item, code…" value={q} onChange={e => setQ(e.target.value)} />
         <WedgeInput autoFocus={false} placeholder="…or scan a label to open it" onCode={async raw => { const p = await findByScan(raw); p ? go("product/" + p.id) : toast("Not found", true); }} />
         <div className="chips"><button className="chip" aria-pressed={!item && !dead && !hiddenView} onClick={() => { setItem(""); setDead(false); setHiddenView(false); }}>All</button>
-          {editable && hiddenCount > 0 && <button className="chip" aria-pressed={hiddenView} title="Products hidden with Hide: their stock and history are kept" onClick={() => setHiddenView(!hiddenView)}>Hidden ({hiddenCount})</button>}<button className="chip" aria-pressed={dead} onClick={() => setDead(!dead)}>Dead stock (TK)</button>
+          {editable && hiddenCount > 0 && <button className="chip" aria-pressed={hiddenView} title="Products taken off the list with “Take off list”: their stock and history are kept. Open to bring any back." onClick={() => setHiddenView(!hiddenView)}>Off the list ({hiddenCount})</button>}<button className="chip" aria-pressed={dead} title="Old, slow-moving goods: the ones marked TK (the old software's dead-stock mark) on their stickers" onClick={() => setDead(!dead)}>Dead stock</button>
           {items.map(i => <button key={i} className="chip" aria-pressed={item === i} onClick={() => setItem(i)}>{i}</button>)}</div>
       </div>
       {editable && <div className="selection-bar"><SelectAll ids={list.map(p => p.id)} selected={selection} onChange={setSelection} label={"Select all " + list.length + " matching products"} />{hiddenView
         ? <button className="btn sm p" disabled={!list.some(p => selection.has(p.id))} onClick={async () => { const ids = list.filter(p => selection.has(p.id)).map(p => p.id); try { await showProducts(ids); setSelection(new Set()); toast(ids.length + " product" + (ids.length === 1 ? "" : "s") + " showing again, with their stock"); } catch (e: any) { toast(e.message, true); } }}>Show again</button>
-        : <DeleteButton className="btn sm bad" disabled={!list.some(p => selection.has(p.id))} onDelete={async () => { const ids = list.filter(p => selection.has(p.id)).map(p => p.id); if (!await confirmDelete("Hide " + ids.length + " selected products? They and their stock leave Products and Stock until shown again (Products › Hidden). Bill history stays.")) return; try { await hideProducts(ids); setSelection(new Set()); toast("Products hidden · Products › Hidden shows them again"); } catch (e: any) { toast(e.message, true); } }}>Hide selected</DeleteButton>}</div>}
+        : <DeleteButton className="btn sm bad" disabled={!list.some(p => selection.has(p.id))} onDelete={async () => { const ids = list.filter(p => selection.has(p.id)).map(p => p.id); if (!await confirmDelete("Take " + ids.length + " selected products off the list? They and their stock leave Products and Stock until brought back (Products › Off the list). Bill history stays.")) return; try { await hideProducts(ids); setSelection(new Set()); toast("Taken off the list · Products › Off the list brings them back"); } catch (e: any) { toast(e.message, true); } }}>Take off list</DeleteButton>}</div>}
       <div className="stack" style={{ gap: 6 }}>
         {list.slice(0, limit).map(p => (
           <div key={p.id} className="item">{editable && <input type="checkbox" aria-label={"Select product " + label(p)} checked={selection.has(p.id)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(p.id) : next.delete(p.id); return next; })} />}<a className="row grow" style={{ textDecoration: "none" }} href={"#/product/" + p.id}>
@@ -95,7 +96,7 @@ function ProductDetail({ id }: { id: string }) {
   const colourNames = tax?.colours.map(c => c.name) || [];
   const set = (k: keyof Product, v: any) => setP({ ...p, [k]: v });
   const total = stock.reduce((a, c) => a + c.qty, 0);
-  const locOf = (x: string | null) => (x ? locs.find(l => l.id === x)?.code || "?" : "");
+  const locOf = (x: string | null) => (x ? locCode(locs.find(l => l.id === x)) || "?" : "");
   return (
     <div>
       <Head eyebrow={p.code} title={label(p)} sub={`${total} pieces in the building`}>

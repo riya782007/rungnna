@@ -1,3 +1,4 @@
+import { askText } from "./AskHost";
 import { can } from "../lib/roles";
 import { useEffect, useState } from "react";
 import { db, put, type Bill, type Transport } from "../lib/db";
@@ -47,7 +48,7 @@ export function GstBill({ b, shop }: { b: Bill; shop: Shop }) {
         {errors.length > 0 && <div className="note warn sm">{errors.join(" · ")}</div>}
         <div className="row"><button className="btn" disabled={busy || !!errors.length} onClick={() => run(async () => { await save(); downloadGst(draft, shop, kind); })}><Icon n="download" size={16} />Download JSON</button>
           {configured && can(me, "gst.register") && !record && <button className="btn p" disabled={busy || !!errors.length || !onlineApproved} onClick={() => run(async () => { await save(); await submitGst(draft, kind, "generate", undefined, onlineApproved); setOnlineApproved(false); toast("Acknowledgement saved"); })}>{sandbox ? "Submit to sandbox" : "Generate"}</button>}
-          {configured && can(me, "gst.register") && canCancel(record) && <button className="btn bad" disabled={busy || !onlineApproved} onClick={() => { const reason = prompt("Cancellation reason"); if (reason) run(async () => { await submitGst(b, kind, "cancel", reason, onlineApproved); setOnlineApproved(false); }); }}>Cancel within 24 hours</button>}</div>
+          {configured && can(me, "gst.register") && canCancel(record) && <button className="btn bad" disabled={busy || !onlineApproved} onClick={async () => { const reason = await askText("Cancellation reason"); if (reason) run(async () => { await submitGst(b, kind, "cancel", reason, onlineApproved); setOnlineApproved(false); }); }}>Cancel within 24 hours</button>}</div>
       </div>;
     })}
   </section>;

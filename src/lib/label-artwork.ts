@@ -26,8 +26,13 @@ export function labelQr(text: string, requestedMm: number, roomMm = requestedMm)
   // 6.25 mm at 2 printer dots each: the size of the old software's QR, which the owner asked for (22 Oct),
   // and sturdier than it. Other QRs keep level M.
   const alnum = /^[0-9A-Z $%*+\-./:]+$/.test(text);
-  const qr = qrcode(0, alnum ? "H" : "M");
+  let qr = qrcode(0, alnum ? "H" : "M");
   qr.addData(text, alnum ? "Alphanumeric" : "Byte"); qr.make();
+  // the old software's own QR (ITEMCODE~RATE~…) is 25 × 25 at level L; ours for it is the same size when it fits
+  if (!alnum && text.includes("~") && qr.getModuleCount() > 25) {
+    const low = qrcode(0, "L"); low.addData(text, "Byte"); low.make();
+    if (low.getModuleCount() < qr.getModuleCount()) qr = low;
+  }
   const modules = qr.getModuleCount(), cells = modules + QR_QUIET_MODULES * 2;
   // 2 printer dots per square is the bare minimum, and a thermal head's heat spreads it: such QRs scanned only
   // sometimes (owner, 22 Oct). When a 3-dot QR still fits the sticker, use it, even a little past the set size.
