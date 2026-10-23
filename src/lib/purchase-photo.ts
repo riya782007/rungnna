@@ -25,7 +25,9 @@ export type PhotoRow = { item: string; style: string; color: string; unit: strin
   /** old software's PRINT QTY: blank is one per packet; 0 skips; a number prints that many stickers. */
   stickers?: string;
   /** the cost exactly as the bill was read, so vendor terms can be undone and a cost divided too often is caught */
-  billCost?: string };
+  billCost?: string;
+  /** owner, 22 Oct: collection/style, material and a photo set on the same screen as the stickers */
+  collection?: string; material?: string; photo_id?: string };
 
 /** Lines whose cost is under a tenth of their selling rate: almost always a cost divided (or misread) too often.
     1-based line numbers. */
@@ -212,7 +214,7 @@ export async function savePhotoPurchase(rows: PhotoRow[], input: { by: string; r
       const old = await findByKey({ model: row.style, style: row.style, color: row.color, vendor_id: supplier.id });
       if (old && old.type !== row.unit.toUpperCase()) throw new Error("Unit differs from the existing article. Review before saving.");
       const code = priceFromCost(row.cost, rule, row.pack, row.unit).cost_code;
-      const p: Product = old ? { ...old, item: row.item, hsn: row.hsn || old.hsn, cost: row.cost, rate: row.rate, retail_rate: old.retail_rate || retailFromRate(row.rate, rule) || undefined, price_locked: 1, cost_code: code, pack: row.pack, item_code: row.item_code || old.item_code, ref: row.ref ?? old.ref } : { ...blankProduct(input.by), item: row.item, style: row.style, model: row.style, color: row.color, item_code: row.item_code, ref: row.ref, type: row.unit, hsn: row.hsn, rate: row.rate, retail_rate: retailFromRate(row.rate, rule) || undefined, cost: row.cost, cost_code: code, price_locked: 1, vendor_id: supplier.id, vendor_name: supplier.name, pack: row.pack };
+      const p: Product = old ? { ...old, item: row.item, hsn: row.hsn || old.hsn, cost: row.cost, rate: row.rate, retail_rate: old.retail_rate || retailFromRate(row.rate, rule) || undefined, price_locked: 1, cost_code: code, pack: row.pack, item_code: row.item_code || old.item_code, ref: row.ref ?? old.ref, collection: row.collection?.trim() || old.collection, material: row.material?.trim() || old.material, photo_id: row.photo_id || old.photo_id } : { ...blankProduct(input.by), item: row.item, style: row.style, model: row.style, color: row.color, item_code: row.item_code, ref: row.ref, type: row.unit, hsn: row.hsn, rate: row.rate, retail_rate: retailFromRate(row.rate, rule) || undefined, cost: row.cost, cost_code: code, price_locked: 1, vendor_id: supplier.id, vendor_name: supplier.name, pack: row.pack, collection: row.collection?.trim() || undefined, material: row.material?.trim() || undefined, photo_id: row.photo_id };
       const saved = await saveProduct(p);
       // Packet-entry totals are recomputed as pkts × pack by stock-in. A partial
       // packet keeps the supplier's exact unit total; label_pack retains its sticker size.

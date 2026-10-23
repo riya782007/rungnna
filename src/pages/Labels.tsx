@@ -54,6 +54,7 @@ export type LabelCfg = {
   cur?: string;          // printed before the rate: "9" on the shop's old stickers, or ₹ / Rs. / nothing
   driverPaper?: boolean; // roll: the page size comes from the printer's own stock (one row of stickers), not the page
   rateScale?: number;    // rate line size, × text size
+  codeOff?: 1;           // the product-code line was switched off once (24 Oct); later choices are kept
 };
 
 /** Where one sticker goes on a sheet page, and how wide it can be before the printer's right edge. */
@@ -127,7 +128,10 @@ export function upgradeLabelCfg(saved: Partial<LabelCfg> | null | undefined): La
   }
   // Earlier single-column USB settings can survive a move to the shop's roll.
   // That transport cannot print multiple columns; normal browser printing can.
-  return upgraded.output === "tspl" && (upgraded.mode !== "roll" || upgraded.cols !== 1) ? { ...upgraded, output: "browser" } : upgraded;
+  // owner, 22 Oct: "letters like RUCJJMEGSEY come on every sticker — why? get them deleted". The product-code line
+  // goes off once on every computer; switching "Product code" back on is remembered.
+  const codeOnce = upgraded.codeOff ? upgraded : { ...upgraded, codeOff: 1 as const, show: { ...upgraded.show, code: false } };
+  return codeOnce.output === "tspl" && (codeOnce.mode !== "roll" || codeOnce.cols !== 1) ? { ...codeOnce, output: "browser" } : codeOnce;
 }
 /** The saved printer settings brought up to date, without saving anything: safe inside a live query
     (a live query may only read; saving the upgrade there crashed the bill reader on a counter whose settings

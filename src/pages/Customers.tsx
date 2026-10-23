@@ -1,3 +1,6 @@
+import { SalesSummaryButton } from "../components/SalesSummary";
+import { customerProfit, type CustomerProfit } from "../lib/customerProfit";
+import { can } from "../lib/roles";
 import { askText } from "../components/AskHost";
 import { stateCode, GST_STATES } from "../lib/states";
 import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
@@ -70,12 +73,14 @@ function PartyView({ id }: { id: string }) {
   const [amt, setAmt] = useState("");
   const [mode, setMode] = useState<Payment["mode"]>("cash");
   const [note, setNote] = useState("");
-  const [tab, setTab] = useState<"account" | "bills" | "details">("account");
+  const [tab, setTab] = useState<"account" | "profit" | "bills" | "details">("account");
+  const [pl, setPl] = useState<CustomerProfit | null>(null);
   const [printing, setPrinting] = useState(false);
   const [share, setShare] = useState(false);
   useEffect(() => { if (p0) setP({ ...p0 }); }, [p0?.updated_at]);
   useEffect(() => { if (p0) ledger(p0).then(setLed); }, [p0?.updated_at, bills, rc, priv]);
   useEffect(() => { getShop().then(setShop); }, []);
+  useEffect(() => { if (tab === "profit") void customerProfit(id, led?.balance || 0).then(setPl); }, [tab, id, bills, led?.balance]);
   usePrintJob(printing, () => setPrinting(false));
   if (!p || !p0) return <div className="skel" style={{ height: 200 }} />;
   const set = (k: keyof Party, v: any) => setP({ ...p, [k]: v });
@@ -101,7 +106,7 @@ function PartyView({ id }: { id: string }) {
       </div>
 
       <div className="tabs" style={{ marginBottom: 14 }}>
-        {(["account", "bills", "details"] as const).map(t => <a key={t} href={"#/customers/" + id} className={tab === t ? "on" : ""} onClick={e => { e.preventDefault(); setTab(t); }}>{t === "account" ? "Account" : t === "bills" ? "Bills" : "Details"}</a>)}
+        {(["account", "profit", "bills", "details"] as const).map(t => <a key={t} href={"#/customers/" + id} className={tab === t ? "on" : ""} onClick={e => { e.preventDefault(); setTab(t); }}>{t === "account" ? "Khata (journal)" : t === "profit" ? "Profit & pattern" : t === "bills" ? "Bills" : "Details"}</a>)}
       </div>
 
       {tab === "account" && <div className="split">
@@ -116,9 +121,10 @@ function PartyView({ id }: { id: string }) {
             <button className="btn sm g" onClick={() => setShare(true)}><Icon n="wa" size={16} />Share statement</button>
             <button className="btn sm" onClick={() => setPrinting(true)}><Icon n="print" size={16} />Print statement</button>
           </div>
+          <div><SalesSummaryButton party={p0} shop={shop} /></div>
         </div>
         <div className="card tw"><table>
-          <thead><tr><th>Date</th><th>Entry</th><th className="r">Debit</th><th className="r">Credit</th><th className="r">Balance</th></tr></thead>
+          <thead><tr><th>Date</th><th>Entry · narration</th><th className="r">Debit</th><th className="r">Credit</th><th className="r">Balance</th></tr></thead>
           <tbody>{(led?.entries || []).slice().reverse().map((e, i) => (
             <tr key={i} className={e.kind === "bill" ? "click" : ""} onClick={() => e.kind === "bill" && go("bills/" + e.id)}>
               <td className="xs mut">{e.kind === "opening" ? "—" : new Date(e.at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</td>
@@ -128,6 +134,27 @@ function PartyView({ id }: { id: string }) {
             {!led?.entries.length && <tr><td colSpan={5} className="empty">No entries yet.</td></tr>}
           </tbody></table></div>
       </div>}
+
+      {tab === "profit" && (pl ? <div className="split">
+        <div className="card pad stack">
+          <b>What the shop sees in {p.name}</b>
+          <ul className="stack" style={{ margin: 0, paddingLeft: 18 }}>{pl.advice.map((a, i) => <li key={i} className="sm">{a}</li>)}</ul>
+          <div className="grid g2">
+            <div><span className="xs mut">Sold (before tax)</span><div className="b mono">{rupees(pl.sales)}</div></div>
+            <div><span className="xs mut">Returns</span><div className="b mono">{rupees(pl.returns)}</div></div>
+            {can(me, "rates") && <><div><span className="xs mut">Cost of those goods</span><div className="b mono">{rupees(pl.cost)}</div></div>
+              <div><span className="xs mut">Profit {pl.margin ? `· ${pl.margin}%` : ""}</span><div className={"b mono " + (pl.profit < 0 ? "bad-text" : "ok-text")}>{rupees(pl.profit)}</div></div></>}
+            <div><span className="xs mut">Bills</span><div className="b">{pl.bills}</div></div>
+            <div><span className="xs mut">Comes every</span><div className="b">{pl.everyDays ? `${pl.everyDays} days` : "—"}</div></div>
+          </div>
+        </div>
+        <div className="card pad stack">
+          <b>Last 6 months</b>
+          <div className="pl-bars">{pl.months.map(m => { const max = Math.max(1, ...pl.months.map(x => x.amount)); return <div key={m.label} className="pl-bar"><span style={{ height: `${Math.round(m.amount / max * 100)}%` }} title={rupees(m.amount)} /><small>{m.label}</small></div>; })}</div>
+          <b>What he buys</b>
+          <table className="pos-t"><tbody>{pl.items.map(i => <tr key={i.name}><td>{i.name}</td><td className="r mono">{i.qty} pcs</td><td className="r mono">{rupees(i.amount)}</td></tr>)}</tbody></table>
+        </div>
+      </div> : <div className="skel" style={{ height: 160 }} />)}
 
       {tab === "bills" && <div className="list">
         {bills.map(b => <a key={b.id} href={"#/bills/" + b.id}><span className="grow"><b className="mono sm">{b.no || "on hold"}</b><div className="xs mut">{when(b.at)} · {b.total_qty} pcs · {b.status}</div></span><b className="mono">{rupees(b.net)}</b><Icon n="chev" size={16} /></a>)}

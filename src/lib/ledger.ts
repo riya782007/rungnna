@@ -31,7 +31,8 @@ export async function ledger(party: Party): Promise<{ entries: Entry[]; balance:
     if (c.paid) raw.push({ at: c.at, kind: "refund", ref: "Refund on " + c.no, id: c.id, debit: c.paid, credit: 0 });
   }
   for (const b of bills) {
-    raw.push({ at: b.at, kind: "bill", ref: b.no, id: b.id, debit: b.net, credit: 0, note: `${b.total_qty} pcs` });
+    // the narration: pieces, and whatever was written on the bill (transport, marka…)
+    raw.push({ at: b.at, kind: "bill", ref: b.no, id: b.id, debit: b.net, credit: 0, note: [`${b.total_qty} pcs`, b.remarks?.trim()].filter(Boolean).join(" · ") });
     const paid = b.advance + b.payments.filter(p => p.mode !== "credit" && !fromReceipt(p)).reduce((a, p) => a + p.amount, 0);
     if (paid) raw.push({ at: b.at, kind: "paid", ref: "Paid on " + b.no, id: b.id, debit: 0, credit: paid });
   }

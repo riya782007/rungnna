@@ -19,7 +19,9 @@ import { purchaseLabelJobs } from "../lib/purchase-labels";
 import { DEFAULT_CFG, LabelView, validateLabelPrint, loadLabelCfg, readLabelCfg, useLabelPrint, tscCommands, expandJobs, type LabelCfg, type Job } from "../pages/Labels";
 import { directPrintSupported } from "../lib/tsc";
 import { currentStore } from "../lib/scope";
-import { toast } from "../lib/app";
+import { toast, useApp } from "../lib/app";
+import { can } from "../lib/roles";
+import { PhotoButton } from "./common";
 import { RackPicker } from "./RackPicker";
 import { StickerQuickBar } from "./StickerQuickBar";
 import { OldCodesCard } from "./OldCodesCard";
@@ -28,10 +30,10 @@ import { checkBill, checkSummary, matchSupplier, fallbackBillNo, type LineFix } 
 import { newParty } from "../lib/billing";
 
 const blank = (pack = "1"): PhotoRow => ({ review_id: uid(), item: "", style: "", color: "", unit: "PCS", hsn: "", qty: "", pack, packSource: "default", stickers: "", cost: "", rate: "" });
-const captions: Record<string, string> = { item: "Item", style: "Style/article", color: "Colour", unit: "Unit", entry_code: "Reference Code", hsn: "HSN", qty: "Total qty", pack: "Pieces per packet (X)", stickers: "Stickers", cost: "Cost ₹", rate: "Rate ₹" };
+const captions: Record<string, string> = { collection: "Collection / style", material: "Material", item: "Item", style: "Style/article", color: "Colour", unit: "Unit", entry_code: "Reference Code", hsn: "HSN", qty: "Total qty", pack: "Pieces per packet (X)", stickers: "Stickers", cost: "Cost ₹", rate: "Rate ₹" };
 /* pack = the "X1" / "X3" after the rate on his stickers: pieces in one packet (his old software's QTY box) */
 const FIELDS = ["entry_code", "item", "style", "unit", "rate", "cost", "stickers", "qty", "pack", "color"] as const;
-type Field = (typeof FIELDS)[number];
+type Field = (typeof FIELDS)[number] | "collection" | "material";
 const defaultStickers = (r: PhotoRow) => {
   const qty = Number(r.qty), pack = Number(r.pack || "1");
   return Number.isSafeInteger(qty) && qty > 0 && Number.isSafeInteger(pack) && pack > 0 ? String(Math.ceil(qty / pack)) : "";
@@ -71,6 +73,13 @@ async function receivingRack(chosen: string): Promise<string> {
 export const fillGaps = (rows: PhotoRow[], rule: PricingRule | null | undefined) => rule ? pricePhotoRows(autoArticle(rows), rule) : autoArticle(rows);
 
 export default function PurchasePhoto({ by, camera = false }: { by: string; camera?: boolean }) {
+  /* Owner, 22 Oct: "the staff who load the stock need not see the bill's money" — whoever may not see costs
+     (permission "See cost & set selling rates") gets no cost/rate columns, totals or pricing buttons here.
+     "More details" adds collection/style, material and a photo per line, on this same screen. */
+  const { me } = useApp();
+  const money = can(me, "rates");
+  const [more, setMore] = useState(false);
+  const lineFields: Field[] = [...FIELDS.filter(f => money || (f !== "cost" && f !== "rate")), ...(more ? ["collection", "material"] as Field[] : [])];
   const [d, setD] = useState<Draft>({ store: currentStore(), rows: [], supplier: "", billNo: "", rack: "", warnings: "", total: "" });
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const countFocus = useRef<HTMLInputElement | null>(null);
@@ -637,12 +646,13 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         </label>)}</div>
       </details>}
 
+      <label className="row sm" style={{ gap: 6 }}><input type="checkbox" checked={more} onChange={e => setMore(e.target.checked)} /> More details: collection / style, material and a photo for each line</label>
       <div className="selection-bar"><SelectAll ids={d.rows.map(r => r.review_id!)} selected={selection} onChange={setSelection} label="Select all purchase lines" /><span className="sm">{d.rows.filter(r => selection.has(r.review_id!)).length} selected</span><DeleteButton className="btn sm bad" disabled={busy || !d.rows.some(r => selection.has(r.review_id!))} onDelete={() => removeRows(d.rows.filter(r => selection.has(r.review_id!)).map(r => r.review_id!))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }}>Keys: ↑↓ lines · ←→ fields · Space select · Shift+↑↓ range</span></div>
-      <div className="tw purchase-lines" onKeyDown={onPurchaseGridKey}><table className="pos-t"><thead><tr>{["No.", "Supplier S.No.", ...FIELDS.map(f => captions[f]), ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
+      <div className="tw purchase-lines" onKeyDown={onPurchaseGridKey}><table className="pos-t"><thead><tr>{["No.", "Supplier S.No.", ...lineFields.map(f => captions[f]), ...(more ? ["Photo"] : []), ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
         {d.rows.map((r, i) => <tr key={r.review_id || i}>
           <td className="line-no" data-l="Line" title="Line number: the same small boxed number printed on this line's stickers"><input type="checkbox" aria-label={"Select purchase line " + (i + 1)} checked={selection.has(r.review_id!)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(r.review_id!) : next.delete(r.review_id!); return next; })} />{r.sr?.trim() ? <span title={"Serial on the supplier's bill (line " + (i + 1) + " here)"}>{r.sr}</span> : i + 1}</td>
           <td data-l="Supplier S.No." className="supplier-number mono" title="Saved supplier roll number">{vendor?.vendor_code || "—"}</td>
-          {FIELDS.map(k => <td key={k} data-l={captions[k]}>
+          {lineFields.map(k => <td key={k} data-l={captions[k]}>
             <input className={"in" + ((k === "style" && r.autoStyle) || d.check?.fixes.some(f => f.line === i + 1 && f.field === k) ? " auto-filled" : "") + (k === "cost" && lowCost.includes(i + 1) ? " cost-low" : "")} aria-label={`${k} line ${i + 1}`}
               title={k === "entry_code" ? "Editable maker initial + entry date (DDMMYY). This assumed code does not encode price." : ["qty", "pack", "stickers"].includes(k) ? `Enter copies this ${captions[k].toLowerCase()} to the next line. Type a new number to change it.${k === "stickers" ? " Blank means one per packet; 0 prints none." : ""}` : k === "style" && r.autoStyle ? "The bill printed no article number — this was built from the item and its rate. Edit it if you have the supplier's own code." : undefined}
               inputMode={k === "cost" || k === "rate" ? "decimal" : ["qty", "pack", "stickers"].includes(k) ? "numeric" : undefined}
@@ -660,12 +670,14 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
                   setError("");
                 } catch (error: any) { setError(error.message); }
               } : undefined}
-              style={{ minWidth: k === "item" ? 130 : ["style", "entry_code"].includes(k) ? 110 : 56 }} /></td>)}
+              style={{ minWidth: k === "item" ? 130 : ["style", "entry_code", "collection", "material"].includes(k) ? 110 : 56 }} /></td>)}
+          {more && <td data-l="Photo"><PhotoButton value={r.photo_id} onChange={v => set({ rows: d.rows.map((x, k) => k === i ? { ...x, photo_id: v } : x) })} label="" /></td>}
           <td><DeleteButton className="iconbtn" aria-label="Remove line" disabled={busy} onDelete={() => removeRows([r.review_id!])}><Trash2 size={16} /></DeleteButton></td>
         </tr>)}</tbody></table></div>
 
       {!!invented && <div className="note sm">{invented} line{invented === 1 ? "" : "s"} had no article number on the bill. An article was built from the item and its rate (e.g. CHOTI-273) so lines at different rates stay separate — and so buying the same thing again at the same rate matches the same product. Edit any of them if the supplier has a code.</div>}
 
+      {money && <>
       <div className="row">
         {vendor && (!!vendor.less_pct || (vendor.rate_divisor || 1) !== 1) && (d.rows.length && d.rows.every(r => r.termsDone)
           ? <span className="pill ok applied" role="status">✓ Vendor terms applied{(vendor.rate_divisor || 1) !== 1 ? ` (÷${vendor.rate_divisor})` : ""}{vendor.less_pct ? ` (${vendor.less_pct}% less)` : ""}{d.rows.some(r => r.billCost) && <button className="linkbtn" style={{ marginLeft: 8 }} onClick={() => { set({ rows: restoreBillCosts(d.rows) }); setDone({}); }}>Undo</button>}</span>
@@ -681,6 +693,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       </div>}
       {done.pricing && done.pricingSig === costSig(d.rows) && <div className="note ok applied-note sm" role="status">✓ {done.pricing}</div>}
       {pricing && <div className="row sm"><span>Pricing: {pricing.margin.mode === "percent" ? `+${pricing.margin.percent}%` : `${pricing.margin.mode === "divide" ? "÷" : "×"}${pricing.margin.factor}`} · round ₹{pricing.margin.round_to} {pricing.margin.round_dir}</span><a href="#/settings/prices">Pricing settings</a></div>}
+      </>}
 
 
       {validation && <div className="note warn" role="status">{validation}</div>}
@@ -706,14 +719,14 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
 
 /* Change one field on every line, or only on the ticked lines, in one go (owner, 21/10):
    Reference Code, Item name, Colour, Unit. Nobody has to edit line after line. */
-type BulkField = "entry_code" | "item" | "color" | "unit";
-const BULK_FIELDS: [BulkField, string][] = [["entry_code", "Reference Code"], ["item", "Item name"], ["color", "Colour"], ["unit", "Unit"]];
+type BulkField = "entry_code" | "item" | "color" | "unit" | "collection" | "material";
+const BULK_FIELDS: [BulkField, string][] = [["entry_code", "Reference Code"], ["item", "Item name"], ["color", "Colour"], ["unit", "Unit"], ["collection", "Collection / style"], ["material", "Material"]];
 function BulkEdit({ rows, selection, disabled, onApply }: { rows: PhotoRow[]; selection: Set<string>; disabled: boolean; onApply: (ids: Set<string> | null, patch: Partial<PhotoRow>) => void }) {
   const [field, setField] = useState<BulkField>("entry_code"), [value, setValue] = useState("");
   const picked = rows.filter(r => selection.has(r.review_id!)).length;
   const clean = () => {
     const v = value.trim().toUpperCase();
-    if (!v && field !== "color" && field !== "entry_code") { toast("Type the new " + (field === "item" ? "item name" : field), true); return null; }
+    if (!v && !["color", "entry_code", "collection", "material"].includes(field)) { toast("Type the new " + (field === "item" ? "item name" : field), true); return null; }
     if (field === "entry_code" && (v.length > 24 || !/^[A-Z0-9./-]*$/.test(v))) { toast("Reference code: up to 24 letters, numbers, / . or -", true); return null; }
     if (field === "unit" && !/^(PCS|PAIR|SET)$/.test(v)) { toast("Unit must be PCS, PAIR or SET", true); return null; }
     return { [field]: v } as Partial<PhotoRow>;
