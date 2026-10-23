@@ -1,3 +1,6 @@
+import { setViewCode } from "../lib/viewCode";
+import { PersonPerms } from "../components/PersonPerms";
+import { currentStore } from "../lib/scope";
 import { askText } from "../components/AskHost";
 import { DeleteButton } from "../components/DeleteButton";
 import { confirmDelete } from "../lib/confirm-delete";
@@ -40,7 +43,7 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
   const { me, setMe } = useApp();
   const staff = useLiveQuery(() => db.staff.toArray(), [], []);
   const [sync, setSync] = useState<SyncState>();
-  const [nm, setNm] = useState(""); const [role, setRole] = useState<Staff["role"]>("salesman"); const [roleId, setRoleId] = useState(""); const [pin, setPin] = useState("");
+  const [nm, setNm] = useState(""); const [pin, setPin] = useState(""); const [open, setOpen] = useState("");
   const [pats, setPats] = useState<Pattern[]>([]);
   const file = useRef<HTMLInputElement>(null);
   useEffect(() => onSync(setSync) as any, []);
@@ -106,10 +109,9 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
             {staff.filter(s => !s.deleted && !isRoleLogin(s)).map(s => (
               <div key={s.id} className="li person-row">
                 <div className="person-info"><div className="person-name"><b>{s.name}</b>{me?.id === s.id && <span className="pill ok">you</span>}{!s.active && <span className="pill warn">disabled</span>}</div>
-                  <div className="xs mut">{roleName(s)}{s.role_id ? "" : " · " + ROLE_NOTE[s.role]}{s.pin ? " · PIN set" : ""}</div></div>
+                  <div className="xs mut">{s.role === "owner" ? "owner · everything" : Array.isArray(s.perms) ? `own ticks · ${s.perms.length} allowed` : roleName(s) + (s.role_id ? "" : " · " + ROLE_NOTE[s.role])}{s.pin ? " · PIN set" : " · no PIN yet"}</div></div>
                 <div className="person-actions">
-                <RoleSelect value={s} allowOwner={me?.role === "owner"} disabled={s.id === me?.id || (s.role === "owner" && me?.role !== "owner")}
-                  onChange={async v => { await put("staff", { ...s, ...v }); toast("Role changed"); }} />
+                {s.role !== "owner" && s.id !== me?.id && <button className="btn sm" aria-expanded={open === s.id} onClick={() => setOpen(open === s.id ? "" : s.id)}>{open === s.id ? "Done" : "Permissions"}</button>}
                 {(s.role !== "owner" || me?.role === "owner") && <button className="btn sm" onClick={async () => {
                   const value = await askText(`New 4-digit PIN for ${s.name}`, "", { secret: true, numeric: true }); if (value === null) return;
                   if (!/^\d{4}$/.test(value)) return toast("PIN must be 4 digits", true);
@@ -118,17 +120,23 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
                 <button className="btn sm" onClick={async () => { const n = await askText("Name", s.name); if (n?.trim()) { await put("staff", { ...s, name: n.trim() }); toast(`Renamed to ${n.trim()}`); } }}>Rename</button>
                 {s.id !== me?.id && <button className="btn sm" onClick={async () => { await put("staff", { ...s, active: s.active ? 0 : 1 }); }}>{s.active ? "Disable" : "Enable"}</button>}
                 </div>
+                {open === s.id && <div style={{ flexBasis: "100%" }}><PersonPerms person={s} /></div>}
               </div>))}
           </div>
           <div className="pad stack" style={{ borderTop: "1px solid var(--line-2)" }}>
             <div className="sm b">Add a person</div>
+            <div className="xs mut">Just the name. Then tick what they may do — the boxes open by themselves. A PIN can be set now or later.</div>
             <div className="grid g3">
               <input className="in" placeholder="Name" value={nm} onChange={e => setNm(e.target.value)} />
-              <RoleSelect value={{ role, role_id: roleId }} allowOwner={me?.role === "owner"} onChange={v => { setRole(v.role); setRoleId(v.role_id || ""); }} />
-              <input className="in mono" placeholder="4-digit personal PIN" inputMode="numeric" maxLength={4} value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, ""))} />
+              <input className="in mono" placeholder="PIN (optional)" inputMode="numeric" maxLength={4} value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, ""))} />
             </div>
-            <button className="btn" onClick={async () => { if (!nm.trim()) return; if (!/^\d{4}$/.test(pin)) return toast("Set a 4-digit personal PIN", true); await put("staff", { ...newStaff(nm.trim(), role, pin), role_id: roleId }); setNm(""); setPin(""); toast("Added"); }}>Add person</button>
+            <button className="btn" disabled={!nm.trim()} onClick={async () => {
+              if (pin && !/^\d{4}$/.test(pin)) return toast("A PIN has 4 digits — or leave it empty", true);
+              const p = { ...newStaff(nm.trim().toUpperCase(), "salesman", pin), perms: [] as string[], store_id: currentStore() };
+              await put("staff", p); setNm(""); setPin(""); setOpen(p.id); toast(`${p.name} added — tick what they may do`);
+            }}>Add person</button>
           </div></div>}
+        {me?.role === "owner" && <ViewCodeCard />}
         {boss && <PrivateCard />}
         {boss && <SecuritySettings />}
       </div>}
@@ -642,4 +650,15 @@ function StuckChanges() {
 function AllOldCodes() {
   const names = useLiveQuery(async () => [...new Set((await db.products.filter(p => !p.deleted).toArray()).map(p => p.item))], [], [] as string[]);
   return <div className="card"><div className="pad stack"><OldCodesCard names={names} title="Old software item for each name" /></div></div>;
+}
+
+/** Owner, 23 Oct: the code staff type to open Reports, Bills, Activity and Products (777 until changed). */
+function ViewCodeCard() {
+  const [code, setCodeV] = useState("");
+  return <div className="card"><header><h3>Code for reports, sales, activity &amp; stock</h3></header>
+    <div className="pad stack">
+      <div className="set-intro">Everyone except you types this code once after signing in to open Reports, Bills, Activity and Products. It is 777 until you change it.</div>
+      <div className="row"><input className="in mono" type="password" inputMode="numeric" placeholder="New code, 3–8 digits" value={code} onChange={e => setCodeV(e.target.value.replace(/\D/g, ""))} style={{ maxWidth: 200 }} />
+        <button className="btn p" disabled={code.length < 3} onClick={async () => { try { await setViewCode(code); setCodeV(""); toast("Code changed on every counter"); } catch (e: any) { toast(e.message, true); } }}>Change code</button></div>
+    </div></div>;
 }

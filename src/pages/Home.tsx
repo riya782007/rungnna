@@ -241,7 +241,7 @@ export default function Home() {
       {/* row: urgent tasks + stock status */}
       <div className="dash-grid">
         <div className="panel urgent">
-          <header><Icon n="lock" size={16} /><h3>Needs attention</h3>{urgent.length > 0 && <span className="pill bad" style={{ marginLeft: "auto" }}>{urgent.length}</span>}</header>
+          <header><Icon n="search" size={16} /><h3>Needs attention</h3>{urgent.length > 0 && <span className="pill bad" style={{ marginLeft: "auto" }}>{urgent.length}</span>}</header>
           <div className="list" style={{ border: 0, boxShadow: "none", borderRadius: 0 }}>
             {urgent.map(x => (
               <a key={x.t} href={"#/" + x.to}>

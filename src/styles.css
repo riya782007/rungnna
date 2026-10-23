@@ -1113,3 +1113,6 @@ tr.act-estimate td { background: #fde8e8; }
 .pill.act-pill-sale { background: #f5d742; color: #3d3200; }
 .pill.act-pill-intake { background: #2e9d4f; color: #fff; }
 .pill.act-pill-estimate { background: #c62828; color: #fff; }
+.person-perms { padding: 8px 0 12px; }
+.perm-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+.perm-group { border: 1px solid var(--line-2); border-radius: 10px; padding: 8px 10px; display: grid; gap: 4px; }

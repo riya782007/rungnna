@@ -1,3 +1,4 @@
+import { setOwnerOpen } from "./privacy";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { db, put, uid, now, getSetting, setSetting, type Staff, type Location } from "./db";
 import { initStores } from "./stores";
@@ -112,7 +113,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [store, setStore] = useState(currentStore());
   const staffRow = useLiveQuery(() => me ? db.staff.get(me.id) : undefined, [me?.id]);
-  useEffect(() => { if (!staffRow || !me || staffRow.updated_at === me.updated_at) return; if (!sessionAllowed(staffRow)) { setMe(null); return; } setMeS(staffRow); const id = staffRow.role === "owner" ? store : staffRow.store_id || MAIN_STORE; setScope(id, staffRow.role, permsOf(staffRow)); setStore(id); }, [staffRow?.updated_at]);
+  useEffect(() => { if (!staffRow || !me || staffRow.updated_at === me.updated_at) return; if (!sessionAllowed(staffRow)) { setMe(null); return; } setMeS(staffRow); const id = staffRow.role === "owner" || staffRow.stores?.includes(store) ? store : staffRow.store_id || MAIN_STORE; setScope(id, staffRow.role, permsOf(staffRow)); setStore(id); }, [staffRow?.updated_at]);
   useEffect(() => {
     (async () => {
       await firstRun();
@@ -129,8 +130,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   /* Role AND permissions move together, synchronously. If the permission set were left to the
      effect below, there would be one commit where `role` is the new person and `perms` are still
      the previous person's — reachable on a shared counter when someone switches and scans at once. */
+  useEffect(() => { setOwnerOpen(me?.role === "owner"); }, [me?.role, me?.id]);
   const setMe = (s: Staff | null) => { const id = s?.role === "owner" ? store : s?.store_id || MAIN_STORE; setScope(id, s?.role || ""); setScopePerms(permsOf(s)); setStore(id); setMeS(s); setSetting("me", s?.id || ""); };
-  const switchStore = async (id: string) => { if (me?.role !== "owner") throw new Error("Owner only"); await setSetting("active_store", id); setScope(id, "owner"); setStore(id); };
+  // the owner opens any company; anyone else the companies ticked for them (owner, 23 Oct)
+  const switchStore = async (id: string) => {
+    if (me?.role !== "owner" && !(me?.stores || []).includes(id)) throw new Error("This company is not open for you");
+    if (me?.role === "owner") await setSetting("active_store", id);
+    setScope(id, me!.role, permsOf(me)); setStore(id);
+  };
   // custom roles sync like any setting; every check (lib/roles) and every guarded save (scope.requirePerm) follows them
   const rolesRow = useLiveQuery(() => db.config.get("roles"), []);
   const [, bump] = useState(0);

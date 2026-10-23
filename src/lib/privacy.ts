@@ -22,7 +22,15 @@ export async function setCode(code: string, hint: string, minutes = 10) {
 let until = 0, timer: any = 0;
 const subs = new Set<(v: boolean) => void>();
 const emit = () => subs.forEach(f => f(isOpen()));
-export const isOpen = () => Date.now() < until;
+/* Owner, 23 Oct: "the owner's screens never show a lock or anything hidden" — while the owner is signed in,
+   estimates are simply open; for anyone else they stay private. */
+let ownerOpen = false;
+export function setOwnerOpen(v: boolean) { if (ownerOpen !== v) { ownerOpen = v; emit(); } }
+export const isOwnerOpen = () => ownerOpen;
+// in the estimate company, estimates are its everyday bills: open for whoever may open that company
+let companyOpen = false;
+export function setCompanyOpen(v: boolean) { if (companyOpen !== v) { companyOpen = v; emit(); } }
+export const isOpen = () => ownerOpen || companyOpen || Date.now() < until;
 export function lockNow() { until = 0; clearTimeout(timer); emit(); }
 function arm(min: number) {
   until = Date.now() + min * 60_000; clearTimeout(timer);

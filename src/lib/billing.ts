@@ -9,7 +9,7 @@ import { currentStore, inStore, assertStoreRow, storeLocations } from "./stores"
 import { fillBillNames } from "./billing-products";
 import { validatePosLines } from "./pos";
 import { isInterState } from "./states";
-import { requirePerm } from "./scope";
+import { requirePerm, typeForCompany } from "./scope";
 import { purgeEstimates } from "./estimatePurge";
 
 /* ---------------- shop profile (synced to every device) ---------------- */
@@ -195,7 +195,8 @@ export const due = (b: Pick<Bill, "net" | "advance" | "paid"> & { bill_type?: Bi
   b.bill_type === "challan" ? 0 : b.net - b.advance - b.paid;   // a challan asks for no money
 
 /* ---------------- building bills ---------------- */
-export function newBill(by: string, shop: Shop, t: BillType = "estimate"): Bill {
+export function newBill(by: string, shop: Shop, t0: BillType = "estimate"): Bill {
+  const t = typeForCompany(t0) as BillType;
   return {
     id: uid(), no: "", series: "", bill_type: t, status: "hold", party_name: "", party_phone: "", party_gstin: "", party_state: "",
     price_level: "wholesale",

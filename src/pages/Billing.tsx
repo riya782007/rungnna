@@ -1,3 +1,4 @@
+import { companyKindNow, typeForCompany } from "../lib/scope";
 import { askText } from "../components/AskHost";
 import { parkBillingDraft, resumeBillingDraft } from "../lib/billing-drafts";
 import { publicOrigin } from "../lib/platform";
@@ -275,11 +276,14 @@ export default function Billing({ args }: { args: string[] }) {
       setBagWithBill(await getSetting<boolean>("bag_labels_with_bill", false));
       if (args[0]) { const x = await db.bills.get(args[0]); if (x && inStore(x) && (!isEstimate(x) || isOpen())) { setBox(selectedBox(x)); setB(x.status === "hold" ? { ...x, items: mergeBillLines(x.items) } : x); return; } }
       const d = await getSetting<BillingDraft | null>("draft_bill", null);
-      if (d?.bill_type === "estimate" && !isOpen() && d.items.length) await parkBillingDraft(d, selectedBox(d), s);
-      const restored = d && d.status === "hold" && !d.no && (d.bill_type !== "estimate" || isOpen()) ? d : await resumeBillingDraft("gst");
+      // a draft from the other company (owner, 23 Oct: two companies) stays there, kept safe in Held
+      const fits = (x: Bill) => inStore(x) && typeForCompany(x.bill_type) === x.bill_type;
+      if (d && d.items.length && (!fits(d) || (d.bill_type === "estimate" && !isOpen()))) await parkBillingDraft(d, selectedBox(d), s).catch(() => {});
+      const want = typeForCompany("gst") as Bill["bill_type"];
+      const restored = d && fits(d) && d.status === "hold" && !d.no && (d.bill_type !== "estimate" || isOpen()) ? d : await resumeBillingDraft(want);
       setBox(restored ? selectedBox(restored) : 1);
       if (restored) delete (restored as BillingDraft).selected_box;   // draft-only field: never saved onto the bill
-      setB(restored ? { ...restored, items: mergeBillLines(restored.items) } : newBill(me?.id || "", s, "gst"));
+      setB(restored ? { ...restored, items: mergeBillLines(restored.items) } : newBill(me?.id || "", s, want));
     })();
   }, [args[0]]);
   useEffect(() => { if (b && !b.no) setSetting("draft_bill", { ...b, selected_box: box }); }, [b, box]);
@@ -600,15 +604,16 @@ export default function Billing({ args }: { args: string[] }) {
       {scanFeedback && createPortal(<BillScanNotice key={scanFeedback.sequence} feedback={scanFeedback} onClose={dismissScanFeedback} />, document.body)}
       <div className="pos-counter-dock" ref={counterDockRef}>
       <div className="pos-top card">
-        {priv ? <div className="seg" role="group" aria-label="Bill type">
+        {companyKindNow() === "estimate" ? <div className="row" style={{ gap: 8 }}><div className="pos-title"><b>Estimate</b><span className="xs mut">estimate company</span></div></div>
+        : priv && companyKindNow() !== "gst" ? <div className="seg" role="group" aria-label="Bill type">
           <button aria-pressed={b.bill_type === "estimate"} onClick={() => void openDocument("estimate")}>Estimate</button>
           <button aria-pressed={b.bill_type === "gst"} onClick={() => void openDocument("gst")}>GST Invoice</button>
           <button aria-pressed={b.bill_type === "challan"} onClick={() => void openDocument("challan")}>Challan</button>
-          <button onClick={() => lockNow()} title="Lock estimates" aria-label="Lock estimates"><Icon n="lock" size={15} /></button>
+          {me?.role !== "owner" && <button onClick={() => lockNow()} title="Close estimates" aria-label="Close estimates">✓</button>}
         </div> : <div className="row" style={{ gap: 8, flexWrap: "nowrap" }}>
+          {/* no lock sign anywhere (owner, 23 Oct): someone allowed to open estimates double-clicks or holds the title */}
           <div className="pos-title" {...hintProps}><b>{b.bill_type === "challan" ? "Delivery challan" : "Tax invoice"}</b><span className="xs mut">{b.bill_type === "challan" ? "goods out · no money" : b.gst_rate + "% GST"}</span></div>
           <div className="seg" role="group" aria-label="Document">
-            {can(me, "estimates.open") && <button title="Unlock private estimates" aria-label="Unlock private estimates" onClick={() => setAskCode(true)}><Icon n="lock" size={15} /></button>}
             <button aria-pressed={b.bill_type !== "challan"} onClick={() => void openDocument("gst")}>Invoice</button>
             <button aria-pressed={b.bill_type === "challan"} onClick={() => void openDocument("challan")} title="Send goods now, invoice later">Challan</button>
           </div></div>}
@@ -713,7 +718,7 @@ export default function Billing({ args }: { args: string[] }) {
               <option value="a5">A5 invoice</option><option value="a4">A4 invoice</option><option value="80mm">80 mm thermal</option><option value="58mm">58 mm thermal</option><option value="packing">Packing slip (no rates)</option></select>
             <button className="btn" disabled={saving} onClick={doHold}>Hold · F3</button>
             <button className="btn" disabled={saving} onClick={() => setHeld(true)}>Held · F4</button>
-            <button className="btn p" disabled={saving} title={"Saves to Bills → " + (b.bill_type === "estimate" ? "Estimates (unlocked only)" : b.bill_type === "gst" ? "Tax invoices" : "Challans")} onClick={() => doSave(false)}>{saving ? "Saving…" : `Save ${documentName}`}</button>
+            <button className="btn p" disabled={saving} title={"Saves to Bills → " + (b.bill_type === "estimate" ? "Estimates" : b.bill_type === "gst" ? "Tax invoices" : "Challans")} onClick={() => doSave(false)}>{saving ? "Saving…" : `Save ${documentName}`}</button>
             <button className="btn dk" disabled={saving} onClick={() => doSave(true)}>Print {documentName}</button>
             <button className="btn g" disabled={saving} onClick={() => doSave(false, true)}>Save & WhatsApp · F10</button>
             <span className="pos-actions-bags">

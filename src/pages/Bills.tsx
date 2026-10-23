@@ -62,7 +62,7 @@ function BillList() {
   return (
     <div>
       <Head title="Bills" sub={open ? "Estimates are showing. They hide again when you lock or leave the app." : "Every bill stays on record. Cancelled bills are kept and marked."}>
-        {open && <button className="btn" onClick={() => lockNow()}><Icon n="lock" size={16} />Lock</button>}
+        {open && me?.role !== "owner" && <button className="btn" onClick={() => lockNow()}>Close estimates</button>}
         {manage && <DeleteButton className="btn bad" onDelete={() => setDelAll(true)}>Delete all estimates</DeleteButton>}
         <button className="btn p" onClick={() => go("bill")}><Icon n="plus" size={18} />New bill</button>
       </Head>

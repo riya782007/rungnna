@@ -162,9 +162,11 @@ export const BUILTIN: Record<Staff["role"], string[]> = new Proxy(BUILTIN_DEFAUL
 });
 export const customRoles = () => ROLES;
 
-export function permsOf(me: Pick<Staff, "role"> & { role_id?: string } | null | undefined): Set<string> {
+export function permsOf(me: Pick<Staff, "role"> & { role_id?: string; perms?: string[] } | null | undefined): Set<string> {
   if (!me) return new Set();
   if (me.role === "owner") return new Set(ALL_PERMS);
+  // the person's own ticks (owner, 23 Oct) come before any role
+  if (Array.isArray(me.perms)) return new Set(me.perms.filter(p => ALL_PERMS.includes(p)));
   const custom = me.role_id ? ROLES.find(r => r.id === me.role_id) : undefined;
   // A missing custom role can be a deletion or a partial sync. Never silently grant the
   // broader built-in base while waiting for its permissions to arrive.
@@ -193,5 +195,5 @@ const LEGACY: Record<Perm, string> = {
   rates: "rates.view", discount: "billing.discount_over", ai: "ai.use", reports: "reports.view", lock: "estimates.open",
 };
 /** can(me, "bill") (original names) or can(me, "stock.move") (any permission key). */
-export const can = (me: (Pick<Staff, "role"> & { role_id?: string }) | null | undefined, p: Perm | string) =>
+export const can = (me: (Pick<Staff, "role"> & { role_id?: string; perms?: string[] }) | null | undefined, p: Perm | string) =>
   permsOf(me).has((LEGACY as Record<string, string>)[p] || p);

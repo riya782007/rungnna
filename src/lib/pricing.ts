@@ -1,6 +1,6 @@
 import { db, getSetting, setSetting, type Config } from "./db";
 import { now } from "./db";
-import { requirePerm } from "./scope";
+import { requirePerm, currentStore, MAIN_STORE } from "./scope";
 
 /* ===========================================================================
    Consistent cost-code + price engine.
@@ -74,8 +74,11 @@ const KEY = "pricing_rule";
 
 /* Shop-wide (synced) so every counter encodes the same way. Falls back to a
    device-local copy if the shop config hasn't loaded yet. */
+/* Owner, 23 Oct: the GST company's profit margin is kept apart from the estimate company's. Each company other
+   than the main one has its own rule ("pricing_rule@<company>"); until one is saved it uses the main rule. */
+const keyFor = (store = currentStore()) => (store && store !== MAIN_STORE ? `${KEY}@${store}` : KEY);
 export async function getRule(): Promise<PricingRule> {
-  const c = await db.config.get(KEY);
+  const c = (await db.config.get(keyFor())) || await db.config.get(KEY);
   const r = c?.value ? normalizeRule(c.value) : normalizeRule((await getSetting<PricingRule | null>(KEY, null)) || DEFAULT_RULE);
   evenOn = r.even_rate !== false;
   return r;
@@ -87,8 +90,8 @@ export async function saveRule(rule: PricingRule) {
   r.updated_at = now();
   // config table syncs to all devices via put(); also keep a device-local copy for instant offline reads.
   const { put } = await import("./db");
-  await put("config", { id: KEY, value: r, updated_at: now() } as Config);
-  await setSetting(KEY, r);
+  await put("config", { id: keyFor(), value: r, updated_at: now() } as Config);
+  if (keyFor() === KEY) await setSetting(KEY, r);
   evenOn = r.even_rate !== false;
   return r;
 }

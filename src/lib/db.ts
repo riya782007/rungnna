@@ -193,6 +193,10 @@ export interface Staff extends Row {
   pin: string;             // 4-digit, hashed later when auth moves server-side
   active: 0 | 1;
   login?: "" | "role";     // "role": the sign-in behind a role's passcode, not a person (Roles page)
+  /* Owner, 23 Oct: "only the name in Add person, then tick the boxes to allow". When set, these ticks are
+     this person's permissions (the role's are not used). */
+  perms?: string[];
+  stores?: string[];       // the companies this person may open after the PIN (none = their store_id / main)
 }
 
 /* A retailer on the dealer portal (registers online, the shop approves). PIN never leaves the server. */
@@ -217,7 +221,10 @@ export interface StockCell { key: string; product_id: string; loc_id: string; qt
 export interface Transport { vehicle_no: string; transporter_id: string; transporter_name: string; distance: number; mode: "1" | "2" | "3" | "4"; doc_no?: string; doc_date?: string; from_city: string; from_pin: string; to_address: string; to_city: string; to_pin: string; to_state_code: string }
 export interface ComplianceRecord { id: string; generated_at: string; ack_no?: string; signed_qr?: string; cancelled_at?: string; sandbox: boolean }
 export interface Compliance { irn?: ComplianceRecord; ewb?: ComplianceRecord }
-export interface Store extends Row { name: string; code: string; address: string; active: 0 | 1 }
+export interface Store extends Row { name: string; code: string; address: string; active: 0 | 1;
+  /* Owner, 23 Oct: two separate companies. "gst" makes tax invoices and challans, "estimate" makes estimates;
+     each keeps its own stock, purchases, profit margin, numbering and reports. Unset = both (as before). */
+  kind?: "gst" | "estimate" }
 export interface StoreTransfer extends Row { no: string; from_store: string; to_store: string; status: "in_transit" | "received"; items: { product_id: string; qty: number; from_loc: string; to_loc?: string; tags?: string[] }[]; by_staff: string; received_by?: string; at: string; received_at?: string; device: string }
 export interface BankLine extends Row { account: string; fingerprint: string; date: string; narration: string; debit: number; credit: number; ref: string; match_key?: string; matched_at?: string; batch: string }
 export interface ImportBatch extends Row { filename: string; at: string; by_staff: string; undone?: boolean; changes: { table: "products" | "parties" | "locations" | "movements"; id: string; before?: any; after: any }[] }

@@ -73,3 +73,25 @@ export async function receiveTransfer(id: string, racks: Record<string, string>,
     await put("store_transfers", { ...t, status: "received", received_at: now(), received_by: by });
   });
 }
+
+/* ---------- the two companies (owner, 23 Oct) ---------- */
+export const companyKind = async (id = currentStore()) => (await db.stores.get(id))?.kind;
+/** Turn the main store into the tax-invoice company and make the estimate company beside it (once). */
+export async function setUpTwoCompanies() {
+  ownerOnly();
+  const main = await db.stores.get(MAIN_STORE);
+  if (main && main.kind !== "gst") await put("stores", { ...main, kind: "gst", name: main.name === "Main store" ? "Tax invoices" : main.name });
+  const est = await db.stores.filter(s => !s.deleted && s.kind === "estimate").first();
+  if (est) return est;
+  const made = await createStore("Estimates", "E");
+  await put("stores", { ...(await db.stores.get(made.id))!, kind: "estimate" });
+  return made;
+}
+/** The companies this person may open after the PIN. */
+export async function companiesFor(me: Pick<Staff, "role" | "store_id" | "stores"> | null | undefined) {
+  const all = await db.stores.filter(s => !s.deleted && !!s.active).toArray();
+  if (!me) return [];
+  if (me.role === "owner") return all;
+  const ids = new Set(me.stores?.length ? me.stores : [me.store_id || MAIN_STORE]);
+  return all.filter(s => ids.has(s.id));
+}

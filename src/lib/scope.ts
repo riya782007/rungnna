@@ -27,3 +27,14 @@ export function inStore(row: { store_id?: string | null }, store = selected) { r
 export function ownerOnly() { if (role !== "owner") throw new Error("Owner only"); }
 export function setScopePerms(p: Set<string>) { perms = p; }
 export function requirePerm(key: string, what = "this") { if (role !== "owner" && !perms.has(key)) throw new Error(`Your role doesn't allow ${what}. Ask the owner.`); }
+
+/* The open company's kind (owner, 23 Oct): "estimate" bills only estimates, "gst" only invoices and challans. */
+let kind: "gst" | "estimate" | undefined;
+export const setCompanyKind = (k?: "gst" | "estimate") => { kind = k; };
+export const companyKindNow = () => kind;
+/** The document type a new bill takes in this company. */
+export function typeForCompany<T extends string>(t: T): T | "estimate" | "gst" {
+  if (kind === "estimate" && t !== "return") return "estimate";
+  if (kind === "gst" && t === "estimate") return "gst";
+  return t;
+}

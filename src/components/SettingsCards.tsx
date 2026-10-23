@@ -1,3 +1,4 @@
+import { currentStore } from "../lib/scope";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, now, getSetting, setSetting, type Party, type Product } from "../lib/db";
@@ -34,6 +35,7 @@ const r1 = (p: number) => rupees(p).replace(/\.00$/, "");
 
 export function PricingCard() {
   const [rule, setRule] = useState<PricingRule>(DEFAULT_RULE);
+  const company = useLiveQuery(() => db.stores.get(currentStore()), []);
   const [saved, setSaved] = useState<PricingRule>(DEFAULT_RULE);
   const [sample, setSample] = useState("120");   // ₹ cost to try
   const [pack, setPack] = useState("1");
@@ -65,6 +67,7 @@ export function PricingCard() {
     <div className="card"><header><h3>Selling price &amp; cost code</h3><span className="grow" /><SaveState dirty={dirty} savedAt={saved.updated_at} /></header>
       <div className="pad stack">
         <div className="set-intro">When a cost is typed (Labels screen, purchase bill reader), the selling rate and the secret cost code on the sticker are worked out from these rules. One change here reaches every counter.</div>
+        {company && company.kind && <div className="note sm">These rules are for <b>{company.name}</b> only — each company keeps its own profit margin. Switch the company in the menu to set the other one.</div>}
 
         <div className="set-sub">1 · From cost to selling rate</div>
         <div className="grid g2">

@@ -6,6 +6,13 @@ import { warmScanner } from "./components/Scanner";
 import { SearchPalette } from "./components/Search";
 import { Icon } from "./components/Icon";
 import { AskHost } from "./components/AskHost";
+import { ViewCodeGate } from "./components/ViewCodeGate";
+import { CompanyPicker } from "./components/CompanyPicker";
+import { companiesFor, companyKind } from "./lib/stores";
+import { setCompanyKind } from "./lib/scope";
+import { setCompanyOpen } from "./lib/privacy";
+import type { Store } from "./lib/db";
+import { VIEW_ROUTES, setViewOpen, useViewOpen } from "./lib/viewCode";
 import { can, roleName } from "./lib/roles";
 import { t, initLang, onLang } from "./lib/i18n";
 import Home from "./pages/Home";
@@ -97,6 +104,15 @@ function Shell() {
   const [, setLangTick] = useState("");
   const [scrolled, setScrolled] = useState(false);
   const sec = sectionOf(route);
+  const viewOpen = useViewOpen();
+  // the two companies (owner, 23 Oct): choose one after the PIN when more than one is open to this person
+  const companiesQ = useLiveQuery(() => companiesFor(me), [me?.id, me?.updated_at]);
+  const companies: Store[] = companiesQ || [];
+  const [picked, setPicked] = useState("");
+  // one company at sign-in: nothing to choose (and making a second one later doesn't interrupt the work)
+  useEffect(() => { if (me && companiesQ && companiesQ.length <= 1) setPicked(me.id); }, [me?.id, companiesQ?.length]);
+  useEffect(() => { void companyKind(store).then(k => { setCompanyKind(k); setCompanyOpen(k === "estimate"); }); }, [store, stores]);
+  useEffect(() => { setViewOpen(false); }, [me?.id]);   // the view code is asked again for the next person
   useEffect(() => {
     startSync(); warmScanner();
     // name products saved from old QRs as "ITEM 202" (after the first sync has had a moment)
@@ -132,6 +148,7 @@ function Shell() {
 
   if (!ready) return null;
   if (!me) return <WhoAreYou />;
+  if (companies.length > 1 && picked !== me.id) return <CompanyPicker companies={companies} onPick={id => { void switchStore(id).then(() => setPicked(me.id)).catch(e => toast(e.message, true)); }} />;
 
   const ok = (r: string) => r === "settings" || !ROUTE_PERM[r] || can(me, ROUTE_PERM[r]);
   const visible = SECTIONS.filter(s => s.tabs ? s.tabs.some(([k]) => ok(k)) : ok(s.key));
@@ -175,6 +192,7 @@ function Shell() {
     default: page = <Home />;
   }
   if (!ok(route)) page = <NoAccess />;
+  else if (VIEW_ROUTES.includes(route) && me.role !== "owner" && !viewOpen) page = <ViewCodeGate />;
 
   return (
     <div className={"shell" + (compact ? " compact-menu" : "") + (route === "bill" ? " billing-shell" : "")}>
@@ -186,14 +204,14 @@ function Shell() {
         {can(me, "bill") && <a href="#/bill" className="newbill"><Icon n="plus" size={18} /><span className="t">{t("New bill")}</span><kbd style={{ background: "rgba(255,255,255,.15)", color: "#fff" }}>F2</kbd></a>}
         <button className="railsearch" onClick={() => setPal(true)}><Icon n="search" size={17} /><span className="grow">Search</span><kbd>Ctrl K</kbd></button>
         {visible.map(s => <a key={s.key} href={hrefOf(s)} title={t(s.label)} aria-label={t(s.label) + (s.key === "sell" && waiting ? ` · ${waiting} waiting` : "")} className={"nav" + (sec === s.key ? " on" : "")}><Icon n={s.icon} /><span className="grow">{t(s.label)}</span>{s.key === "sell" && waiting > 0 && <span className="navbadge" title={`${waiting} trade order${waiting > 1 ? "s" : ""} / dealer sign-up${waiting > 1 ? "s" : ""} waiting`}>{waiting > 9 ? "9+" : waiting}</span>}</a>)}
-        {me.role === "owner" && <label className="f store-switch">Store<select className="in" value={store} onChange={e => switchStore(e.target.value)}>{stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>}
+        {companies.length > 1 && <label className="f store-switch">Company<select className="in" value={store} onChange={e => void switchStore(e.target.value)}>{companies.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>}
         {can(me, "stores.transfer") && <a className="nav" href="#/stores" title="Transfers and stores" aria-label="Transfers and stores"><Icon n="stock" /><span>Transfers{me.role === "owner" ? " & stores" : ""}</span></a>}
         {can(me, "bank.reconcile") && <a className="nav" href="#/bank" title="Bank reconciliation" aria-label="Bank reconciliation"><Icon n="sales" /><span>Bank reconciliation</span></a>}
         <div className="railfoot">
           <Status />
           <button className="me" onClick={() => setMe(null)} title="Switch person">
             <span className="av">{me.name.slice(0, 1).toUpperCase()}</span>
-            <span className="grow"><b className="sm">{me.name}</b><small>{roleName(me)} · tap to lock / switch</small></span><Icon n="lock" size={16} />
+            <span className="grow"><b className="sm">{me.name}</b><small>{roleName(me)} · tap to switch person</small></span><Icon n="user" size={16} />
           </button>
         </div>
       </aside>
@@ -202,7 +220,7 @@ function Shell() {
           <button className="iconbtn menu-toggle" title={compact ? "Show menu" : "Hide menu"} aria-label={compact ? "Show menu" : "Hide menu"} onClick={() => { setCompact(!compact); setSetting("compact_menu", !compact); }}>{compact ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button>
           <span className="brandm"><span className="mark">R</span>{cur.label === "Home" ? "Rungnna" : t(cur.label)}</span>
           <span className="grow" />
-          {me.role === "owner" && <select aria-label="Store" className="in mobile-store" value={store} onChange={e => switchStore(e.target.value)}>{stores.map(s => <option key={s.id} value={s.id}>{s.code}</option>)}</select>}
+          {companies.length > 1 && <select aria-label="Company" className="in mobile-store" value={store} onChange={e => void switchStore(e.target.value)}>{companies.map(s => <option key={s.id} value={s.id}>{s.code}</option>)}</select>}
           <button className="iconbtn" aria-label="Search" onClick={() => setPal(true)}><Icon n="search" size={18} /></button>
           <button className="avatar" onClick={() => go("settings")} aria-label="Me">{me.name.slice(0, 1).toUpperCase()}</button>
         </div>
