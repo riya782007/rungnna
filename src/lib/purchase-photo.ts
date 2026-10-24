@@ -245,6 +245,19 @@ export function nextPageNo(billNo: string, taken: string[]): string {
   for (let n = 2; n < 100; n++) { const no = `${base} P${n}`; if (!used.has(no.toUpperCase())) return no; }
   return `${base} P${Date.now() % 1000}`;
 }
+/** The bill's discount % taken off each line's cost (rounded to paise). Selling rates are left as they are. */
+export function withBillDiscount<T extends { cost: string }>(rows: T[], pct: number): T[] {
+  if (!(pct > 0)) return rows;
+  return rows.map(r => { const c = Number(r.cost); return c > 0 ? { ...r, cost: (Math.round(c * (100 - pct)) / 100).toFixed(2) } : r; });
+}
+/** The discount % the bill reader found: as a %, or worked out from a rupee discount and the goods' total. */
+export function readDiscount(out: { discount_pct?: unknown; discount_amount?: unknown }, rows: { qty: string; cost: string }[]): string {
+  const pct = Number(String(out?.discount_pct ?? "").replace(/[^0-9.]/g, ""));
+  if (pct > 0 && pct < 90) return String(Math.round(pct * 100) / 100);
+  const amt = Number(String(out?.discount_amount ?? "").replace(/[^0-9.]/g, ""));
+  const goods = rows.reduce((a, r) => a + (Number(r.qty) || 0) * (Number(r.cost) || 0), 0);
+  return amt > 0 && goods > amt ? String(Math.round(amt / goods * 10000) / 100) : "";
+}
 export function lineSignature(lines: { style: string; color: string; qty: number; cost: number }[]): string {
   return lines.map(l => [l.style.trim().toUpperCase(), (l.color || "").trim().toUpperCase(), l.qty, Math.round(l.cost)].join("|")).sort().join(";");
 }

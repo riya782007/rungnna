@@ -16,6 +16,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, type Bill, type BillLine, type Party, type Payment, type Product } from "../lib/db";
 import { findByScan, fillFromItemCode, label, readItemMap, codeInfo } from "../lib/products";
 import { noteMiss, clearMiss, learnFromPick } from "../lib/scan-learn";
+import { ShopDetailsAsk, shopNeedsTaxDetails } from "../components/ShopDetailsAsk";
 import { NameItemCodes, unnamedCodes } from "../components/NameItemCodes";
 import { isRfidTag, normTag, soldBill, TagSet, Recent } from "../lib/rfid";
 import { discError, newBill, lineFrom, priceFor, totals, gstLabel, fixLine, finalize, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
@@ -613,6 +614,7 @@ export default function Billing({ args }: { args: string[] }) {
     <div className="pos">
       {scanFeedback && createPortal(<BillScanNotice key={scanFeedback.sequence} feedback={scanFeedback} onClose={dismissScanFeedback} />, document.body)}
       <div className="pos-counter-dock" ref={counterDockRef}>
+      {b.bill_type === "gst" && shopNeedsTaxDetails(shop) && <ShopDetailsAsk shop={shop} onSaved={setShop} />}
       <div className="pos-top card">
         {companyKindNow() === "estimate" ? <div className="row" style={{ gap: 8 }}><div className="pos-title"><b>Estimate</b><span className="xs mut">estimate company</span></div></div>
         : priv && companyKindNow() !== "gst" ? <div className="seg" role="group" aria-label="Bill type">

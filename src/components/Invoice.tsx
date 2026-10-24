@@ -62,7 +62,7 @@ export function InvoiceSheet({ b, shop, format, copy }: { b: Bill; shop: Shop; f
         {/* Owner, 22 Oct: an estimate carries only the shop's initials ("RJ") at the top, no name or tagline.
             Tax invoices keep the full name, as the law needs. */}
         <div><div className="inv-shop">{estimate ? initials(shop.name) : shop.name}</div>{!estimate && <div className="inv-sub">{shop.tagline}</div>}
-          <div className="inv-sub">{[shop.address, shop.phone].filter(Boolean).join(" · ")}</div>
+          {!estimate && <div className="inv-sub">{[shop.address, shop.phone].filter(Boolean).join(" · ")}</div>}
           {shop.gstin && taxDoc && <div className="inv-sub">GSTIN: <b>{shop.gstin}</b>{shop.state ? " · State: " + shop.state + (shopCode ? " (" + shopCode + ")" : "") : ""}</div>}</div>
         <div className="inv-title">{title}{estimate && <div className="inv-approval">APPROVAL CHALLAN</div>}{copy && <div className="inv-copy">{copy}</div>}{b.status === "void" && <div className="inv-void">CANCELLED</div>}
           {notExecuted && <div><span className="inv-notexec">SALE NOT EXECUTED · बिक्री निष्पादित नहीं</span></div>}</div>

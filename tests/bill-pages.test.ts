@@ -15,3 +15,19 @@ describe("pages of one supplier bill", () => {
     expect(nextPageNo("1234", ["1234", "1234 P2"])).toBe("1234 P3");
   });
 });
+
+import { withBillDiscount, readDiscount } from "../src/lib/purchase-photo";
+import { joinHalves } from "../src/lib/pdf-pages";
+describe("bill discount and long pages", () => {
+  it("takes the bill's discount off each line's cost", () => {
+    expect(withBillDiscount([{ cost: "100" }, { cost: "72.50" }, { cost: "" }], 10)).toEqual([{ cost: "90.00" }, { cost: "65.25" }, { cost: "" }]);
+    expect(readDiscount({ discount_pct: "10%" }, [])).toBe("10");
+    expect(readDiscount({ discount_amount: "120" }, [{ qty: "12", cost: "100" }])).toBe("10");
+    expect(readDiscount({}, [{ qty: "1", cost: "5" }])).toBe("");
+  });
+  it("joins the two halves of a page without the lines both halves saw", () => {
+    const top = [{ sr: "1", style: "A" }, { sr: "2", style: "B" }, { sr: "3", style: "C" }];
+    const bottom = [{ sr: "3", style: "C" }, { sr: "4", style: "D" }];
+    expect(joinHalves([top, bottom]).map(r => r.sr)).toEqual(["1", "2", "3", "4"]);
+  });
+});

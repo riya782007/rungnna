@@ -12,7 +12,7 @@ import { compress, savePhoto } from "../lib/image";
 import { getRule, type PricingRule } from "../lib/pricing";
 import {
   preparePhotoRows, savePhotoPurchase, validatePhotoRows, pricePhotoRows, applyVendorTerms, repricePhotoRows, suspiciousCosts, restoreBillCosts,
-  autoArticle, autoArticleCount, draftLabelProducts, combineRepeatedRows, labelCountFor, lineSignature, isSamePage, nextPageNo, type PhotoRow,
+  autoArticle, autoArticleCount, draftLabelProducts, combineRepeatedRows, labelCountFor, lineSignature, isSamePage, nextPageNo, withBillDiscount, readDiscount, type PhotoRow,
 } from "../lib/purchase-photo";
 import { applyPhotoQuantities, readCount, repeatPhotoCount, stickersPerPacket, type RepeatedCountField } from "../lib/purchase-quantities";
 import { purchaseLabelJobs } from "../lib/purchase-labels";
@@ -29,6 +29,7 @@ import { SupplierNo } from "./SupplierNo";
 import { checkBill, checkSummary, matchSupplier, fallbackBillNo, type LineFix } from "../lib/billCheck";
 import { newParty } from "../lib/billing";
 import { UNITS, UNIT_RE } from "../lib/products";
+import { isPdf, expandPdfs, splitPage, joinHalves } from "../lib/pdf-pages";
 
 const blank = (pack = "1"): PhotoRow => ({ review_id: uid(), item: "", style: "", color: "", unit: "PCS", hsn: "", qty: "", pack, packSource: "default", stickers: "", cost: "", rate: "" });
 const captions: Record<string, string> = { collection: "Collection / style", material: "Material", item: "Item", style: "Style/article", color: "Colour", unit: "Unit", entry_code: "Reference Code", hsn: "HSN", qty: "Total qty", pack: "Pieces per packet (X)", stickers: "Stickers", cost: "Cost ₹", rate: "Rate ₹" };
@@ -41,6 +42,9 @@ const defaultStickers = (r: PhotoRow) => {
 };
 
 type Draft = { store: string; rows: PhotoRow[]; supplier: string; billNo: string; rack: string; photoId?: string; warnings: string; total: string;
+  /* owner, 24 Oct: "the discount on the goods bill is not mentioned in the bill received" — the bill's discount %,
+     read from the bill or typed; it comes off every line's cost when the purchase is saved and is written on it */
+  discount?: string;
   /* what the bill's own arithmetic said: shown so the owner checks only what is in doubt */
   check?: { summary: string; ok: boolean; fixes: LineFix[]; doubts: { line: number; why: string }[] };
   supplierName?: string;   // as read from the bill, for one-tap "add this supplier"
@@ -254,8 +258,13 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
      in place of the first one, so page 1's lines disappeared. Now a page read while a bill is open is
      ADDED below its lines, and more than three photos are read three at a time. The bill's own serial
      numbers carry on from page to page; lines without one are numbered on after the last line. */
-  const read = async (files: File[]) => {
-    if (!files.length || lock.current) return;
+  const read = async (picked: File[]) => {
+    if (!picked.length || lock.current) return;
+    let files = picked;
+    if (picked.some(isPdf)) {
+      try { toast("Opening the PDF…"); files = await expandPdfs(picked); }
+      catch (e: any) { return setError("Could not open this PDF: " + (e?.message || "it may be damaged or password-protected") + ". Take a photo of the page instead."); }
+    }
     if (files.length > 12) return setError("Choose up to twelve pages of one bill");
     if (!(await getSetting<boolean>("bill_ai_ok", false))) {
       if (!confirm("Bill photos are sent to the AI (OpenAI, then Gemini, then Groq) to be read. Nothing is saved until you approve.\n\nAllow this from now on, on this device?")) return;
@@ -279,6 +288,18 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
           toast(`The AI read ${first} of about ${seen} lines — reading the page again…`);
           const second = await api<any>("purchase-photo", { images, retry: { counted: seen, got: first } }).catch(() => null);
           if (second && Array.isArray(second.rows) && second.rows.length > first) out = second;
+          // still short (owner, 24 Oct: "it doesn't read the whole page, some lines are left"): read the top and
+          // the bottom half of the page separately — fewer lines each, bigger letters — and join them
+          const got = Array.isArray(out?.rows) ? out.rows.length : 0;
+          if (got < seen && part.length === 1) {
+            toast(`Still ${got} of ${seen} lines — reading the page in two halves…`);
+            const halves = await splitPage(part[0]).catch(() => null);
+            if (halves) {
+              const read2 = await Promise.all(halves.map(async h => { const { blob } = await compress(h, 2800, 1050000); return api<any>("purchase-photo", { images: [{ data: await blobToB64(blob), mime: blob.type }] }).catch(() => null); }));
+              const joined = joinHalves(read2.map(x => (Array.isArray(x?.rows) ? x.rows : [])));
+              if (joined.length > got) out = { ...out, ...(read2[0] || {}), rows: joined, invoice_total: out.invoice_total || read2[1]?.invoice_total || read2[0]?.invoice_total };
+            }
+          }
         }
         const rule = await getRule(); setPricing(rule);
         const text = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v) : "");
@@ -310,6 +331,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         current = {
           ...current,
           rows: [...current.rows, ...rows], supplier, supplierName, total,
+          discount: current.discount || readDiscount(out, [...current.rows, ...rows]),
           billNo: keepNo ? current.billNo : printedNo || fallbackBillNo(text(out.bill_date), checked.net),
           autoBillNo: keepNo ? false : !printedNo,
           check: { summary: checkSummary(checked), ok: checked.addsUp === true && !checked.doubts.length, fixes: checked.fixes, doubts: checked.doubts },
@@ -405,7 +427,8 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       const merged = combineRepeatedRows(filled);
       if (merged.conflict) throw new Error(merged.conflict);
       if (merged.combined) { set({ rows: merged.rows }); toast(`${merged.combined} repeated line${merged.combined === 1 ? "" : "s"} added together`); }
-      const rows = await preparePhotoRows(merged.rows, D.supplier, packetDefault);
+      const pct = Math.min(90, Math.max(0, Number(d.discount) || 0));
+      const rows = await preparePhotoRows(pct ? withBillDiscount(merged.rows, pct) : merged.rows, D.supplier, packetDefault);
       const rule = await getRule(), current = await loadLabelCfg();
       const checked = validatePhotoRows(rows), products = draftLabelProducts(rows, by, rule, rows.length);
       const preflight = checked.flatMap((r, i) => {
@@ -442,13 +465,13 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         toast(`Bill ${D.billNo} was already saved as ${before.no} · ${how === "browser" ? "opening its labels to print" : "printing its labels again"}`);
         return;
       }
-      const p = await savePhotoPurchase(rows, { by, rack: D.rack, supplierId: D.supplier, billNo: D.billNo, photoId: d.photoId, invoiceTotal: d.total, note: [d.warnings, d.total ? "Supplier invoice total (as printed): " + d.total : ""].filter(Boolean).join("\n") });
+      const p = await savePhotoPurchase(rows, { by, rack: D.rack, supplierId: D.supplier, billNo: D.billNo, photoId: d.photoId, invoiceTotal: d.total, note: [pct ? `Bill discount ${pct}% (taken off every line's cost)` : "", d.warnings, d.total ? "Supplier invoice total (as printed): " + d.total : ""].filter(Boolean).join("\n") });
       savedPurchase = p;
       setSaved(p); setBulkQty(""); setBulkRef(""); setQuantityNote("");
       await setSetting(LAST, { id: p.id });
       // Financial saving succeeded. Any subsequent print failure is recovered
       // by printing this saved purchase, never by approving it a second time.
-      set({ rows: [], supplier: D.supplier, billNo: "", total: "", warnings: "", photoId: undefined });
+      set({ rows: [], supplier: D.supplier, billNo: "", total: "", discount: "", warnings: "", photoId: undefined });
       setReviewed(false);
       const queue = await jobsFor(p);
       setJobs(queue);
@@ -515,7 +538,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
     {!d.rows.length && <div className="bill-drop stack">
       <button className="btn p bill-drop-btn" disabled={busy} onClick={() => setCam(true)}>
         <Camera size={22} />{busy ? "Reading the bill…" : "Take photo of the bill"}</button>
-      <button className="linkbtn" disabled={busy} onClick={() => file.current?.click()}>or upload a photo already taken</button>
+      <button className="linkbtn" disabled={busy} onClick={() => file.current?.click()}>or upload a photo or PDF of the bill</button>
       <div className="xs mut">Up to 3 pages of one bill. Then check what is highlighted, and approve: the products are drafted and the labels print.</div>
       <div className="row xs" style={{ justifyContent: "center", gap: 14 }}>
         <span className={notReady ? "bad-text" : "mut"}>{checking ? "Checking the AI…" : connection || ""}</span>
@@ -535,12 +558,12 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       }}><Plus size={15} />Line</button>
       <button type="button" className="linkbtn" disabled={busy} onClick={async () => {
         if (busy || lock.current || !await confirmDelete("Clear this bill and start again? Nothing has been saved.")) return;
-        set({ rows: [], supplier: "", billNo: "", total: "", warnings: "", check: undefined, supplierName: "", photoId: undefined, autoBillNo: undefined });
+        set({ rows: [], supplier: "", billNo: "", total: "", discount: "", warnings: "", check: undefined, supplierName: "", photoId: undefined, autoBillNo: undefined });
         readSoFar.current = [];
         setDone({}); setSelection(new Set()); setError("");
         setBulkQty(""); setBulkPack(packetDefault); setBulkRef(""); setQuantityNote("");
       }}>Start over</button></div>}
-    <input ref={file} type="file" hidden accept="image/jpeg,image/png,image/webp" multiple onChange={e => { void read(Array.from(e.target.files || [])); e.target.value = ""; }} />
+    <input ref={file} type="file" hidden accept="image/jpeg,image/png,image/webp,application/pdf,.pdf" multiple onChange={e => { void read(Array.from(e.target.files || [])); e.target.value = ""; }} />
     {busy && !!d.rows.length && <div role="status">Working…</div>}
     {cam && <Suspense fallback={<div role="status">Opening camera…</div>}>
       <BillCamera title="Photo of the purchase bill" facing="environment" settingKey="bill_camera" onClose={() => setCam(false)}
@@ -690,7 +713,9 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
               Apply vendor terms{vendor.less_pct ? ` (${vendor.less_pct}% less)` : ""}{(vendor.rate_divisor || 1) !== 1 ? ` (÷${vendor.rate_divisor})` : ""}{d.rows.some(r => r.termsDone) ? ` to ${d.rows.filter(r => !r.termsDone).length} new lines` : ""}</button>)}
         <button className="btn" disabled={busy} onClick={() => void price()}>{done.pricing && done.pricingSig === costSig(d.rows) ? "Apply shop pricing again" : "Apply shop pricing"}</button>
         <span>Goods cost ₹{total}</span>
+        <label className="f">Bill discount %<input className="in" inputMode="decimal" style={{ maxWidth: 90 }} value={d.discount || ""} placeholder="0" onChange={e => set({ discount: e.target.value.replace(/[^0-9.]/g, "").slice(0, 5) })} /></label>
         <label className="f">Supplier payable ₹<input className="in" inputMode="decimal" value={d.total} onChange={e => set({ total: e.target.value })} /></label></div>
+      {Number(d.discount) > 0 && <div className="xs mut">{d.discount}% bill discount comes off each line's cost when you approve (selling rates stay as they are) and is written on the saved purchase.</div>}
 
       {!!lowCost.length && <div className="note bad sm" role="alert">
         <b>Check the cost on line{lowCost.length === 1 ? "" : "s"} {lowCost.join(", ")}:</b> it is less than a tenth of the selling rate. A cost like ₹1.03 against a rate of ₹170 usually means the vendor terms (÷) were applied again and again, or the cost was misread.
