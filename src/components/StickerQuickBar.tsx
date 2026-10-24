@@ -18,7 +18,7 @@ import { labelOrder, PART_NAMES, type LabelPart } from "../lib/label-order";
 =========================================================================== */
 
 const FIELDS: [keyof LabelCfg["show"], string][] = [
-  ["style", "Style"], ["ref", "Reference"], ["color", "Colour"], ["cost_code", "Cost code"], ["line", "Line no."],
+  ["style", "Style"], ["ref", "Reference"], ["color", "Colour"], ["collection", "Collection"], ["material", "Material"], ["cost_code", "Cost code"], ["line", "Line no."],
   ["rate", "Rate"], ["qty", "X qty"], ["code", "Product code"], ["shop", "RUNGNNA"],
 ];
 
@@ -43,7 +43,7 @@ export function StickerQuickBar({ cfg, onChange }: { cfg: LabelCfg; onChange?: (
   const step = (key: "offX" | "offY" | "font", d: number, what: string, min = -20, max = 20) =>
     apply({ [key]: Math.max(min, Math.min(max, r2((Number(cfg[key]) || 0) + d))) } as Partial<LabelCfg>, what);
   const direct = cfg.output === "qz" || cfg.output === "tspl";
-  const on = (k: LabelPart) => k === "item" ? cfg.show.item : k === "ref" ? (cfg.show.ref ?? cfg.show.style) : k === "style" ? cfg.show.style : k === "color" ? cfg.show.color
+  const on = (k: LabelPart) => k === "collection" ? !!cfg.show.collection : k === "material" ? !!cfg.show.material : k === "item" ? cfg.show.item : k === "ref" ? (cfg.show.ref ?? cfg.show.style) : k === "style" ? cfg.show.style : k === "color" ? cfg.show.color
     : k === "tk" ? cfg.show.tk : k === "cost" ? cfg.show.cost_code || !!cfg.show.line : cfg.show.code;
   const order = labelOrder(cfg.order), shown = order.filter(on);
   // jump over hidden parts, so one tap always visibly moves it past its visible neighbour

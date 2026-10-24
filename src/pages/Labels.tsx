@@ -45,7 +45,7 @@ export type LabelCfg = {
   w: number; h: number; cols: number; gapX: number; gapY: number;
   sheetW: number; sheetH: number; top: number; left: number; rows: number;
   qr: number; font: number; pad: number; offX: number; offY: number;
-  shop: string; format: "shop" | "rungnna"; layout: "shop" | "stack"; show: { shop: boolean; item: boolean; style: boolean; color: boolean; rate: boolean; tk: boolean; code: boolean; qty: boolean; cost_code: boolean; line?: boolean; ref?: boolean };
+  shop: string; format: "shop" | "rungnna"; layout: "shop" | "stack"; show: { shop: boolean; item: boolean; style: boolean; color: boolean; rate: boolean; tk: boolean; code: boolean; qty: boolean; cost_code: boolean; line?: boolean; ref?: boolean; collection?: boolean; material?: boolean };
   order?: string[];      // the parts top to bottom (lib/label-order); missing = the usual order
   batch?: number;        // stickers handed to the printer at a time (0 = all at once) — see lib/labelBatches
   testFirst?: boolean;   // a long run starts with one test row (only until this computer's setup is confirmed)

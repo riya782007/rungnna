@@ -245,6 +245,40 @@ export function nextPageNo(billNo: string, taken: string[]): string {
   for (let n = 2; n < 100; n++) { const no = `${base} P${n}`; if (!used.has(no.toUpperCase())) return no; }
   return `${base} P${Date.now() % 1000}`;
 }
+/* Owner, 24 Oct (call): "every supplier has his own system — this one multiplies by 5, that one writes net rates,
+   another takes off a less %; then packing ₹1200, then my weighing/freight… I end up working out factors like 1.24
+   by hand". One box per bill: Multiply ×, Less %, Packing/freight ₹. Each line's cost = the bill's printed rate ×
+   multiply − less %, shown live so the selling rates are worked out from the real cost; packing/freight is spread
+   over the lines by value when the purchase is saved. */
+export type Costing = { mult?: string; less?: string; extra?: string };
+const num0 = (v?: string) => { const n = Number(String(v ?? "").replace(/[^0-9.]/g, "")); return Number.isFinite(n) ? n : 0; };
+export const costingOf = (c: Costing) => ({ mult: num0(c.mult) > 0 ? Math.min(1000, num0(c.mult)) : 1, less: Math.min(90, num0(c.less)), extra: num0(c.extra) });
+/** Each line's cost from its printed rate (billCost) × multiply − less %. The printed rate is kept in billCost. */
+export function applyCosting<T extends { cost: string; billCost?: string; termsDone?: boolean }>(rows: T[], c: Costing): T[] {
+  const { mult, less } = costingOf(c);
+  return rows.map(r => {
+    const base = Number(r.billCost ?? r.cost);
+    if (!(base > 0)) return r;
+    return { ...r, billCost: String(base), cost: (Math.round(base * mult * (100 - less)) / 100).toFixed(2) };
+  });
+}
+/** Packing / freight spread over the lines by value (each line's cost goes up by the same %). */
+export function spreadExtra<T extends { cost: string; qty: string }>(rows: T[], extra: number): T[] {
+  const goods = rows.reduce((a, r) => a + (Number(r.qty) || 0) * (Number(r.cost) || 0), 0);
+  if (!(extra > 0) || !(goods > 0)) return rows;
+  const up = 1 + extra / goods;
+  return rows.map(r => { const c = Number(r.cost); return c > 0 ? { ...r, cost: (Math.round(c * up * 100) / 100).toFixed(2) } : r; });
+}
+/** A multiplier the bill prints under its total (e.g. "Total 98446 · 5 · Rs 492230"). */
+export function readMultiplier(out: { bill_multiplier?: unknown }): string {
+  const m = Number(String(out?.bill_multiplier ?? "").replace(/[^0-9.]/g, ""));
+  return m > 1 && m <= 100 ? String(m) : "";
+}
+/** Packing / freight / other charges the bill adds below its total. */
+export function readExtra(out: { extra_charges?: unknown }): string {
+  const e = Number(String(out?.extra_charges ?? "").replace(/[^0-9.]/g, ""));
+  return e > 0 ? String(Math.round(e * 100) / 100) : "";
+}
 /** The bill's discount % taken off each line's cost (rounded to paise). Selling rates are left as they are. */
 export function withBillDiscount<T extends { cost: string }>(rows: T[], pct: number): T[] {
   if (!(pct > 0)) return rows;

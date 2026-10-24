@@ -1,9 +1,10 @@
 /* Owner, 22 Oct (voice note): "the place of each thing on the sticker should be set here too, so it's clear
    where what is and nobody gets confused reading it". The words on a sticker are parts in an order he chooses.
    Neighbouring Reference / Style (and Colour, on the shop's row sticker) share one line, as they always have. */
-export type LabelPart = "item" | "ref" | "style" | "color" | "tk" | "cost" | "code";
-export const DEFAULT_ORDER: LabelPart[] = ["item", "ref", "style", "color", "tk", "cost", "code"];
-export const PART_NAMES: Record<LabelPart, string> = { item: "Item", ref: "Reference", style: "Style", color: "Colour", tk: "TK", cost: "Cost code / line no.", code: "Code" };
+/* Owner, 24 Oct (call): collection and material can print too; with no colour, the material takes its place. */
+export type LabelPart = "item" | "ref" | "style" | "collection" | "color" | "material" | "tk" | "cost" | "code";
+export const DEFAULT_ORDER: LabelPart[] = ["item", "ref", "style", "collection", "color", "material", "tk", "cost", "code"];
+export const PART_NAMES: Record<LabelPart, string> = { item: "Item", ref: "Reference", style: "Style", collection: "Collection", color: "Colour", material: "Material", tk: "TK", cost: "Cost code / line no.", code: "Code" };
 
 /** A saved order made whole: unknown names dropped, repeats dropped, missing parts added at the end. */
 export function labelOrder(saved?: readonly string[] | null): LabelPart[] {
@@ -23,7 +24,7 @@ export function movePart(order: readonly string[] | undefined, part: LabelPart, 
 
 /** The lines, top to bottom: each is the parts on it and its words. Empty parts are skipped. */
 export function orderedLines(order: readonly string[] | undefined, values: Partial<Record<LabelPart, string>>, joinColour: boolean): { parts: LabelPart[]; text: string }[] {
-  const joins = new Set<LabelPart>(joinColour ? ["ref", "style", "color"] : ["ref", "style"]);
+  const joins = new Set<LabelPart>(joinColour ? ["ref", "style", "collection", "color", "material"] : ["ref", "style", "collection"]);
   const out: { parts: LabelPart[]; text: string }[] = [];
   for (const k of labelOrder(order)) {
     const v = values[k];

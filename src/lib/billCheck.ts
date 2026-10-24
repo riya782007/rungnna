@@ -66,10 +66,11 @@ export function resolveDitto(rows: ReadRow[]): ReadRow[] {
 }
 
 /** Check every line and the total. Returns corrected rows plus what changed and what's in doubt. */
-/* Owner, 24 Oct (call): "the bill says 24, 11, 12 … but the software shows 120, 55, 60". On that supplier's bill
-   every Amount is 5 × Qty × Rate (its own group totals use Qty × Rate), so "fixing" each quantity from its amount
-   multiplied all of them by 5. When most lines share one whole-number factor like that, it is the bill's way of
-   pricing, not a misread: the printed Qty and Rate are kept and the owner is told once. */
+/* Owner, 24 Oct (calls): "the bill says 24, 11, 12 … but the software shows 120, 55, 60", and "this supplier keeps
+   his rate divided by 5". On such a bill every Amount is 5 × Qty × Rate, so "fixing" each quantity from its amount
+   multiplied all of them by 5. When most lines share one whole-number factor, the printed Qty is right and the
+   real cost of one piece is Amount ÷ Qty (= Rate × 5): that is what he pays, and what the selling rate is worked
+   out from. The owner is told once. */
 export function sharedFactor(rows: ReadRow[]): number | undefined {
   const ks = rows.map(r => { const q = wholeQty(r.qty), c = paise(r.cost), a = paise(r.amount); return q && c && a ? a / (q * c) : NaN; }).filter(k => Number.isFinite(k));
   if (ks.length < 3) return undefined;
@@ -86,7 +87,7 @@ export function checkBill(input: ReadRow[], netTotal?: string): BillCheck {
     const qty = wholeQty(r.qty), cost = paise(r.cost), amount = paise(r.amount);
     if (amount === undefined || amount === 0) return r;            // the bill gave no amount to check against
     if (qty && cost && qty * cost === amount) return r;            // agrees with itself
-    if (factor && qty && cost && qty * cost * factor === amount) return r;   // the bill's own ×factor pricing
+    if (factor && qty && cost && qty * cost * factor === amount) return r;   // printed rate × factor: the costing box multiplies
     // exactly one sensible reading fixes the line: take it, and say so
     if (cost && amount % cost === 0 && wholeQty(amount / cost)) {
       const to = String(amount / cost);
@@ -115,7 +116,7 @@ export function checkBill(input: ReadRow[], netTotal?: string): BillCheck {
 
 /** The one line the owner reads before approving. */
 export function checkSummary(c: BillCheck): string {
-  if (c.factor) return `${c.rows.length} lines · ${c.pieces} as printed in the Qty column · on this bill every Amount is ${c.factor} × Qty × Rate, so quantities and rates are kept exactly as printed. If one Qty means a set of ${c.factor}, set the packet to ${c.factor}${c.doubts.length ? ` · ${c.doubts.length} line${c.doubts.length > 1 ? "s" : ""} to check` : ""}`;
+  if (c.factor) return `${c.rows.length} lines · ${c.pieces} pieces as printed · this bill multiplies every rate by ${c.factor} (Amount = ${c.factor} × Qty × Rate): "Multiply ×${c.factor}" is set in Bill costing below${c.doubts.length ? ` · ${c.doubts.length} line${c.doubts.length > 1 ? "s" : ""} to check` : ""}`;
   const total = `₹${(c.sum / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
   if (c.addsUp === true && !c.doubts.length)
     return `${c.rows.length} lines · ${c.pieces} pieces · adds up to ${total}, the bill's own total${c.fixes.length ? ` (after ${c.fixes.length} correction${c.fixes.length > 1 ? "s" : ""} shown below)` : ""}`;

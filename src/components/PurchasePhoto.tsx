@@ -12,7 +12,7 @@ import { compress, savePhoto } from "../lib/image";
 import { getRule, type PricingRule } from "../lib/pricing";
 import {
   preparePhotoRows, savePhotoPurchase, validatePhotoRows, pricePhotoRows, applyVendorTerms, repricePhotoRows, suspiciousCosts, restoreBillCosts,
-  autoArticle, autoArticleCount, draftLabelProducts, combineRepeatedRows, labelCountFor, lineSignature, isSamePage, nextPageNo, withBillDiscount, readDiscount, type PhotoRow,
+  autoArticle, autoArticleCount, draftLabelProducts, combineRepeatedRows, labelCountFor, lineSignature, isSamePage, nextPageNo, readDiscount, readMultiplier, readExtra, applyCosting, spreadExtra, costingOf, type PhotoRow,
 } from "../lib/purchase-photo";
 import { applyPhotoQuantities, readCount, repeatPhotoCount, stickersPerPacket, type RepeatedCountField } from "../lib/purchase-quantities";
 import { purchaseLabelJobs } from "../lib/purchase-labels";
@@ -32,9 +32,11 @@ import { UNITS, UNIT_RE } from "../lib/products";
 import { isPdf, expandPdfs, splitPage, joinHalves } from "../lib/pdf-pages";
 
 const blank = (pack = "1"): PhotoRow => ({ review_id: uid(), item: "", style: "", color: "", unit: "PCS", hsn: "", qty: "", pack, packSource: "default", stickers: "", cost: "", rate: "" });
-const captions: Record<string, string> = { collection: "Collection / style", material: "Material", item: "Item", style: "Style/article", color: "Colour", unit: "Unit", entry_code: "Reference Code", hsn: "HSN", qty: "Total qty", pack: "Pieces per packet (X)", stickers: "Stickers", cost: "Cost ₹", rate: "Rate ₹" };
+const captions: Record<string, string> = { sr: "Bill Sr.", collection: "Collection / style", material: "Material", item: "Item", style: "Style/article", color: "Colour", unit: "Unit", entry_code: "Reference Code", hsn: "HSN", qty: "Total qty", pack: "Pieces per packet (X)", stickers: "Stickers", cost: "Cost ₹", rate: "Rate ₹" };
 /* pack = the "X1" / "X3" after the rate on his stickers: pieces in one packet (his old software's QTY box) */
-const FIELDS = ["entry_code", "item", "style", "unit", "rate", "cost", "stickers", "qty", "pack", "color"] as const;
+/* Owner, 24 Oct (call): the order he tallies a bill in — the bill's own serial no., item, quantity, cost, our
+   rate, pieces per packet (X), stickers, colour — and the things filled once (reference code, supplier) last. */
+const FIELDS = ["sr", "item", "style", "qty", "cost", "rate", "pack", "stickers", "color", "unit", "entry_code"] as const;
 type Field = (typeof FIELDS)[number] | "collection" | "material";
 const defaultStickers = (r: PhotoRow) => {
   const qty = Number(r.qty), pack = Number(r.pack || "1");
@@ -45,8 +47,10 @@ type Draft = { store: string; rows: PhotoRow[]; supplier: string; billNo: string
   /* owner, 24 Oct: "the discount on the goods bill is not mentioned in the bill received" — the bill's discount %,
      read from the bill or typed; it comes off every line's cost when the purchase is saved and is written on it */
   discount?: string;
+  mult?: string;   // "Multiply ×" — the supplier writes his rates ÷ this (owner, 24 Oct: KALPESH ×5)
+  extra?: string;  // packing / freight ₹ on this bill, spread over the lines when saved
   /* what the bill's own arithmetic said: shown so the owner checks only what is in doubt */
-  check?: { summary: string; ok: boolean; fixes: LineFix[]; doubts: { line: number; why: string }[] };
+  check?: { summary: string; ok: boolean; fixes: LineFix[]; doubts: { line: number; why: string }[]; factor?: number };
   supplierName?: string;   // as read from the bill, for one-tap "add this supplier"
   autoBillNo?: boolean };  // the bill printed no number; one was made from its date and total
 
@@ -320,7 +324,13 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         // bills that print no article get one built from item + rate, so the lines neither collide nor merge
         const readName = OWN_SHOP.test(text(out.supplier)) ? "" : text(out.supplier).trim();
         const supplier = current.supplier || matchSupplier(readName, suppliers)?.id || "";
-        const rows = await preparePhotoRows(pricePhotoRows(autoArticle(read), rule), supplier, packetDefault);
+        // this bill's costing (multiply / less %): read from the bill, kept for its next pages
+        const costing = {
+          mult: current.mult || (checked.factor ? String(checked.factor) : readMultiplier(out)),
+          discount: current.discount || readDiscount(out, readSoFar.current.map(r => ({ qty: String(r.qty), cost: String(r.cost) }))),
+          extra: current.extra || readExtra(out),
+        };
+        const rows = await preparePhotoRows(pricePhotoRows(autoArticle(applyCosting(read, { mult: costing.mult, less: costing.discount })), rule), supplier, packetDefault);
         const boxes = out.rows.filter((r: any) => r?.box && String(r.box).trim() && String(r.box).trim() !== "0").length;
         const readBy = out.read_by ? String(out.read_by) : "";
         const fellBack = Array.isArray(out.attempts) && out.attempts.some((a: any) => a && a.ok === false && !a.skipped);
@@ -331,10 +341,10 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         current = {
           ...current,
           rows: [...current.rows, ...rows], supplier, supplierName, total,
-          discount: current.discount || readDiscount(out, [...current.rows, ...rows]),
+          ...costing,
           billNo: keepNo ? current.billNo : printedNo || fallbackBillNo(text(out.bill_date), checked.net),
           autoBillNo: keepNo ? false : !printedNo,
-          check: { summary: checkSummary(checked), ok: checked.addsUp === true && !checked.doubts.length, fixes: checked.fixes, doubts: checked.doubts },
+          check: { summary: checkSummary(checked), ok: checked.addsUp === true && !checked.doubts.length, fixes: checked.fixes, doubts: checked.doubts, ...(checked.factor ? { factor: checked.factor } : {}) },
           warnings: [
             current.warnings,
             ...(Array.isArray(out.warnings) ? out.warnings.map(String) : []),
@@ -427,8 +437,8 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       const merged = combineRepeatedRows(filled);
       if (merged.conflict) throw new Error(merged.conflict);
       if (merged.combined) { set({ rows: merged.rows }); toast(`${merged.combined} repeated line${merged.combined === 1 ? "" : "s"} added together`); }
-      const pct = Math.min(90, Math.max(0, Number(d.discount) || 0));
-      const rows = await preparePhotoRows(pct ? withBillDiscount(merged.rows, pct) : merged.rows, D.supplier, packetDefault);
+      const cst = costingOf({ mult: d.mult, less: d.discount, extra: d.extra }), pct = cst.less;
+      const rows = await preparePhotoRows(cst.extra ? spreadExtra(merged.rows, cst.extra) : merged.rows, D.supplier, packetDefault);
       const rule = await getRule(), current = await loadLabelCfg();
       const checked = validatePhotoRows(rows), products = draftLabelProducts(rows, by, rule, rows.length);
       const preflight = checked.flatMap((r, i) => {
@@ -465,13 +475,13 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         toast(`Bill ${D.billNo} was already saved as ${before.no} · ${how === "browser" ? "opening its labels to print" : "printing its labels again"}`);
         return;
       }
-      const p = await savePhotoPurchase(rows, { by, rack: D.rack, supplierId: D.supplier, billNo: D.billNo, photoId: d.photoId, invoiceTotal: d.total, note: [pct ? `Bill discount ${pct}% (taken off every line's cost)` : "", d.warnings, d.total ? "Supplier invoice total (as printed): " + d.total : ""].filter(Boolean).join("\n") });
+      const p = await savePhotoPurchase(rows, { by, rack: D.rack, supplierId: D.supplier, billNo: D.billNo, photoId: d.photoId, invoiceTotal: d.total, note: [cst.mult !== 1 || pct || cst.extra ? `Bill costing: printed rate${cst.mult !== 1 ? ` × ${cst.mult}` : ""}${pct ? ` − ${pct}% less` : ""}${cst.extra ? ` + ₹${cst.extra} packing/freight spread over the lines` : ""}` : "", d.warnings, d.total ? "Supplier invoice total (as printed): " + d.total : ""].filter(Boolean).join("\n") });
       savedPurchase = p;
       setSaved(p); setBulkQty(""); setBulkRef(""); setQuantityNote("");
       await setSetting(LAST, { id: p.id });
       // Financial saving succeeded. Any subsequent print failure is recovered
       // by printing this saved purchase, never by approving it a second time.
-      set({ rows: [], supplier: D.supplier, billNo: "", total: "", discount: "", warnings: "", photoId: undefined });
+      set({ rows: [], supplier: D.supplier, billNo: "", total: "", discount: "", mult: "", extra: "", warnings: "", photoId: undefined });
       setReviewed(false);
       const queue = await jobsFor(p);
       setJobs(queue);
@@ -558,7 +568,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       }}><Plus size={15} />Line</button>
       <button type="button" className="linkbtn" disabled={busy} onClick={async () => {
         if (busy || lock.current || !await confirmDelete("Clear this bill and start again? Nothing has been saved.")) return;
-        set({ rows: [], supplier: "", billNo: "", total: "", discount: "", warnings: "", check: undefined, supplierName: "", photoId: undefined, autoBillNo: undefined });
+        set({ rows: [], supplier: "", billNo: "", total: "", discount: "", mult: "", extra: "", warnings: "", check: undefined, supplierName: "", photoId: undefined, autoBillNo: undefined });
         readSoFar.current = [];
         setDone({}); setSelection(new Set()); setError("");
         setBulkQty(""); setBulkPack(packetDefault); setBulkRef(""); setQuantityNote("");
@@ -676,10 +686,9 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
 
       <label className="row sm" style={{ gap: 6 }}><input type="checkbox" checked={more} onChange={e => setMore(e.target.checked)} /> More details: collection / style, material and a photo for each line</label>
       <div className="selection-bar"><SelectAll ids={d.rows.map(r => r.review_id!)} selected={selection} onChange={setSelection} label="Select all purchase lines" /><span className="sm">{d.rows.filter(r => selection.has(r.review_id!)).length} selected</span><DeleteButton className="btn sm bad" disabled={busy || !d.rows.some(r => selection.has(r.review_id!))} onDelete={() => removeRows(d.rows.filter(r => selection.has(r.review_id!)).map(r => r.review_id!))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }}>Keys: ↑↓ lines · ←→ fields · Space select · Shift+↑↓ range</span></div>
-      <div className="tw purchase-lines" onKeyDown={onPurchaseGridKey}><table className="pos-t"><thead><tr>{["No.", "Supplier S.No.", ...lineFields.map(f => captions[f]), ...(more ? ["Photo"] : []), ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
+      <div className="tw purchase-lines" onKeyDown={onPurchaseGridKey}><table className="pos-t"><thead><tr>{["No.", ...lineFields.map(f => captions[f]), ...(more ? ["Photo"] : []), "Supplier S.No.", ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
         {d.rows.map((r, i) => <tr key={r.review_id || i}>
           <td className="line-no" data-l="Line" title="Line number: the same small boxed number printed on this line's stickers"><input type="checkbox" aria-label={"Select purchase line " + (i + 1)} checked={selection.has(r.review_id!)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(r.review_id!) : next.delete(r.review_id!); return next; })} />{r.sr?.trim() ? <span title={"Serial on the supplier's bill (line " + (i + 1) + " here)"}>{r.sr}</span> : i + 1}</td>
-          <td data-l="Supplier S.No." className="supplier-number mono" title="Saved supplier roll number">{vendor?.vendor_code || "—"}</td>
           {lineFields.map(k => <td key={k} data-l={captions[k]}>
             <input className={"in" + ((k === "style" && r.autoStyle) || d.check?.fixes.some(f => f.line === i + 1 && f.field === k) ? " auto-filled" : "") + (k === "cost" && lowCost.includes(i + 1) ? " cost-low" : "")} aria-label={`${k} line ${i + 1}`}
               title={k === "entry_code" ? "Editable maker initial + entry date (DDMMYY). This assumed code does not encode price." : ["qty", "pack", "stickers"].includes(k) ? `Enter copies this ${captions[k].toLowerCase()} to the next line. Type a new number to change it.${k === "stickers" ? " Blank means one per packet; 0 prints none." : ""}` : k === "style" && r.autoStyle ? "The bill printed no article number — this was built from the item and its rate. Edit it if you have the supplier's own code." : undefined}
@@ -700,6 +709,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
               } : undefined}
               style={{ minWidth: k === "item" ? 130 : ["style", "entry_code", "collection", "material"].includes(k) ? 110 : 56 }} /></td>)}
           {more && <td data-l="Photo"><PhotoButton value={r.photo_id} onChange={v => set({ rows: d.rows.map((x, k) => k === i ? { ...x, photo_id: v } : x) })} label="" /></td>}
+          <td data-l="Supplier S.No." className="supplier-number mono" title="Saved supplier roll number">{vendor?.vendor_code || "—"}</td>
           <td><DeleteButton className="iconbtn" aria-label="Remove line" disabled={busy} onDelete={() => removeRows([r.review_id!])}><Trash2 size={16} /></DeleteButton></td>
         </tr>)}</tbody></table></div>
 
@@ -713,9 +723,14 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
               Apply vendor terms{vendor.less_pct ? ` (${vendor.less_pct}% less)` : ""}{(vendor.rate_divisor || 1) !== 1 ? ` (÷${vendor.rate_divisor})` : ""}{d.rows.some(r => r.termsDone) ? ` to ${d.rows.filter(r => !r.termsDone).length} new lines` : ""}</button>)}
         <button className="btn" disabled={busy} onClick={() => void price()}>{done.pricing && done.pricingSig === costSig(d.rows) ? "Apply shop pricing again" : "Apply shop pricing"}</button>
         <span>Goods cost ₹{total}</span>
-        <label className="f">Bill discount %<input className="in" inputMode="decimal" style={{ maxWidth: 90 }} value={d.discount || ""} placeholder="0" onChange={e => set({ discount: e.target.value.replace(/[^0-9.]/g, "").slice(0, 5) })} /></label>
         <label className="f">Supplier payable ₹<input className="in" inputMode="decimal" value={d.total} onChange={e => set({ total: e.target.value })} /></label></div>
-      {Number(d.discount) > 0 && <div className="xs mut">{d.discount}% bill discount comes off each line's cost when you approve (selling rates stay as they are) and is written on the saved purchase.</div>}
+      <BillCosting d={d} busy={busy} onChange={patch => {
+        const next = { ...d, ...patch };
+        if (("mult" in patch && patch.mult !== d.mult) || ("discount" in patch && patch.discount !== d.discount)) {
+          const rows = applyCosting(d.rows, { mult: next.mult, less: next.discount });
+          set({ ...patch, rows }); void price(rows, "Costing changed · ");
+        } else set(patch);
+      }} />
 
       {!!lowCost.length && <div className="note bad sm" role="alert">
         <b>Check the cost on line{lowCost.length === 1 ? "" : "s"} {lowCost.join(", ")}:</b> it is less than a tenth of the selling rate. A cost like ₹1.03 against a rate of ₹170 usually means the vendor terms (÷) were applied again and again, or the cost was misread.
@@ -773,5 +788,26 @@ function BulkEdit({ rows, selection, disabled, onApply }: { rows: PhotoRow[]; se
       <button type="button" className="btn p" disabled={!rows.length} onClick={() => go(null, rows.length)}>Apply to all {rows.length} lines</button>
     </div>
     <div className="xs mut">Tick lines in the first column (or Select all, Space / Shift+↑↓) to change only those. Changing the item name or unit clears that line's old-software code so the right one is used.</div>
+  </fieldset>;
+}
+
+/* One box per bill for the supplier's own way of pricing (owner, 24 Oct). Changes apply when the box is left. */
+function BillCosting({ d, busy, onChange }: { d: { mult?: string; discount?: string; extra?: string; rows: PhotoRow[] }; busy: boolean; onChange: (p: { mult?: string; discount?: string; extra?: string }) => void }) {
+  const [v, setV] = useState({ mult: d.mult || "", discount: d.discount || "", extra: d.extra || "" });
+  useEffect(() => { setV({ mult: d.mult || "", discount: d.discount || "", extra: d.extra || "" }); }, [d.mult, d.discount, d.extra]);
+  const clean = (x: string) => x.replace(/[^0-9.]/g, "").slice(0, 9);
+  const commit = (k: "mult" | "discount" | "extra") => { if ((v[k] || "") !== (d[k] || "")) onChange({ [k]: v[k] }); };
+  const c = costingOf({ mult: d.mult, less: d.discount, extra: d.extra });
+  const sample = d.rows.find(r => Number(r.billCost ?? r.cost) > 0);
+  const field = (k: "mult" | "discount" | "extra", label: string, ph: string, w = 90) =>
+    <label className="f">{label}<input className="in" inputMode="decimal" style={{ maxWidth: w }} disabled={busy} value={v[k]} placeholder={ph}
+      onChange={e => setV({ ...v, [k]: clean(e.target.value) })} onBlur={() => commit(k)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commit(k); } }} /></label>;
+  return <fieldset className="purchase-quantity-tools bill-costing">
+    <legend>Bill costing <span className="xs mut">— this supplier's way of writing rates</span></legend>
+    <div className="row" style={{ flexWrap: "wrap", alignItems: "flex-end", gap: 8 }}>
+      {field("mult", "Multiply ×", "1")}{field("discount", "Less / discount %", "0")}{field("extra", "Packing / freight ₹", "0", 120)}
+      {sample && (c.mult !== 1 || c.less) ? <span className="sm">e.g. printed ₹{sample.billCost ?? sample.cost}{c.mult !== 1 ? ` × ${c.mult}` : ""}{c.less ? ` − ${c.less}%` : ""} = <b>₹{sample.cost}</b> cost</span> : null}
+    </div>
+    <div className="xs mut">Multiply and less % change every line's cost now, and the selling rates are worked out again from it. Packing / freight is spread over the lines by value when you approve. All of it is written on the saved purchase.</div>
   </fieldset>;
 }

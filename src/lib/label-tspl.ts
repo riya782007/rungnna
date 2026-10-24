@@ -15,7 +15,7 @@ import { labelHeat, type LabelHeat } from "./label-darkness";
    Every number is millimetres; the printer is 203 dpi (8 dots per mm).
 =========================================================================== */
 
-export type LabelShow = { shop: boolean; item: boolean; style: boolean; color: boolean; rate: boolean; tk: boolean; code: boolean; qty: boolean; cost_code: boolean; ref?: boolean };
+export type LabelShow = { shop: boolean; item: boolean; style: boolean; color: boolean; rate: boolean; tk: boolean; code: boolean; qty: boolean; cost_code: boolean; ref?: boolean; collection?: boolean; material?: boolean };
 export type LabelLook = LabelHeat & CostCodeLook & { w: number; h: number; qr: number; font: number; pad: number; offX: number; offY: number; gapY: number; shop: string; layout?: "shop" | "stack"; show: LabelShow; cur?: string };
 export type LabelLine = { text: string; big?: boolean; bold?: boolean; small?: boolean; optional?: boolean };   // optional = may be left off a crowded label (the QR carries it anyway)
 
@@ -33,6 +33,7 @@ export function labelLines(look: Pick<LabelLook, "shop" | "layout" | "show" | "c
   // the words in the owner's chosen order (lib/label-order); the price goes just above the cost code / code
   const lines = orderedLines(look.order, {
     item: s.item ? p.item : "", ref: (s.ref ?? s.style) ? p.entry_code : "", style: s.style ? p.style : "", color: s.color ? p.color : "",
+    collection: s.collection ? (p.collection || "").toUpperCase() : "", material: s.material ? (p.material || "").toUpperCase() : "",
     tk: s.tk && p.tk ? "TK " + p.tk : "", cost: s.cost_code ? printedCostCode(p.cost_code, look) : "", code: s.code ? p.code : "",
   }, false);
   let priced = false;

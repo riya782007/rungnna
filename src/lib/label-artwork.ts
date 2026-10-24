@@ -108,6 +108,7 @@ export function renderLabelSvg(cfg: LabelCfg, p: Product & { entry_code?: string
   // the words in the owner's chosen order (Settings on the print screen); Reference / Style (/ Colour) share a line
   const lines = orderedLines(cfg.order, {
     item: s.item ? p.item : "", ref: (s.ref ?? s.style) ? p.entry_code : "", style: s.style ? p.style : "", color: s.color ? p.color : "",
+    collection: s.collection ? (p.collection || "").toUpperCase() : "", material: s.material ? (p.material || "").toUpperCase() : "",
     tk: s.tk && p.tk ? `TK ${p.tk}` : "", cost: hasCost ? " " : "", code: s.code ? p.code : "",
   }, !stack);
   let extrasDone = !stack;
