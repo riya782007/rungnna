@@ -12,7 +12,7 @@ import { compress, savePhoto } from "../lib/image";
 import { getRule, type PricingRule } from "../lib/pricing";
 import {
   preparePhotoRows, savePhotoPurchase, validatePhotoRows, pricePhotoRows, applyVendorTerms, repricePhotoRows, suspiciousCosts, restoreBillCosts,
-  autoArticle, autoArticleCount, draftLabelProducts, combineRepeatedRows, labelCountFor, lineSignature, type PhotoRow,
+  autoArticle, autoArticleCount, draftLabelProducts, combineRepeatedRows, labelCountFor, lineSignature, isSamePage, nextPageNo, type PhotoRow,
 } from "../lib/purchase-photo";
 import { applyPhotoQuantities, readCount, repeatPhotoCount, stickersPerPacket, type RepeatedCountField } from "../lib/purchase-quantities";
 import { purchaseLabelJobs } from "../lib/purchase-labels";
@@ -28,6 +28,7 @@ import { OldCodesCard } from "./OldCodesCard";
 import { SupplierNo } from "./SupplierNo";
 import { checkBill, checkSummary, matchSupplier, fallbackBillNo, type LineFix } from "../lib/billCheck";
 import { newParty } from "../lib/billing";
+import { UNITS, UNIT_RE } from "../lib/products";
 
 const blank = (pack = "1"): PhotoRow => ({ review_id: uid(), item: "", style: "", color: "", unit: "PCS", hsn: "", qty: "", pack, packSource: "default", stickers: "", cost: "", rate: "" });
 const captions: Record<string, string> = { collection: "Collection / style", material: "Material", item: "Item", style: "Style/article", color: "Colour", unit: "Unit", entry_code: "Reference Code", hsn: "HSN", qty: "Total qty", pack: "Pieces per packet (X)", stickers: "Stickers", cost: "Cost ₹", rate: "Rate ₹" };
@@ -414,7 +415,11 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       if (preflight.length) validateLabelPrint(current, preflight);
       // the same supplier bill was saved before: don't save it twice, print its labels again
       const billNo = D.billNo.trim().toUpperCase();
-      const before = await db.purchases.filter(x => !x.deleted && x.status === "final" && x.supplier_id === D.supplier && x.supplier_bill.trim().toUpperCase() === billNo).first();
+      const pages = await db.purchases.filter(x => !x.deleted && x.status === "final" && x.supplier_id === D.supplier && (x.supplier_bill.trim().toUpperCase() === billNo || x.supplier_bill.trim().toUpperCase().startsWith(billNo + " P"))).toArray();
+      const now = checked.map(r => ({ style: r.style, color: r.color, qty: r.qty, cost: r.cost }));
+      const before = pages.find(x => isSamePage(x.items, now));
+      // same bill no., new lines: the next page of that bill, saved under its own page number
+      if (!before && pages.length) { D.billNo = nextPageNo(D.billNo, pages.map(x => x.supplier_bill)); set({ billNo: D.billNo }); toast(`Next page of bill ${billNo} — saved as ${D.billNo}`); }
       // the same lines saved recently under another bill no. or supplier: print those stickers again rather
       // than adding the stock and the supplier's amount a second time
       const sig = lineSignature(checked.map(r => ({ style: r.style, color: r.color, qty: r.qty, cost: r.cost })));
@@ -728,7 +733,7 @@ function BulkEdit({ rows, selection, disabled, onApply }: { rows: PhotoRow[]; se
     const v = value.trim().toUpperCase();
     if (!v && !["color", "entry_code", "collection", "material"].includes(field)) { toast("Type the new " + (field === "item" ? "item name" : field), true); return null; }
     if (field === "entry_code" && (v.length > 24 || !/^[A-Z0-9./-]*$/.test(v))) { toast("Reference code: up to 24 letters, numbers, / . or -", true); return null; }
-    if (field === "unit" && !/^(PCS|PAIR|SET)$/.test(v)) { toast("Unit must be PCS, PAIR or SET", true); return null; }
+    if (field === "unit" && !UNIT_RE.test(v)) { toast("Unit must be PCS, PAIR, SET, DOZEN, BOX, CARD or PACKET", true); return null; }
     return { [field]: v } as Partial<PhotoRow>;
   };
   const go = (ids: Set<string> | null, n: number) => { const patch = clean(); if (!patch) return; onApply(ids, patch); toast(`${BULK_FIELDS.find(f => f[0] === field)![1]} changed on ${n} line${n === 1 ? "" : "s"}`); };
@@ -737,7 +742,7 @@ function BulkEdit({ rows, selection, disabled, onApply }: { rows: PhotoRow[]; se
     <div className="row" style={{ flexWrap: "wrap", alignItems: "flex-end" }}>
       <label className="f">Field<select className="in" value={field} onChange={e => { setField(e.target.value as BulkField); setValue(""); }}>{BULK_FIELDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
       {field === "unit"
-        ? <label className="f">New value<select className="in" value={value} onChange={e => setValue(e.target.value)}><option value="">—</option>{["PCS", "PAIR", "SET"].map(u => <option key={u}>{u}</option>)}</select></label>
+        ? <label className="f">New value<select className="in" value={value} onChange={e => setValue(e.target.value)}><option value="">—</option>{UNITS.map(u => <option key={u}>{u}</option>)}</select></label>
         : <label className="f grow">New value<input className={"in" + (field === "entry_code" ? " mono" : "")} value={value} maxLength={field === "entry_code" ? 24 : 80} onChange={e => setValue(e.target.value.toUpperCase())} placeholder={field === "entry_code" ? "e.g. K211026" : field === "item" ? "e.g. N SET" : field === "color" ? "e.g. MIX (blank clears)" : ""} /></label>}
       <button type="button" className="btn" disabled={!picked} onClick={() => go(new Set(rows.filter(r => selection.has(r.review_id!)).map(r => r.review_id!)), picked)}>Apply to {picked || "ticked"} selected</button>
       <button type="button" className="btn p" disabled={!rows.length} onClick={() => go(null, rows.length)}>Apply to all {rows.length} lines</button>

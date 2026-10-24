@@ -108,7 +108,7 @@ describe("reviewed photo purchases", () => {
     expect(await db.products.count()).toBe(0); expect(await db.outbox.count()).toBe(0);
   });
   it("does not guess missing prices or convert packaging quantities", () => {
-    for (const patch of [{ item: "" }, { cost: "" }, { rate: "" }, { qty: "1.5" }, { unit: "DOZEN" }, { hsn: "bad" }, { pack: "0" }, { pack: "1.5" }, { stickers: "-1" }, { stickers: "1.5" }, { stickers: "5001" }]) expect(() => validatePhotoRows([{ ...row, ...patch }])).toThrow();
+    for (const patch of [{ item: "" }, { cost: "" }, { rate: "" }, { qty: "1.5" }, { unit: "GROSS" }, { hsn: "bad" }, { pack: "0" }, { pack: "1.5" }, { stickers: "-1" }, { stickers: "1.5" }, { stickers: "5001" }]) expect(() => validatePhotoRows([{ ...row, ...patch }])).toThrow();
   });
   it("restricts purchase-photo saves to owners and roles granted it", async () => {
     setScope(MAIN_STORE, "salesman"); setScopePerms(new Set());

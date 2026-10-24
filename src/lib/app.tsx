@@ -1,6 +1,6 @@
-import { setOwnerOpen } from "./privacy";
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { db, put, uid, now, getSetting, setSetting, type Staff, type Location } from "./db";
+import { setOwnerOpen, lockNow } from "./privacy";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { db, put, uid, now, getSetting, setSetting, deviceId, type Staff, type Location } from "./db";
 import { initStores } from "./stores";
 import { setScope, setScopePerms, currentStore, MAIN_STORE } from "./scope";
 import { resetCounterAccess } from "./entryAuth";
@@ -147,8 +147,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (me && !sessionAllowed(me)) { setMe(null); return; }
     setScopePerms(permsOf(me)); bump(n => n + 1);
   }, [rolesRow?.updated_at, me?.id, me?.role, me?.role_id]);
+  /* Owner, 23 Oct (voice): "a lockout: if, God forbid, it is ever needed, I log out from my phone and everyone is
+     logged out — no company can open estimates". The owner's "Log out everyone" stamps config "logout_all"; every
+     counter that signed in before that stamp goes back to the sign-in screen (as soon as it is online). */
+  const signedAt = useRef(0);
+  useEffect(() => { signedAt.current = me ? Date.now() : 0; }, [me?.id]);
+  const logoutRow = useLiveQuery(() => db.config.get(LOGOUT_ALL), []);
+  useEffect(() => {
+    const v = logoutRow?.value as { at?: string; device?: string } | undefined;
+    if (!me || !v?.at || v.device === deviceId() || Date.parse(v.at) <= signedAt.current) return;
+    lockNow(); setOwnerOpen(false); setMe(null);
+    toast("The owner logged everyone out. Sign in again.", true);
+  }, [logoutRow?.updated_at, me?.id]);
   return <AppCtx.Provider value={{ me, setMe, ready, store, switchStore }}>{children}</AppCtx.Provider>;
 }
 
+export const LOGOUT_ALL = "logout_all";
+/** Owner only: every other computer and phone is signed out and estimates close everywhere. */
+export async function logoutEveryone(by: string) {
+  await put("config", { id: LOGOUT_ALL, value: { at: now(), device: deviceId(), by }, updated_at: now() } as any);
+}
 export const newStaff = (name: string, role: Staff["role"], pin = "", phone = ""): Staff =>
   ({ id: uid(), name, role, pin, phone, active: 1, updated_at: now() });

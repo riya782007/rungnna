@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, deviceId, uid, type Staff } from "../lib/db";
 import { Head } from "../components/common";
-import { useApp, toast, newStaff, SEED_OWNER } from "../lib/app";
+import { useApp, toast, newStaff, SEED_OWNER, logoutEveryone } from "../lib/app";
 import { onSync, signIn, signOut, syncNow, exportAll, importAll, createShopLogin, sb, ensureSession, markShopDevice, type SyncState } from "../lib/sync";
 import type { Pattern } from "../lib/parse";
 import { when } from "../lib/format";
@@ -58,6 +58,12 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
       <div className="row"><span className="avatar" style={{ width: 44, height: 44, fontSize: 17 }}>{me?.name.slice(0, 1)}</span>
         <span className="grow"><b>{me?.name}</b><div className="xs mut">{roleName(me)}{me?.role_id ? "" : " · " + (me ? ROLE_NOTE[me.role] : "")}</div></span>
         <button className="btn sm" onClick={() => setMe(null)}>Switch person</button></div>
+      {me?.role === "owner" && <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+        <button className="btn sm bad" onClick={async () => {
+          if (!confirm("Log out everyone on every other computer and phone now?\n\nEstimates close everywhere. Each person signs in again with the shop code, name and PIN.")) return;
+          await logoutEveryone(me.name); toast("Everyone else is logged out (computers that are offline log out as soon as they connect)");
+        }}>Log out everyone</button>
+        <span className="xs mut">For an emergency — from your phone too.</span></div>}
       {me && isRoleLogin(me) && <div className="xs mut">Signed in with this role's passcode. The owner changes it on Roles &amp; Permissions.</div>}
       {me && !isRoleLogin(me) && <button className="btn sm" onClick={async () => {
         const p = await askText(me.pin ? "New 4-digit personal PIN" : "Set a 4-digit PIN so nobody else can use your name", "", { secret: true, numeric: true });
@@ -277,6 +283,10 @@ export function WhoAreYou() {
   const [bad, setBad] = useState("");
   const [pick, setPick] = useState<Staff | null>(null);
   const [pin, setPin] = useState("");
+  /* Owner, 23–24 Oct: "the sign-in must not show the names of who can open it. Only the shop's password, then the
+     person types his own name, then his password." So no list of names: the name is typed and checked with the PIN. */
+  const [typed, setTyped] = useState("");
+  const [roleMode, setRoleMode] = useState(false);
   const [owner, setOwner] = useState("");
   const [newPin, setNewPin] = useState("");
   const [busy, setBusy] = useState(false);
@@ -310,7 +320,7 @@ export function WhoAreYou() {
     try {
       const remaining = await entryWait(stage); if (remaining > 0) { setWait(remaining); return; }
       if (await action()) { await recordEntryAttempt(true, stage); setCode(""); setPin(""); }
-      else { setWait(await recordEntryAttempt(false, stage)); setBad(unlocked ? "Passcode or PIN not recognised. Ask the owner to check your access." : "Entry code not recognised. Ask the owner."); setCode(""); setPin(""); }
+      else { setWait(await recordEntryAttempt(false, stage)); setBad(unlocked ? "Name or PIN not recognised. Check the spelling of your name, or ask the owner." : "Entry code not recognised. Ask the owner."); setCode(""); setPin(""); }
     } catch (e: any) { setBad(e.message || "Could not open. Try again."); }
     finally { setBusy(false); }
   };
@@ -318,9 +328,14 @@ export function WhoAreYou() {
     e.preventDefault();
     void attempt(async () => {
       if (!unlocked) { if (!codeMatches(code, await getOpenCode())) return false; setUnlocked(true); return true; }
-      const person = pick ? await personForPin(pick.id, pin) : await staffForRolePasscode(code);
-      if (!person) return false;
-      setMe(person); return true;
+      if (roleMode) { const person = await staffForRolePasscode(code); if (!person) return false; setMe(person); return true; }
+      const want = typed.trim().toUpperCase().replace(/\s+/g, " ");
+      const named = persons.filter(s => s.name.trim().toUpperCase().replace(/\s+/g, " ") === want);
+      // an owner with no PIN yet sets one now (one-time); anyone else without a PIN asks the owner
+      const fresh = named.find(s => s.role === "owner" && !s.pin);
+      if (fresh) { setPick(fresh); return true; }
+      for (const s of named) { const person = s.pin ? await personForPin(s.id, pin) : null; if (person) { setMe(person); return true; } }
+      return false;
     });
   };
   const setupOwner = async (person: Staff, name = person.name) => {
@@ -344,7 +359,7 @@ export function WhoAreYou() {
         <span className="mark">R</span><div><b style={{ font: "700 26px/1 var(--display)", color: "var(--gold-l)" }}>Rungnna</b><div className="xs" style={{ opacity: .7 }}>Jewellery &amp; Co · Shop OS</div></div></header>
       <div className="pad stack">
         {unlocked && reset ? <OwnerPinReset onDone={person => { setReset(false); if (person) setMe(person); }}
-            onUseCloud={o => { setReset(false); setPick(o); setPin(""); setCode(""); setBad(""); }} />
+            onUseCloud={o => { setReset(false); setPick(null); setTyped(o.name); setRoleMode(false); setPin(""); setCode(""); setBad(""); }} />
         : unlocked && joining ? <div className="stack" role="status">
           <div className="b sm">Getting the shop from the cloud…</div>
           <div className="xs mut">Names, PINs, stock and bills are coming to this computer. Then sign in with your usual PIN — no new setup needed.</div>
@@ -357,24 +372,22 @@ export function WhoAreYou() {
           <label className="f">New 4-digit personal PIN<input className="in mono" type="password" inputMode="numeric" maxLength={4} autoComplete="new-password" value={newPin} onChange={e => setNewPin(e.target.value.replace(/\D/g, ""))} /></label>
           <button className="btn p" disabled={busy || !/^\d{4}$/.test(newPin) || (needsName && !owner.trim())}>Save PIN &amp; open</button>
         </form> : <form className="stack" onSubmit={open}>
-          <label className="f">{!unlocked ? "Common shop entry code" : pick ? `Personal PIN for ${pick.name}` : "Your role passcode"}
-            <input className="in" autoFocus key={stage + (pick?.id || "")} type="password" autoComplete="current-password" inputMode={pick ? "numeric" : "text"} maxLength={pick ? 4 : undefined}
-              placeholder={!unlocked ? "Same entry code for everyone" : pick ? "Your 4-digit PIN" : "Type your own role passcode"} value={pick ? pin : code}
-              onChange={e => { pick ? setPin(e.target.value.replace(/\D/g, "")) : setCode(e.target.value); setBad(""); }} /></label>
-          <button className="btn p" disabled={busy || wait > 0 || (pick ? pin.length !== 4 : !code.trim())}>{busy ? "Checking…" : unlocked ? "Sign in" : "Continue"}</button>
+          {unlocked && !roleMode && <label className="f">Your name
+            <input className="in" autoFocus key={"name" + stage} autoComplete="username" autoCapitalize="words" spellCheck={false} placeholder="Type your name" value={typed}
+              onChange={e => { setTyped(e.target.value); setBad(""); }} /></label>}
+          <label className="f">{!unlocked ? "Common shop entry code" : roleMode ? "Your role passcode" : "Your password (PIN)"}
+            <input className="in" autoFocus={!unlocked || roleMode} key={stage + (roleMode ? "r" : "p")} type="password" autoComplete="current-password" inputMode={unlocked && !roleMode ? "numeric" : "text"} maxLength={unlocked && !roleMode ? 4 : undefined}
+              placeholder={!unlocked ? "Same entry code for everyone" : roleMode ? "Type your own role passcode" : "Your 4-digit PIN"} value={unlocked && !roleMode ? pin : code}
+              onChange={e => { unlocked && !roleMode ? setPin(e.target.value.replace(/\D/g, "")) : setCode(e.target.value); setBad(""); }} /></label>
+          <button className="btn p" disabled={busy || wait > 0 || (unlocked && !roleMode ? !typed.trim() || (pin.length !== 4 && !persons.some(s => s.role === "owner" && !s.pin)) : !code.trim())}>{busy ? "Checking…" : unlocked ? "Sign in" : "Continue"}</button>
           {unlocked && <>
-            <div className="sm">Or choose your name and use your personal PIN.</div>
-            {persons.map(s => <button key={s.id} type="button" className="item" onClick={() => {
-              if (!s.pin && s.role !== "owner") { setBad("Your PIN is not set. Ask the owner: Settings → People → Set PIN."); return; }
-              setPick(s); setPin(""); setCode(""); setBad("");
-            }}><span className="thumb" style={{ width: 36, height: 36 }}>{s.name.slice(0, 1)}</span><span className="grow b">{s.name}</span><span className="xs mut">{roleName(s)}</span></button>)}
-            {pick && <button type="button" className="linkbtn" onClick={() => { setPick(null); setPin(""); }}>Use a role passcode</button>}
+            <button type="button" className="linkbtn" onClick={() => { setRoleMode(m => !m); setPin(""); setCode(""); setBad(""); }}>{roleMode ? "Sign in with your name and PIN" : "Use a role passcode"}</button>
             <button type="button" className="linkbtn" onClick={() => { setReset(true); setBad(""); setPick(null); setPin(""); }}>Forgot the owner PIN? Set a new one with the shop's cloud login</button>
           </>}
         </form>}
         {bad && <div className="note warn" role="alert">{bad}</div>}
         {wait > 0 && <div className="note bad sm" role="status">Too many wrong attempts — try again in {Math.ceil(wait / 1000)}s.</div>}
-        {unlocked && <button type="button" className="linkbtn" onClick={() => { setUnlocked(false); setPick(null); setPin(""); setCode(""); setBad(""); }}>Lock shop</button>}
+        {unlocked && <button type="button" className="linkbtn" onClick={() => { setUnlocked(false); setPick(null); setTyped(""); setRoleMode(false); setPin(""); setCode(""); setBad(""); }}>Lock shop</button>}
         <div className="xs mut">Works offline after this counter has loaded the app and received its staff and stock. Role and PIN changes reach other counters when sync is allowed and connected.</div>
       </div>
     </div>

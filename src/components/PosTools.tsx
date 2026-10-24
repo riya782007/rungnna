@@ -5,7 +5,7 @@ import { type BillLine, type Product } from "../lib/db";
 import { manualLine, moneyInput } from "../lib/pos";
 import { calculate } from "../lib/calculator";
 import { priceFor } from "../lib/billing";
-import { fillFromItemCode } from "../lib/products";
+import { fillFromItemCode, UNITS } from "../lib/products";
 import { billAmount } from "../lib/format";
 import { beep } from "../lib/app";
 
@@ -40,7 +40,7 @@ export function ManualItems({ products, box, level, canRates, onProduct, onCusto
   if (persistent) return <section className="pos-inline pos-quick" id="pos-item-entry" aria-label="Add custom item">
     <form className="pos-quick-row" onSubmit={e => { e.preventDefault(); submit(false); }}>
       <input ref={search} className="in" aria-label="Product name" placeholder="Product name" value={item} onChange={e => setItem(e.target.value)} />
-      <select className="in" aria-label="Unit" value={unit} onChange={e => setUnit(e.target.value)}>{["PCS", "PAIR", "SET"].map(u => <option key={u}>{u}</option>)}</select>
+      <select className="in" aria-label="Unit" value={unit} onChange={e => setUnit(e.target.value)}>{UNITS.map(u => <option key={u}>{u}</option>)}</select>
       <input className="in" aria-label="Style" placeholder="Style" value={style} onChange={e => setStyle(e.target.value)} />
       <input className="in" aria-label="Colour" placeholder="Colour" value={color} onChange={e => setColor(e.target.value)} />
       <input className="in r" aria-label="Quantity" placeholder="Qty" type="number" min={1} step={1} value={qty} onChange={e => setQty(e.target.value)} />
@@ -55,7 +55,7 @@ export function ManualItems({ products, box, level, canRates, onProduct, onCusto
       {!chosen ? <div className="pos-picklist">{hits.map(p => <button className="pos-pick" key={p.id} disabled={busy} onClick={() => select(p)}><span><b>{p.item || "Item " + (p.item_code || p.code)}</b><span className="mut sm">{p.style} · {p.color}</span></span><b className="mono">{billAmount(priceFor(p, level))}</b></button>)}{!hits.length && <div className="mut">No matching products</div>}</div> : <div className="note"><b>{chosen.item || "Item " + chosen.item_code}</b><div>{chosen.style} · {chosen.color} · {chosen.type}</div></div>}
     </>}
     {(chosen || mode === "custom") && <form onSubmit={e => { e.preventDefault(); submit(false); }} className="pos-entry-fields">
-      {mode === "custom" && <><label className="f pos-entry-name">Product name<input ref={search} autoFocus={!persistent} className="in" value={item} onChange={e => setItem(e.target.value)} /></label><label className="f">Unit<select className="in" value={unit} onChange={e => setUnit(e.target.value)}>{["PCS", "PAIR", "SET"].map(u => <option key={u}>{u}</option>)}</select></label><label className="f">Style<input className="in" value={style} onChange={e => setStyle(e.target.value)} /></label><label className="f">Colour<input className="in" value={color} onChange={e => setColor(e.target.value)} /></label><label className="f">HSN<input className="in" inputMode="numeric" value={hsn} onChange={e => setHsn(e.target.value)} /></label></>}
+      {mode === "custom" && <><label className="f pos-entry-name">Product name<input ref={search} autoFocus={!persistent} className="in" value={item} onChange={e => setItem(e.target.value)} /></label><label className="f">Unit<select className="in" value={unit} onChange={e => setUnit(e.target.value)}>{UNITS.map(u => <option key={u}>{u}</option>)}</select></label><label className="f">Style<input className="in" value={style} onChange={e => setStyle(e.target.value)} /></label><label className="f">Colour<input className="in" value={color} onChange={e => setColor(e.target.value)} /></label><label className="f">HSN<input className="in" inputMode="numeric" value={hsn} onChange={e => setHsn(e.target.value)} /></label></>}
       {mode === "catalog" && chosen && (chosen.pack || 1) > 1 && <div className="seg pos-entry-wide" role="group" aria-label="Quantity mode"><button type="button" aria-pressed={!pieces} onClick={() => setPieces(false)}>Packets ×{chosen.pack}</button><button type="button" aria-pressed={pieces} onClick={() => setPieces(true)}>Loose {chosen.type}</button></div>}
       <label className="f">Quantity<input className="in" type="number" min={1} step={1} value={qty} onChange={e => setQty(e.target.value)} /></label><label className="f">Rate / {mode === "catalog" ? chosen?.type : unit}<input className="in" inputMode="decimal" value={rate} disabled={mode === "catalog" && !!chosen && !canRates && !!priceFor(chosen, level)} onChange={e => setRate(e.target.value)} /></label>
       <div className="row pos-entry-actions"><button className="btn p" disabled={busy}><Plus size={16} />Add to bill</button>{!persistent && <button type="button" className="btn" disabled={busy} onClick={() => submit(true)}>Add & next</button>}{mode === "custom" && <span className="xs mut">Tracked in stock when saved; zero stock can go negative</span>}</div>

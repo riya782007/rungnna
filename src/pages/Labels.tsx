@@ -491,8 +491,13 @@ export function tscCommands(cfg: LabelCfg, list: Job[]) {
 
 type Run = {
   list: Job[]; batches: LabelBatch[]; i: number; phase: "print" | "wait"; direct: boolean;
-  prompt: boolean; n: number; verify?: boolean; cfg: LabelCfg; error?: string;
+  prompt: boolean; n: number; verify?: boolean; cfg: LabelCfg; error?: string; at?: number;
 };
+/* Owner, 24 Oct: "printing ahead is not possible until the old print is deleted — even Start over doesn't help".
+   A print that is only waiting for its check ("did it come out right?"), or whose print window never reported
+   back, must not block the next print: starting a new one closes it. Only a job still being sent blocks. */
+const STALE_MS = 45_000;
+export const blocksNextPrint = (r: { phase: "print" | "wait"; at?: number } | null, now = Date.now()) => !!r && r.phase === "print" && now - (r.at || now) < STALE_MS;
 
 /* A printer or geometry change requires one fresh, accepted check row. */
 export const printerSig = (c: LabelCfg) => [c.output || "browser", c.qzPrinter || "", c.preset, c.mode, c.w, c.h, c.cols, c.gapX, c.gapY, c.offX, c.offY, c.driverPaper ? 1 : 0, c.edgeR ?? "", c.sheetW, c.sheetH, c.rows, c.left, c.top, c.qr, c.font, c.pad, c.rateScale ?? "", c.layout, c.format, c.density ?? DEFAULT_LABEL_DENSITY, c.speed ?? DEFAULT_LABEL_SPEED, c.compactCostCode ? 1 : 0, c.fakeLetters ?? "Z"].join("|");
@@ -525,7 +530,7 @@ export function useLabelPrint(cfg: LabelCfg, onConfig?: (config: LabelCfg) => vo
     toast(`All ${r.list.length} sticker${r.list.length === 1 ? "" : "s"} sent to the printer`);
   };
   const go = async (r: Run) => {
-    const sending = { ...r, phase: "print" as const, error: undefined };
+    const sending = { ...r, phase: "print" as const, error: undefined, at: Date.now() };
     setRun(sending);
     if (!sending.direct) return;
     try {
@@ -553,7 +558,10 @@ export function useLabelPrint(cfg: LabelCfg, onConfig?: (config: LabelCfg) => vo
       if (!cancelled) toast(message, true);
       return { started: false, message, ...(cancelled ? { cancelled: true } : {}) };
     };
-    if (ref.current) return rejectStart("Finish or stop the print already running first");
+    if (ref.current) {
+      if (blocksNextPrint(ref.current)) return rejectStart("Stickers are still being sent to the printer — wait a moment");
+      setRun(null);   // the earlier print was only waiting for a check: this new print replaces it
+    }
     // start receives an expanded queue: every entry represents ONE sticker,
     // even when it originated in a purchase job with copies greater than one.
     const queue = list.map((j, index) => ({ ...j, p: { ...j.p }, copies: 1, labelIndex: j.labelIndex ?? index }));
@@ -636,7 +644,7 @@ export function useLabelPrint(cfg: LabelCfg, onConfig?: (config: LabelCfg) => vo
       <div className="xs mut">Wrong print already coming out? Switch the printer off, cancel its Windows print queue, then switch it back on. Check the queue before retrying an unconfirmed job to avoid duplicate stickers.</div>
     </div>
   </> : null;
-  return { start, stop, busy: !!run, panel };
+  return { start, stop, busy: blocksNextPrint(run), panel };
 }
 
 /* What this computer must be told once, so the sticker on screen is the sticker on the roll. */

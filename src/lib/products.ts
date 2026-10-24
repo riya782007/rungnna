@@ -208,7 +208,9 @@ export function fromParsed(x: Parsed, by: string): Product {
    every later scan of that number — billing, stock in, scan, import — fills the name and unit by itself.
    The list lives in config "item_codes" (synced): { "202": { name: "F-RING", unit: "PAIR" } }.
    Older copies stored just the name ("202": "F-RING"); those still read fine. */
-export const UNITS = ["PCS", "PAIR", "SET"] as const;
+/* Owner, 24 Oct (voice): "in Unit there is only piece, pair and set — dozen, box, card and the rest are gone". */
+export const UNITS = ["PCS", "PAIR", "SET", "DOZEN", "BOX", "CARD", "PACKET"] as const;
+export const UNIT_RE = /^(PCS|PAIR|SET|DOZEN|BOX|CARD|PACKET)$/i;
 export type ItemInfo = { name: string; unit: string; owner?: boolean };   // owner: named on purpose by the shop
 export type ItemMap = Record<string, ItemInfo>;
 

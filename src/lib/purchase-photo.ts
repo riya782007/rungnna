@@ -1,6 +1,6 @@
 import { checkedEntryReference } from "./entry-reference";
 import { db, uid, setSetting, type Product, type Purchase, type Party } from "./db";
-import { blankProduct, findByKey, saveProduct, itemMap, normUnit, productKey, resolvedItemMap } from "./products";
+import { blankProduct, findByKey, saveProduct, itemMap, normUnit, productKey, resolvedItemMap, UNIT_RE } from "./products";
 import { newPurchase, lineOf, finalizePurchase } from "./stockin";
 import { readCount, readPacketSize } from "./purchase-quantities";
 import { moneyInput } from "./pos";
@@ -144,7 +144,7 @@ export function validatePhotoRows(rows: PhotoRow[]) {
     const cost = moneyInput(r.cost), rate = moneyInput(r.rate);
     if (cost <= 0 || rate <= 0) throw new Error(`Line ${i + 1}: enter positive cost and selling rate`);
     if (!Number.isSafeInteger(qty * cost)) throw new Error("Purchase amount is too large");
-    if (!/^(PCS|PAIR|SET)$/i.test(r.unit)) throw new Error(`Line ${i + 1}: convert dozen/box/packet to PCS, PAIR or SET before saving`);
+    if (!UNIT_RE.test(r.unit)) throw new Error(`Line ${i + 1}: choose the unit (PCS, PAIR, SET, DOZEN, BOX, CARD or PACKET)`);
     if (r.item_code && !/^\d+$/.test(r.item_code.trim())) throw new Error(`Line ${i + 1}: old-software item code must be numeric`);
     if (/[~\u0000-\u001f\u007f]/.test(r.ref || "")) throw new Error(`Line ${i + 1}: old-software reference cannot contain ~ or control characters`);
     if (r.hsn && !/^\d{4,8}$/.test(r.hsn)) throw new Error(`Line ${i + 1}: check HSN`);
@@ -163,7 +163,7 @@ export function draftLabelProducts(rows: PhotoRow[], by: string, rule: PricingRu
     let cost = 0, rate = 0;
     try { cost = moneyInput(r.cost); } catch { /* blank while typing */ }
     try { rate = moneyInput(r.rate); } catch { /* blank while typing */ }
-    const unit = /^(PCS|PAIR|SET)$/i.test(r.unit.trim()) ? r.unit.trim().toUpperCase() : "PCS";
+    const unit = UNIT_RE.test(r.unit.trim()) ? r.unit.trim().toUpperCase() : "PCS";
     return {
       ...blankProduct(by),
       item: r.item.trim().toUpperCase(), style: r.style.trim().toUpperCase(), model: r.style.trim().toUpperCase(),
@@ -231,6 +231,20 @@ export async function savePhotoPurchase(rows: PhotoRow[], input: { by: string; r
 /** What a bill's lines add up to, whatever its bill no. or supplier: article + colour + pieces + cost.
     Two purchases with the same signature are the same bill entered twice (owner's log, 21 Oct: one bill saved
     again with a "/" added to its number, another under a second supplier, to print the stickers again). */
+/* Owner, 24 Oct: "when the second page of a bill comes, it doesn't print because it reads the same bill number;
+   to move ahead I have to change the bill number". Same bill no. + lines that are not on the saved page = the
+   next page of that bill: it is saved as "<bill no> P2" (P3…) and only its own stickers print. Lines that are all
+   on a saved page = the same page again: its stickers are printed again and nothing is added twice. */
+export const lineKey = (l: { style: string; color?: string; qty: number; cost: number }) => [l.style.trim().toUpperCase(), (l.color || "").trim().toUpperCase(), l.qty, Math.round(l.cost)].join("|");
+export function isSamePage(saved: { style: string; color?: string; qty: number; cost: number }[], now: { style: string; color?: string; qty: number; cost: number }[]) {
+  const have = new Set(saved.map(lineKey));
+  return now.length > 0 && now.every(l => have.has(lineKey(l)));
+}
+export function nextPageNo(billNo: string, taken: string[]): string {
+  const base = billNo.trim(), used = new Set(taken.map(t => t.trim().toUpperCase()));
+  for (let n = 2; n < 100; n++) { const no = `${base} P${n}`; if (!used.has(no.toUpperCase())) return no; }
+  return `${base} P${Date.now() % 1000}`;
+}
 export function lineSignature(lines: { style: string; color: string; qty: number; cost: number }[]): string {
   return lines.map(l => [l.style.trim().toUpperCase(), (l.color || "").trim().toUpperCase(), l.qty, Math.round(l.cost)].join("|")).sort().join(";");
 }
