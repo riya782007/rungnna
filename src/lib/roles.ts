@@ -35,7 +35,7 @@ export const PERMISSION_GROUPS: PermGroup[] = [
     { key: "billing.merge", label: "Merge, split & convert bills" },
   ]},
   { key: "estimates", label: "Private estimates", perms: [
-    { key: "estimates.open", label: "Open private estimates (and make estimates in the estimate company)" },
+    { key: "estimates.open", label: "Open private estimates (and make estimates)" },
     { key: "estimates.delete", label: "Delete estimates for good" },
   ]},
   { key: "sales", label: "Sales & customers", perms: [

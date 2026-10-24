@@ -1,4 +1,4 @@
-import { companyKindNow, typeForCompany } from "../lib/scope";
+import { companyKindNow, typeForCompany, estimatesOnly } from "../lib/scope";
 import { askText } from "../components/AskHost";
 import { parkBillingDraft, resumeBillingDraft } from "../lib/billing-drafts";
 import { publicOrigin } from "../lib/platform";
@@ -616,7 +616,7 @@ export default function Billing({ args }: { args: string[] }) {
       <div className="pos-counter-dock" ref={counterDockRef}>
       {b.bill_type === "gst" && shopNeedsTaxDetails(shop) && <ShopDetailsAsk shop={shop} onSaved={setShop} />}
       <div className="pos-top card">
-        {companyKindNow() === "estimate" ? <div className="row" style={{ gap: 8 }}><div className="pos-title"><b>Estimate</b><span className="xs mut">estimate company</span></div></div>
+        {companyKindNow() === "estimate" || estimatesOnly() ? <div className="row" style={{ gap: 8 }}><div className="pos-title"><b>Estimate</b><span className="xs mut">{companyKindNow() === "estimate" ? "estimate company" : "estimates"}</span></div></div>
         : priv && companyKindNow() !== "gst" ? <div className="seg" role="group" aria-label="Bill type">
           <button aria-pressed={b.bill_type === "estimate"} onClick={() => void openDocument("estimate")}>Estimate</button>
           <button aria-pressed={b.bill_type === "gst"} onClick={() => void openDocument("gst")}>GST Invoice</button>

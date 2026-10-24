@@ -28,12 +28,12 @@ export function ownerOnly() { if (role !== "owner") throw new Error("Owner only"
 export function setScopePerms(p: Set<string>) { perms = p; }
 export function requirePerm(key: string, what = "this") { if (role !== "owner" && !perms.has(key) && !estimateBilling(key, k => perms.has(k))) throw new Error(`Your role doesn't allow ${what}. Ask the owner.`); }
 
-import { companyKindNow, setCompanyKind, estimateBilling } from "./company-kind";
-export { companyKindNow, setCompanyKind };
+import { companyKindNow, setCompanyKind, estimateBilling, estimatesOnly } from "./company-kind";
+export { companyKindNow, setCompanyKind, estimatesOnly };
 /** The document type a new bill takes in this company. */
 export function typeForCompany<T extends string>(t: T): T | "estimate" | "gst" {
   const kind = companyKindNow();
-  if (kind === "estimate" && t !== "return") return "estimate";
+  if ((kind === "estimate" || estimatesOnly()) && t !== "return") return "estimate";
   if (kind === "gst" && t === "estimate") return "gst";
   return t;
 }

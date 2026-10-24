@@ -13,6 +13,14 @@ import { setCompanyKind } from "./lib/scope";
 import { setCompanyOpen, getPrivate } from "./lib/privacy";
 import { exitCompany, watchIdle } from "./lib/companyLock";
 import { useShopQueue, isPhoneLike } from "./lib/print-queue";
+import { setEstimatesOnly } from "./lib/company-kind";
+import { permsOf } from "./lib/roles";
+/* someone allowed private estimates but not "Make bills": the bill screen makes only estimates for them */
+const estimatesOnlyFor = (me: { role: string; perms?: string[]; role_id?: string } | null) => {
+  if (!me || me.role === "owner") { setEstimatesOnly(false); return false; }
+  const p = permsOf(me as any), only = p.has("estimates.open") && !p.has("billing.sell");
+  setEstimatesOnly(only); return only;
+};
 import type { Store } from "./lib/db";
 import { VIEW_ROUTES, setViewOpen, useViewOpen } from "./lib/viewCode";
 import { can, roleName } from "./lib/roles";
@@ -96,6 +104,7 @@ function Loading() { return <div className="stack"><div className="skel" style={
 
 function Shell() {
   const { me, setMe, ready, store, switchStore } = useApp();
+  estimatesOnlyFor(me);   // before any screen starts a bill (screens' effects run before this component's)
   const stores = useLiveQuery(() => db.stores.filter(s => !s.deleted && !!s.active).toArray(), [], []);
   const [route, args] = useRoute();
   // the owner's pricing switches (e.g. even sticker rates) apply on this counter as soon as they sync in
@@ -115,10 +124,10 @@ function Shell() {
   useEffect(() => { if (me && companiesQ && companiesQ.length <= 1) setPicked(me.id); }, [me?.id, companiesQ?.length]);
   const [, setKindTick] = useState("");
   useEffect(() => { void companyKind(store).then(k => {
-    setCompanyKind(k); setCompanyOpen(k === "estimate"); setKindTick(store + (k || ""));
+    setCompanyKind(k); setCompanyOpen(k === "estimate" || (k !== "gst" && estimatesOnlyFor(me))); setKindTick(store + (k || ""));
     // GST company dark, estimate company light, so nobody mistakes one for the other (owner, 24 Oct)
     if (k === "gst") document.documentElement.dataset.company = "gst"; else delete document.documentElement.dataset.company;
-  }); }, [store, stores]);
+  }); }, [store, stores, me?.id, me?.updated_at]);
   // the estimate company closes itself after the idle minutes and the app returns to the tax-invoice company (owner, 23 Oct)
   useEffect(() => {
     const back = exitCompany(companiesQ || [], store);
