@@ -46,6 +46,7 @@ const Recheck = lazy(() => import("./pages/Recheck"));
 const RfidCount = lazy(() => import("./pages/RfidCount"));
 const Labels = lazy(() => import("./pages/Labels"));
 const Catalogue = lazy(() => import("./pages/Catalogue"));
+const PhotoRound = lazy(() => import("./pages/PhotoRound"));
 const Racks = lazy(() => import("./pages/Racks"));
 const Move = lazy(() => import("./pages/Move"));
 const Products = lazy(() => import("./pages/Products"));
@@ -70,18 +71,18 @@ const SECTIONS: Sec[] = [
   { key: "home", label: "Home", icon: "home" },
   { key: "purchase", label: "Bill → Stickers", icon: "print" },
   { key: "sell", label: "Sell", icon: "sell", tabs: [["bill", "New bill"], ["bills", "Bills"], ["customers", "Customers"], ["suppliers", "Suppliers"], ["dealers", "Trade orders"], ["vouchers", "Vouchers"]] },
-  { key: "stock", label: "Stock", icon: "stock", tabs: [["products", "Products"], ["add", "Add inventory"], ["stockin", "Stock in"], ["scan", "Scan & record"], ["recheck", "Recheck"], ["rfid", "RFID count"], ["labels", "Labels"], ["catalogue", "Catalogue"], ["racks", "Racks"], ["move", "Move"], ["activity", "Activity"], ["import", "Import"]] },
+  { key: "stock", label: "Stock", icon: "stock", tabs: [["products", "Products"], ["add", "Add inventory"], ["stockin", "Stock in"], ["scan", "Scan & record"], ["recheck", "Recheck"], ["rfid", "RFID count"], ["labels", "Labels"], ["photos", "Photos"], ["catalogue", "Catalogue"], ["racks", "Racks"], ["move", "Move"], ["activity", "Activity"], ["import", "Import"]] },
   { key: "reports", label: "Reports", icon: "sales" },
   { key: "ask", label: "Ask", icon: "ask" },
   { key: "settings", label: "Settings", icon: "settings" },
 ];
-const sectionOf = (r: string) => (["bill", "bills", "customers", "suppliers", "dealers", "vouchers"].includes(r) ? "sell" : ["products", "product", "add", "stockin", "scan", "recheck", "rfid", "labels", "catalogue", "racks", "move", "activity", "import"].includes(r) ? "stock" : r === "ask" || r === "settings" || r === "reports" || r === "purchase" ? r : r === "roles" ? "settings" : "home");
+const sectionOf = (r: string) => (["bill", "bills", "customers", "suppliers", "dealers", "vouchers"].includes(r) ? "sell" : ["products", "product", "add", "stockin", "scan", "recheck", "rfid", "labels", "photos", "catalogue", "racks", "move", "activity", "import"].includes(r) ? "stock" : r === "ask" || r === "settings" || r === "reports" || r === "purchase" ? r : r === "roles" ? "settings" : "home");
 const lastTab: Record<string, string> = { sell: "bill", stock: "products" };
 /* What each screen needs (lib/roles). A tab you can't use is not shown. */
 const ROUTE_PERM: Record<string, string> = {
   bill: "billing.sell", bills: "billing.sell", customers: "customers.manage", suppliers: "suppliers.manage", vouchers: "money.vouchers",
   reports: "reports.view", ask: "ai.use", scan: "stock.in", stockin: "stock.in", recheck: "stock.count", rfid: "stock.count",
-  labels: "labels.print", catalogue: "catalogue.share", racks: "racks.manage", move: "stock.move", products: "stock.view", product: "stock.view",
+  labels: "labels.print", catalogue: "catalogue.share", photos: "catalogue.share", racks: "racks.manage", move: "stock.move", products: "stock.view", product: "stock.view",
   activity: "stock.view", add: "products.edit", dealers: "dealers.manage", import: "import.data", bank: "bank.reconcile", stores: "stores.transfer", roles: "staff.manage",
   settings: "settings.manage", purchase: "purchases.photo",
 };
@@ -200,6 +201,7 @@ function Shell() {
     case "rfid": page = <RfidCount />; break;
     case "labels": page = <Labels args={args} />; break;
     case "catalogue": page = <Catalogue />; break;
+    case "photos": page = <PhotoRound />; break;
     case "racks": page = <Racks args={args} />; break;
     case "move": page = <Move args={args} />; break;
     case "products": page = <Products args={[]} />; break;

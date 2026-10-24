@@ -169,7 +169,7 @@ export default function Home() {
         {can(me, "billing.sell") && <a className="home-job" href="#/bill"><Icon n="sell" size={26} /><span><b>New bill</b><small>Scan stickers, print the bill · F2</small></span></a>}
         {can(me, "purchases.photo") && <a className="home-job" href="#/purchase"><Icon n="print" size={26} /><span><b>Purchase bill → stickers</b><small>Photo of the supplier's bill, print its stickers · F1</small></span></a>}
       </div>
-      <div className="row quick-operations"><a className="btn" href="#/bill">Billing</a><a className="btn" href="#/customers">Customers</a>{me?.role === "owner" && <><a className="btn" href="#/suppliers">Suppliers</a><a className="btn" href="#/vouchers">Daily expenses</a><a className="btn" href="#/reports">Analytics</a></>}<a className="btn" href="#/catalogue">Photo catalogue</a><a className="btn" href="#/purchase">Purchase bills</a></div>
+      <div className="row quick-operations"><a className="btn" href="#/bill">Billing</a><a className="btn" href="#/customers">Customers</a>{me?.role === "owner" && <><a className="btn" href="#/suppliers">Suppliers</a><a className="btn" href="#/vouchers">Daily expenses</a><a className="btn" href="#/reports">Analytics</a></>}<a className="btn" href="#/photos">Photos → customers</a><a className="btn" href="#/purchase">Purchase bills</a></div>
       <DailyTasks />
       {/* KPI tiles */}
       {money && (
