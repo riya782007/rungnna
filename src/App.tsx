@@ -12,6 +12,7 @@ import { companiesFor, companyKind } from "./lib/stores";
 import { setCompanyKind } from "./lib/scope";
 import { setCompanyOpen, getPrivate } from "./lib/privacy";
 import { exitCompany, watchIdle } from "./lib/companyLock";
+import { useShopQueue, isPhoneLike } from "./lib/print-queue";
 import type { Store } from "./lib/db";
 import { VIEW_ROUTES, setViewOpen, useViewOpen } from "./lib/viewCode";
 import { can, roleName } from "./lib/roles";
@@ -251,6 +252,7 @@ function Shell() {
         <main className={"page" + (route === "bill" ? " wide" : "")}>
           <Guard key={store + route + (args[0] || "")}>
             {sec === "stock" && <Suspense fallback={null}><StockAI route={route} /></Suspense>}
+            {route !== "purchase" && <ShopPrintsWaiting />}
             <Suspense fallback={<Loading />}><div className="pagein">{page}</div></Suspense>
           </Guard>
         </main>
@@ -297,4 +299,15 @@ function NoAccess() {
 
 export default function App() {
   return <AppProvider><OwnerGate><Shell /></OwnerGate><Toasts /><AskHost /></AppProvider>;
+}
+
+/* Stickers sent from the owner's phone are waiting (lib/print-queue): said on every screen of a shop computer. */
+function ShopPrintsWaiting() {
+  const q = useShopQueue();
+  if (isPhoneLike() || !q.length) return null;
+  const n = q.reduce((a, x) => a + (x.labels || 0), 0);
+  return <div className="note warn row" role="status" style={{ gap: 8, marginBottom: 10 }}>
+    <span className="grow"><b>{n} sticker{n === 1 ? "" : "s"} sent from {q[0].by || "a phone"}</b> are waiting to print ({q.map(x => x.no).join(", ")}).</span>
+    <a className="btn p sm" href="#/purchase">Print them (F1)</a>
+  </div>;
 }

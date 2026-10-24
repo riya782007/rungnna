@@ -9,7 +9,7 @@ import { Camera, Plus, Trash2 } from "lucide-react";
 import { db, put, uid, now, getSetting, setSetting, type Product, type Purchase } from "../lib/db";
 import { api, blobToB64 } from "../lib/ai";
 import { compress, savePhoto } from "../lib/image";
-import { getRule, type PricingRule } from "../lib/pricing";
+import { getRule, costCode, type PricingRule } from "../lib/pricing";
 import {
   preparePhotoRows, savePhotoPurchase, validatePhotoRows, pricePhotoRows, applyVendorTerms, repricePhotoRows, suspiciousCosts, restoreBillCosts,
   autoArticle, autoArticleCount, draftLabelProducts, combineRepeatedRows, labelCountFor, lineSignature, isSamePage, nextPageNo, readDiscount, readMultiplier, readExtra, applyCosting, spreadExtra, costingOf, type PhotoRow,
@@ -30,14 +30,15 @@ import { checkBill, checkSummary, matchSupplier, fallbackBillNo, type LineFix } 
 import { newParty } from "../lib/billing";
 import { UNITS, UNIT_RE } from "../lib/products";
 import { isPdf, expandPdfs, splitPage, joinParts, srSpan } from "../lib/pdf-pages";
+import { queueForShop, doneAtShop, useShopQueue, isPhoneLike, type RemotePrint } from "../lib/print-queue";
 
 const blank = (pack = "1"): PhotoRow => ({ review_id: uid(), item: "", style: "", color: "", unit: "PCS", hsn: "", qty: "", pack, packSource: "default", stickers: "", cost: "", rate: "" });
-const captions: Record<string, string> = { sr: "Bill Sr.", collection: "Collection / style", material: "Material", item: "Item", style: "Style/article", color: "Colour", unit: "Unit", entry_code: "Reference Code", hsn: "HSN", qty: "Total qty", pack: "Pieces per packet (X)", stickers: "Stickers", cost: "Cost ₹", rate: "Rate ₹" };
+const captions: Record<string, string> = { costcode: "Cost code", sr: "Bill Sr.", collection: "Collection / style", material: "Material", item: "Item", style: "Style/article", color: "Colour", unit: "Unit", entry_code: "Reference Code", hsn: "HSN", qty: "Total qty", pack: "Pieces per packet (X)", stickers: "Stickers", cost: "Cost ₹", rate: "Rate ₹" };
 /* pack = the "X1" / "X3" after the rate on his stickers: pieces in one packet (his old software's QTY box) */
 /* Owner, 24 Oct (call): the order he tallies a bill in — the bill's own serial no., item, quantity, cost, our
    rate, pieces per packet (X), stickers, colour — and the things filled once (reference code, supplier) last. */
 const FIELDS = ["sr", "item", "style", "qty", "cost", "rate", "pack", "stickers", "color", "unit", "entry_code"] as const;
-type Field = (typeof FIELDS)[number] | "collection" | "material";
+type Field = (typeof FIELDS)[number] | "collection" | "material" | "costcode";
 const defaultStickers = (r: PhotoRow) => {
   const qty = Number(r.qty), pack = Number(r.pack || "1");
   return Number.isSafeInteger(qty) && qty > 0 && Number.isSafeInteger(pack) && pack > 0 ? String(Math.ceil(qty / pack)) : "";
@@ -88,7 +89,11 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
   const { me } = useApp();
   const money = can(me, "rates");
   const [more, setMore] = useState(false);
-  const lineFields: Field[] = [...FIELDS.filter(f => money || (f !== "cost" && f !== "rate")), ...(more ? ["collection", "material"] as Field[] : [])];
+  /* Owner, 24 Oct (voice): "today I thought of giving the rates to a boy — he needn't see what everything costs;
+     it should reach him coded". Ticked for "Set selling rates — cost shown only as code": he sets the rates and
+     sees each line's cost only as the shop's cost code. */
+  const coded = !money && can(me, "rates.coded");
+  const lineFields: Field[] = [...FIELDS.flatMap((f): Field[] => money ? [f] : f === "rate" ? (coded ? ["costcode", "rate"] : []) : f === "cost" ? [] : [f]), ...(more ? ["collection", "material"] as Field[] : [])];
   const [d, setD] = useState<Draft>({ store: currentStore(), rows: [], supplier: "", billNo: "", rack: "", warnings: "", total: "" });
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const countFocus = useRef<HTMLInputElement | null>(null);
@@ -191,6 +196,17 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
   const [packetDefault, setPacketDefault] = useState("1"), [bulkPack, setBulkPack] = useState("1"), [bulkQty, setBulkQty] = useState(""), [bulkRef, setBulkRef] = useState("");
   const [rememberPack, setRememberPack] = useState(true), [quantityNote, setQuantityNote] = useState("");
   const [pricing, setPricing] = useState<PricingRule | null>(null);
+  const [atShop, setAtShop] = useState(isPhoneLike());
+  const shopQueue = useShopQueue();
+  useEffect(() => { if (!pricing) void getRule().then(setPricing).catch(() => {}); }, []);
+  const onCosting = (patch: { mult?: string; discount?: string; extra?: string }) => {
+    const next = { ...d, ...patch };
+    if (("mult" in patch && patch.mult !== d.mult) || ("discount" in patch && patch.discount !== d.discount)) {
+      const rows = applyCosting(d.rows, { mult: next.mult, less: next.discount });
+      set({ ...patch, rows }); void price(rows, "Costing changed · ");
+    } else set(patch);
+  };
+  const codeFor = (r: PhotoRow) => { const c = Math.round(Number(r.cost) * 100); return pricing && c > 0 ? costCode(c, pricing, Number(r.pack) || 1, r.unit || "PCS") : "—"; };
   const [cfg, setCfg] = useState<LabelCfg>(DEFAULT_CFG);
   const [jobs, setJobs] = useState<Job[]>([]);          // labels for the purchase just saved
   const printer = useLabelPrint(cfg, setCfg);
@@ -489,6 +505,11 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       setReviewed(false);
       const queue = await jobsFor(p);
       setJobs(queue);
+      if (atShop) {
+        await queueForShop(p, me?.name || "", expandJobs(queue).length);
+        toast(`Purchase ${p.no} saved · ${expandJobs(queue).length} stickers will print at the shop computer`);
+        return;
+      }
       const how = await sendToPrinter(queue, true);
       toast(how === "none" ? `Purchase ${p.no} saved · no stickers requested` : how === "browser" ? `Purchase ${p.no} saved · opening the label print window` : `Purchase ${p.no} saved · starting label printing`);
     } catch (e: any) {
@@ -497,6 +518,25 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
     } finally { lock.current = false; setBusy(false); }
   };
 
+  const printRemote = async (q: RemotePrint) => {
+    setError("");
+    try {
+      const p = await db.purchases.get(q.id);
+      if (!p || p.deleted) { await doneAtShop(q.id); return toast(`${q.no} is not on this computer (deleted, or not synced yet)`, true); }
+      const queue = await jobsFor(p);
+      if (!queue.length) { await doneAtShop(q.id); return toast(`${q.no} has no stickers`, true); }
+      setSaved(p); setJobs(queue);
+      await sendToPrinter(queue, true);
+      await doneAtShop(q.id);
+    } catch (e: any) { setError(e.message || "Printing did not start. Check the printer settings."); }
+  };
+  // a computer with a direct label printer prints phone-sent stickers by itself (nothing to click)
+  const autoDone = useRef(new Set<string>());
+  useEffect(() => {
+    if (isPhoneLike() || printer.busy || !shopQueue.length || !(cfg.output === "tspl" || cfg.output === "qz")) return;
+    const q = shopQueue.find(x => !autoDone.current.has(x.id)); if (!q) return;
+    autoDone.current.add(q.id); void printRemote(q);
+  }, [shopQueue.length, printer.busy, cfg.output]);
   const reprint = async () => {
     if (!jobs.length) return;
     setError("");
@@ -584,6 +624,14 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         onBlob={b => void read([new File([b], `bill-${Date.now()}.jpg`, { type: "image/jpeg" })])} />
     </Suspense>}
 
+    {!isPhoneLike() && !!shopQueue.length && <div className="note stack remote-prints" role="status" style={{ gap: 6 }}>
+      <b>Stickers sent from a phone</b>
+      {shopQueue.map(q => <div key={q.id} className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+        <span className="grow">{q.no}{q.supplier ? " · " + q.supplier : ""} · {q.labels} sticker{q.labels === 1 ? "" : "s"} · from {q.by || "phone"}, {new Date(q.at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
+        <button className="btn p sm" disabled={printer.busy} onClick={() => void printRemote(q)}>Print now</button>
+        <button className="linkbtn" onClick={() => void doneAtShop(q.id)}>Remove</button>
+      </div>)}
+    </div>}
     {saved && !d.rows.length && <div className="note stack saved-purchase" role="status" style={{ gap: 8 }}>
       <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
         <b className="grow">Purchase {saved.no} saved{saved.supplier_name ? " · " + saved.supplier_name : ""} · {expandJobs(jobs).length} label{expandJobs(jobs).length === 1 ? "" : "s"} ready</b>
@@ -693,7 +741,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       <div className="tw purchase-lines" onKeyDown={onPurchaseGridKey}><table className="pos-t"><thead><tr>{["No.", ...lineFields.map(f => captions[f]), ...(more ? ["Photo"] : []), "Supplier S.No.", ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
         {d.rows.map((r, i) => <tr key={r.review_id || i}>
           <td className="line-no" data-l="Line" title="Line number: the same small boxed number printed on this line's stickers"><input type="checkbox" aria-label={"Select purchase line " + (i + 1)} checked={selection.has(r.review_id!)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(r.review_id!) : next.delete(r.review_id!); return next; })} />{r.sr?.trim() ? <span title={"Serial on the supplier's bill (line " + (i + 1) + " here)"}>{r.sr}</span> : i + 1}</td>
-          {lineFields.map(k => <td key={k} data-l={captions[k]}>
+          {lineFields.map(k => k === "costcode" ? <td key={k} data-l={captions[k]} className="mono b" title="The cost as the shop's code (only people allowed to see costs see the rupees)">{codeFor(r)}</td> : <td key={k} data-l={captions[k]}>
             <input className={"in" + ((k === "style" && r.autoStyle) || d.check?.fixes.some(f => f.line === i + 1 && f.field === k) ? " auto-filled" : "") + (k === "cost" && lowCost.includes(i + 1) ? " cost-low" : "")} aria-label={`${k} line ${i + 1}`}
               title={k === "entry_code" ? "Editable maker initial + entry date (DDMMYY). This assumed code does not encode price." : ["qty", "pack", "stickers"].includes(k) ? `Enter copies this ${captions[k].toLowerCase()} to the next line. Type a new number to change it.${k === "stickers" ? " Blank means one per packet; 0 prints none." : ""}` : k === "style" && r.autoStyle ? "The bill printed no article number — this was built from the item and its rate. Edit it if you have the supplier's own code." : undefined}
               inputMode={k === "cost" || k === "rate" ? "decimal" : ["qty", "pack", "stickers"].includes(k) ? "numeric" : undefined}
@@ -728,13 +776,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         <button className="btn" disabled={busy} onClick={() => void price()}>{done.pricing && done.pricingSig === costSig(d.rows) ? "Apply shop pricing again" : "Apply shop pricing"}</button>
         <span>Goods cost ₹{total}</span>
         <label className="f">Supplier payable ₹<input className="in" inputMode="decimal" value={d.total} onChange={e => set({ total: e.target.value })} /></label></div>
-      <BillCosting d={d} busy={busy} onChange={patch => {
-        const next = { ...d, ...patch };
-        if (("mult" in patch && patch.mult !== d.mult) || ("discount" in patch && patch.discount !== d.discount)) {
-          const rows = applyCosting(d.rows, { mult: next.mult, less: next.discount });
-          set({ ...patch, rows }); void price(rows, "Costing changed · ");
-        } else set(patch);
-      }} />
+      <BillCosting d={d} busy={busy} onChange={onCosting} />
 
       {!!lowCost.length && <div className="note bad sm" role="alert">
         <b>Check the cost on line{lowCost.length === 1 ? "" : "s"} {lowCost.join(", ")}:</b> it is less than a tenth of the selling rate. A cost like ₹1.03 against a rate of ₹170 usually means the vendor terms (÷) were applied again and again, or the cost was misread.
@@ -745,6 +787,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       </>}
 
 
+      {coded && <BillCosting d={d} busy={busy} onChange={onCosting} hideRupees />}
       {validation && <div className="note warn" role="status">{validation}</div>}
       {d.warnings && <div className="note warn" style={{ whiteSpace: "pre-wrap" }}>{d.warnings}</div>}
 
@@ -753,6 +796,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       {!!autoFill.length && <div className="xs mut">Approve fills in by itself — {autoFill.join(" · ")}. Change any of them above if you like.</div>}
       <label className="row"><input type="checkbox" checked={reviewed} onChange={e => setReviewed(e.target.checked)} />
         {d.check?.ok ? "The lines add up to the bill. I checked the highlighted cells and the selling rates." : "I checked quantities, units, costs, selling rates and tax/freight differences."} <span className="xs mut">(optional)</span></label>
+      <label className="row"><input type="checkbox" checked={atShop} onChange={e => setAtShop(e.target.checked)} /> Print the stickers at the shop computer (not here)</label>
       <button className="btn p" disabled={!ready4} onClick={approve}>
         {busy ? "Working…" : `Approve: draft ${d.rows.length} product${d.rows.length === 1 ? "" : "s"}${labelCount ? ` & print ${labelCount} label${labelCount === 1 ? "" : "s"}` : " & save purchase"}`}
       </button>
@@ -796,7 +840,7 @@ function BulkEdit({ rows, selection, disabled, onApply }: { rows: PhotoRow[]; se
 }
 
 /* One box per bill for the supplier's own way of pricing (owner, 24 Oct). Changes apply when the box is left. */
-function BillCosting({ d, busy, onChange }: { d: { mult?: string; discount?: string; extra?: string; rows: PhotoRow[] }; busy: boolean; onChange: (p: { mult?: string; discount?: string; extra?: string }) => void }) {
+function BillCosting({ d, busy, onChange, hideRupees = false }: { d: { mult?: string; discount?: string; extra?: string; rows: PhotoRow[] }; busy: boolean; onChange: (p: { mult?: string; discount?: string; extra?: string }) => void; hideRupees?: boolean }) {
   const [v, setV] = useState({ mult: d.mult || "", discount: d.discount || "", extra: d.extra || "" });
   useEffect(() => { setV({ mult: d.mult || "", discount: d.discount || "", extra: d.extra || "" }); }, [d.mult, d.discount, d.extra]);
   const clean = (x: string) => x.replace(/[^0-9.]/g, "").slice(0, 9);
@@ -809,8 +853,8 @@ function BillCosting({ d, busy, onChange }: { d: { mult?: string; discount?: str
   return <fieldset className="purchase-quantity-tools bill-costing">
     <legend>Bill costing <span className="xs mut">— this supplier's way of writing rates</span></legend>
     <div className="row" style={{ flexWrap: "wrap", alignItems: "flex-end", gap: 8 }}>
-      {field("mult", "Multiply ×", "1")}{field("discount", "Less / discount %", "0")}{field("extra", "Packing / freight ₹", "0", 120)}
-      {sample && (c.mult !== 1 || c.less) ? <span className="sm">e.g. printed ₹{sample.billCost ?? sample.cost}{c.mult !== 1 ? ` × ${c.mult}` : ""}{c.less ? ` − ${c.less}%` : ""} = <b>₹{sample.cost}</b> cost</span> : null}
+      {field("mult", "Multiply ×", "1")}{field("discount", "Less / discount %", "0")}{!hideRupees && field("extra", "Packing / freight ₹", "0", 120)}
+      {!hideRupees && sample && (c.mult !== 1 || c.less) ? <span className="sm">e.g. printed ₹{sample.billCost ?? sample.cost}{c.mult !== 1 ? ` × ${c.mult}` : ""}{c.less ? ` − ${c.less}%` : ""} = <b>₹{sample.cost}</b> cost</span> : null}
     </div>
     <div className="xs mut">Multiply and less % change every line's cost now, and the selling rates are worked out again from it. Packing / freight is spread over the lines by value when you approve. All of it is written on the saved purchase.</div>
   </fieldset>;

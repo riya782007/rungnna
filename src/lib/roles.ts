@@ -55,6 +55,7 @@ export const PERMISSION_GROUPS: PermGroup[] = [
   { key: "products", label: "Products & labels", perms: [
     { key: "products.edit", label: "Add / edit products" },
     { key: "rates.view", label: "See cost & set selling rates", desc: "cost codes, purchase cost, margins" },
+    { key: "rates.coded", label: "Set selling rates — cost shown only as code", desc: "for the boy doing rates: he sees the cost code, never the rupees" },
     { key: "labels.print", label: "Print labels" },
   ]},
   { key: "purchases", label: "Purchases & suppliers", perms: [
