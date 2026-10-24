@@ -29,7 +29,7 @@ import { SupplierNo } from "./SupplierNo";
 import { checkBill, checkSummary, matchSupplier, fallbackBillNo, type LineFix } from "../lib/billCheck";
 import { newParty } from "../lib/billing";
 import { UNITS, UNIT_RE } from "../lib/products";
-import { isPdf, expandPdfs, splitPage, joinHalves } from "../lib/pdf-pages";
+import { isPdf, expandPdfs, splitPage, joinParts, srSpan } from "../lib/pdf-pages";
 
 const blank = (pack = "1"): PhotoRow => ({ review_id: uid(), item: "", style: "", color: "", unit: "PCS", hsn: "", qty: "", pack, packSource: "default", stickers: "", cost: "", rate: "" });
 const captions: Record<string, string> = { sr: "Bill Sr.", collection: "Collection / style", material: "Material", item: "Item", style: "Style/article", color: "Colour", unit: "Unit", entry_code: "Reference Code", hsn: "HSN", qty: "Total qty", pack: "Pieces per packet (X)", stickers: "Stickers", cost: "Cost ₹", rate: "Rate ₹" };
@@ -287,21 +287,25 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         for (const f of part) { const { blob } = await compress(f, 2800, 1050000); images.push({ data: await blobToB64(blob), mime: blob.type }); }
         if (files.length > 1) toast(`Reading page ${at + 1} of ${files.length}…`);
         let out = await api<any>("purchase-photo", { images });
-        const seen = Number(out?.lines_on_bill) || 0, first = Array.isArray(out?.rows) ? out.rows.length : 0;
+        const rowsOf = (x: any): any[] => (Array.isArray(x?.rows) ? x.rows : []);
+        let seen = Math.max(Number(out?.lines_on_bill) || 0, srSpan(rowsOf(out)));
+        const first = rowsOf(out).length;
         if (seen > first) {
           toast(`The AI read ${first} of about ${seen} lines — reading the page again…`);
           const second = await api<any>("purchase-photo", { images, retry: { counted: seen, got: first } }).catch(() => null);
-          if (second && Array.isArray(second.rows) && second.rows.length > first) out = second;
-          // still short (owner, 24 Oct: "it doesn't read the whole page, some lines are left"): read the top and
-          // the bottom half of the page separately — fewer lines each, bigger letters — and join them
-          const got = Array.isArray(out?.rows) ? out.rows.length : 0;
+          if (second && rowsOf(second).length > first) out = second;
+          seen = Math.max(seen, Number(second?.lines_on_bill) || 0, srSpan(rowsOf(second)));
+          /* still short (owner, 24 Oct: "the bill was 25 lines, it read 18"): cut the page into strips of about 8
+             lines each, read them all at once, and put the lines together by their bill Sr. numbers */
+          const got = rowsOf(out).length;
           if (got < seen && part.length === 1) {
-            toast(`Still ${got} of ${seen} lines — reading the page in two halves…`);
-            const halves = await splitPage(part[0]).catch(() => null);
-            if (halves) {
-              const read2 = await Promise.all(halves.map(async h => { const { blob } = await compress(h, 2800, 1050000); return api<any>("purchase-photo", { images: [{ data: await blobToB64(blob), mime: blob.type }] }).catch(() => null); }));
-              const joined = joinHalves(read2.map(x => (Array.isArray(x?.rows) ? x.rows : [])));
-              if (joined.length > got) out = { ...out, ...(read2[0] || {}), rows: joined, invoice_total: out.invoice_total || read2[1]?.invoice_total || read2[0]?.invoice_total };
+            const n = Math.min(5, Math.max(2, Math.ceil(seen / 8)));
+            toast(`Still ${got} of ${seen} lines — reading the page in ${n} parts…`);
+            const strips = await splitPage(part[0], n).catch(() => null);
+            if (strips) {
+              const reads = await Promise.all(strips.map(async h => { const { blob } = await compress(h, 2800, 1050000); return api<any>("purchase-photo", { images: [{ data: await blobToB64(blob), mime: blob.type }] }).catch(() => null); }));
+              const joined = joinParts([rowsOf(out), ...reads.map(rowsOf)]);
+              if (joined.length > got) out = { ...out, rows: joined, invoice_total: out.invoice_total || reads.map(x => x?.invoice_total).filter(Boolean).pop(), lines_on_bill: String(seen) };
             }
           }
         }
@@ -350,7 +354,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
             ...(Array.isArray(out.warnings) ? out.warnings.map(String) : []),
             counted > raw.length ? `The AI counted ${counted} lines on ${part.length > 1 ? "these pages" : "this page"} but read only ${raw.length}. Take the photo again (closer, one page at a time) or add the missing lines with + Line.` : "",
             boxes ? `${boxes} line(s) showed a box/packet count. Printed packet sizes, known articles, or your saved packet default fill X automatically; check the quantities below.` : "",
-            fellBack && readBy ? `Read by ${readBy} — an earlier provider was unavailable, so check these lines a little harder than usual.` : "",
+            fellBack && readBy ? `Read by ${readBy} — ${whyFellBack(out.attempts)}. Check these lines a little harder than usual.` : "",
           ].filter(Boolean).join("\n"),
           photoId: current.photoId || await savePhoto(files[0]),
         };
@@ -810,4 +814,19 @@ function BillCosting({ d, busy, onChange }: { d: { mult?: string; discount?: str
     </div>
     <div className="xs mut">Multiply and less % change every line's cost now, and the selling rates are worked out again from it. Packing / freight is spread over the lines by value when you approve. All of it is written on the saved purchase.</div>
   </fieldset>;
+}
+
+/** Why the stronger readers were not used, in plain words (shown on the bill and kept in the purchase note). */
+function whyFellBack(attempts: unknown): string {
+  const list = Array.isArray(attempts) ? attempts.filter((a: any) => a && a.ok === false) : [];
+  const say = (a: any) => {
+    const n = a.provider === "openai" ? "OpenAI" : a.provider === "gemini" ? "Gemini" : "Groq", m = String(a.message || "");
+    if (a.skipped) return `${n} not set up`;
+    if (a.kind === "quota") return `${n} out of credit/quota`;
+    if (a.kind === "timeout") return `${n} too slow`;
+    if (a.kind === "rate_limit") return `${n} busy`;
+    if (/model/i.test(m) && /not.?found|does not exist|deprecat|no longer|unsupported/i.test(m)) return `${n} model not available (${m.slice(0, 80)})`;
+    return `${n}: ${m.slice(0, 90) || "error"}`;
+  };
+  return list.length ? list.map(say).join("; ") : "an earlier provider was unavailable";
 }

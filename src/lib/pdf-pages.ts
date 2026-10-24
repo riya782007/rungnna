@@ -32,16 +32,17 @@ export async function expandPdfs(files: File[]): Promise<File[]> {
   return out;
 }
 
-/** The top and bottom part of a page photo (overlapping a little, so no line is cut in two). */
-export async function splitPage(file: Blob, overlap = 0.12): Promise<File[]> {
+/** A page photo cut into n strips from top to bottom (each overlapping the next a little, so no line is cut in two). */
+export async function splitPage(file: Blob, n = 2, overlap = 0.06): Promise<File[]> {
   const bmp = await createImageBitmap(file);
-  const h = bmp.height, cut = Math.round(h / 2), pad = Math.round(h * overlap / 2);
+  const h = bmp.height, step = h / n, pad = Math.round(h * overlap);
   const parts: File[] = [];
-  for (const [y0, y1] of [[0, cut + pad], [cut - pad, h]]) {
+  for (let i = 0; i < n; i++) {
+    const y0 = Math.max(0, Math.round(i * step) - pad), y1 = Math.min(h, Math.round((i + 1) * step) + pad);
     const c = document.createElement("canvas"); c.width = bmp.width; c.height = y1 - y0;
     c.getContext("2d")!.drawImage(bmp, 0, y0, bmp.width, y1 - y0, 0, 0, bmp.width, y1 - y0);
     const blob = await new Promise<Blob>((ok, bad) => c.toBlob(b => (b ? ok(b) : bad(new Error("crop"))), "image/jpeg", 0.92));
-    parts.push(new File([blob], `half-${y0}.jpg`, { type: "image/jpeg" }));
+    parts.push(new File([blob], `part-${i + 1}.jpg`, { type: "image/jpeg" }));
   }
   bmp.close?.();
   return parts;
@@ -49,14 +50,27 @@ export async function splitPage(file: Blob, overlap = 0.12): Promise<File[]> {
 
 type ReadRow = { sr?: unknown; style?: unknown; qty?: unknown; cost?: unknown; item?: unknown };
 const key = (r: ReadRow) => [String(r.style ?? "").trim().toUpperCase(), String(r.qty ?? "").trim(), String(r.cost ?? "").trim()].join("|");
-/** Lines from the two halves, in page order, without the lines both halves saw in the overlap. */
-export function joinHalves([top, bottom]: ReadRow[][]): ReadRow[] {
-  const out = [...(top || [])];
-  const seenSr = new Set(out.map(r => String(r.sr ?? "").trim()).filter(Boolean)), seenKey = new Set(out.map(key));
-  for (const r of bottom || []) {
-    const sr = String(r.sr ?? "").trim();
-    if (sr ? seenSr.has(sr) : seenKey.has(key(r))) continue;
-    out.push(r);
-  }
-  return out;
+const srNum = (r: ReadRow) => { const m = /^(\d{1,4})$/.exec(String(r.sr ?? "").trim()); return m ? Number(m[1]) : NaN; };
+/** How many lines the bill's own Sr. numbers say there are (28 … 58 = 31), or 0 when they don't run in order. */
+export function srSpan(rows: ReadRow[]): number {
+  const ns = rows.map(srNum).filter(Number.isFinite);
+  if (ns.length < 3 || ns.length < rows.length * 0.8) return 0;
+  const lo = Math.min(...ns), hi = Math.max(...ns);
+  return hi - lo + 1 <= 300 ? hi - lo + 1 : 0;
 }
+/** Lines from several readings of one page, each line once, in the bill's own order. */
+export function joinParts(parts: ReadRow[][]): ReadRow[] {
+  const bySr = new Map<string, ReadRow>(), loose: ReadRow[] = [], seenKey = new Set<string>();
+  for (const part of parts) for (const r of part || []) {
+    const sr = String(r.sr ?? "").trim();
+    if (sr) { if (!bySr.has(sr)) bySr.set(sr, r); continue; }
+    const k = key(r); if (seenKey.has(k)) continue; seenKey.add(k); loose.push(r);
+  }
+  const numbered = [...bySr.values()];
+  if (numbered.every(r => Number.isFinite(srNum(r)))) numbered.sort((a, b) => srNum(a) - srNum(b));
+  // lines without an Sr. that match a numbered one (same article, qty and rate) are the same line
+  const have = new Set(numbered.map(key));
+  return [...numbered, ...loose.filter(r => !have.has(key(r)))];
+}
+/** @deprecated two parts only — kept for older callers */
+export const joinHalves = ([top, bottom]: ReadRow[][]) => joinParts([top, bottom]);

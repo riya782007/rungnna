@@ -31,3 +31,18 @@ describe("bill discount and long pages", () => {
     expect(joinHalves([top, bottom]).map(r => r.sr)).toEqual(["1", "2", "3", "4"]);
   });
 });
+
+import { joinParts, srSpan } from "../src/lib/pdf-pages";
+describe("a page read in parts (owner, 24 Oct: 25 lines, read 18)", () => {
+  const line = (sr: number) => ({ sr: String(sr), style: "S" + sr, qty: "12", cost: "100" });
+  it("puts every line together once, in the bill's order", () => {
+    const full = Array.from({ length: 18 }, (_, i) => line(i + 1));
+    const parts = [[1, 9], [8, 16], [15, 23], [22, 25]].map(([a, b]) => Array.from({ length: b - a + 1 }, (_, i) => line(a + i)));
+    const out = joinParts([full, parts[2], parts[0], parts[3], parts[1]]);
+    expect(out.map(r => r.sr)).toEqual(Array.from({ length: 25 }, (_, i) => String(i + 1)));
+  });
+  it("counts the lines from the bill's own Sr. numbers", () => {
+    expect(srSpan([line(28), line(29), line(45)])).toBe(18);
+    expect(srSpan([{ sr: "" }, { sr: "" }, { sr: "" }])).toBe(0);
+  });
+});
