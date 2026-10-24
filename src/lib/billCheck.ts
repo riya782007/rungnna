@@ -26,6 +26,7 @@ export type BillCheck = {
   rows: ReadRow[];
   fixes: LineFix[];                 // changed, and why: shown and highlighted
   doubts: { line: number; why: string }[];   // could not be settled: the owner decides
+  factor?: number;                  // every Amount on this bill is factor × Qty × Rate (see below)
   sum: number;                      // paise, after fixes
   net?: number;                     // paise, as the bill states it
   addsUp: boolean | null;           // null when the bill states no total
@@ -65,13 +66,27 @@ export function resolveDitto(rows: ReadRow[]): ReadRow[] {
 }
 
 /** Check every line and the total. Returns corrected rows plus what changed and what's in doubt. */
+/* Owner, 24 Oct (call): "the bill says 24, 11, 12 … but the software shows 120, 55, 60". On that supplier's bill
+   every Amount is 5 × Qty × Rate (its own group totals use Qty × Rate), so "fixing" each quantity from its amount
+   multiplied all of them by 5. When most lines share one whole-number factor like that, it is the bill's way of
+   pricing, not a misread: the printed Qty and Rate are kept and the owner is told once. */
+export function sharedFactor(rows: ReadRow[]): number | undefined {
+  const ks = rows.map(r => { const q = wholeQty(r.qty), c = paise(r.cost), a = paise(r.amount); return q && c && a ? a / (q * c) : NaN; }).filter(k => Number.isFinite(k));
+  if (ks.length < 3) return undefined;
+  const counts = new Map<number, number>();
+  for (const k of ks) if (Number.isInteger(k) && k >= 2 && k <= 100) counts.set(k, (counts.get(k) || 0) + 1);
+  const [best, n] = [...counts].sort((a, b) => b[1] - a[1])[0] || [0, 0];
+  return best && n >= 3 && n / ks.length >= 0.6 ? best : undefined;
+}
 export function checkBill(input: ReadRow[], netTotal?: string): BillCheck {
   const fixes: LineFix[] = [], doubts: { line: number; why: string }[] = [];
-  const rows = resolveDitto(input).map((r, i): ReadRow => {
+  const resolved = resolveDitto(input), factor = sharedFactor(resolved);
+  const rows = resolved.map((r, i): ReadRow => {
     const line = i + 1;
     const qty = wholeQty(r.qty), cost = paise(r.cost), amount = paise(r.amount);
     if (amount === undefined || amount === 0) return r;            // the bill gave no amount to check against
     if (qty && cost && qty * cost === amount) return r;            // agrees with itself
+    if (factor && qty && cost && qty * cost * factor === amount) return r;   // the bill's own ×factor pricing
     // exactly one sensible reading fixes the line: take it, and say so
     if (cost && amount % cost === 0 && wholeQty(amount / cost)) {
       const to = String(amount / cost);
@@ -94,11 +109,13 @@ export function checkBill(input: ReadRow[], netTotal?: string): BillCheck {
     if (q && c) sum += q * c;
   }
   const net = paise(netTotal);
-  return { rows, fixes, doubts, sum, net, addsUp: net === undefined ? null : sum === net, pieces };
+  const addsUp = net === undefined ? null : sum === net || (!!factor && sum * factor === net);
+  return { rows, fixes, doubts, sum, net, addsUp, pieces, ...(factor ? { factor } : {}) };
 }
 
 /** The one line the owner reads before approving. */
 export function checkSummary(c: BillCheck): string {
+  if (c.factor) return `${c.rows.length} lines · ${c.pieces} as printed in the Qty column · on this bill every Amount is ${c.factor} × Qty × Rate, so quantities and rates are kept exactly as printed. If one Qty means a set of ${c.factor}, set the packet to ${c.factor}${c.doubts.length ? ` · ${c.doubts.length} line${c.doubts.length > 1 ? "s" : ""} to check` : ""}`;
   const total = `₹${(c.sum / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
   if (c.addsUp === true && !c.doubts.length)
     return `${c.rows.length} lines · ${c.pieces} pieces · adds up to ${total}, the bill's own total${c.fixes.length ? ` (after ${c.fixes.length} correction${c.fixes.length > 1 ? "s" : ""} shown below)` : ""}`;
