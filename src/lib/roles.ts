@@ -1,4 +1,5 @@
 import type { Staff } from "./db";
+import { estimateBilling } from "./company-kind";
 
 /* ===========================================================================
    Roles & permissions — granular, grouped, like the reference console:
@@ -34,7 +35,7 @@ export const PERMISSION_GROUPS: PermGroup[] = [
     { key: "billing.merge", label: "Merge, split & convert bills" },
   ]},
   { key: "estimates", label: "Private estimates", perms: [
-    { key: "estimates.open", label: "Open private estimates" },
+    { key: "estimates.open", label: "Open private estimates (and make estimates in the estimate company)" },
     { key: "estimates.delete", label: "Delete estimates for good" },
   ]},
   { key: "sales", label: "Sales & customers", perms: [
@@ -195,5 +196,7 @@ const LEGACY: Record<Perm, string> = {
   rates: "rates.view", discount: "billing.discount_over", ai: "ai.use", reports: "reports.view", lock: "estimates.open",
 };
 /** can(me, "bill") (original names) or can(me, "stock.move") (any permission key). */
-export const can = (me: (Pick<Staff, "role"> & { role_id?: string; perms?: string[] }) | null | undefined, p: Perm | string) =>
-  permsOf(me).has((LEGACY as Record<string, string>)[p] || p);
+export const can = (me: (Pick<Staff, "role"> & { role_id?: string; perms?: string[] }) | null | undefined, p: Perm | string) => {
+  const set = permsOf(me), key = (LEGACY as Record<string, string>)[p] || p;
+  return set.has(key) || estimateBilling(key, k => set.has(k));
+};

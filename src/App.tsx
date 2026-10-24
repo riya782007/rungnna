@@ -112,7 +112,12 @@ function Shell() {
   const [picked, setPicked] = useState("");
   // one company at sign-in: nothing to choose (and making a second one later doesn't interrupt the work)
   useEffect(() => { if (me && companiesQ && companiesQ.length <= 1) setPicked(me.id); }, [me?.id, companiesQ?.length]);
-  useEffect(() => { void companyKind(store).then(k => { setCompanyKind(k); setCompanyOpen(k === "estimate"); }); }, [store, stores]);
+  const [, setKindTick] = useState("");
+  useEffect(() => { void companyKind(store).then(k => {
+    setCompanyKind(k); setCompanyOpen(k === "estimate"); setKindTick(store + (k || ""));
+    // GST company dark, estimate company light, so nobody mistakes one for the other (owner, 24 Oct)
+    if (k === "gst") document.documentElement.dataset.company = "gst"; else delete document.documentElement.dataset.company;
+  }); }, [store, stores]);
   // the estimate company closes itself after the idle minutes and the app returns to the tax-invoice company (owner, 23 Oct)
   useEffect(() => {
     const back = exitCompany(companiesQ || [], store);
@@ -222,7 +227,7 @@ function Shell() {
           <Status />
           <button className="me" onClick={() => setMe(null)} title="Switch person">
             <span className="av">{me.name.slice(0, 1).toUpperCase()}</span>
-            <span className="grow"><b className="sm">{me.name}</b><small>{roleName(me)} · tap to switch person</small></span><Icon n="user" size={16} />
+            <span className="grow"><b className="sm">{me.name}</b></span><Icon n="user" size={16} />
           </button>
         </div>
       </aside>

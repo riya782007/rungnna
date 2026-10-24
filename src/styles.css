@@ -1119,3 +1119,30 @@ tr.act-estimate td { background: #fde8e8; }
 .pl-bars { display: flex; gap: 8px; align-items: flex-end; height: 120px; }
 .pl-bar { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 4px; }
 .pl-bar span { width: 100%; min-height: 2px; background: var(--emerald); border-radius: 4px 4px 0 0; }
+
+/* Owner, 24 Oct (voice): "when the GST company is open the background should be black, and white for estimates —
+   the two companies must look different". Screen only: printed bills and stickers stay black on white. */
+@media screen {
+  html[data-company="gst"]{
+    --bg:#121016; --surface:#1C1922; --ink:#F2ECE3; --ink-2:#D9D1DF; --muted:#A79FB2; --line:#3A3446; --line-2:#2A2632; --fill:#26222E;
+    --gold-l:#3A3020; --gold-ink:#EBD08E; --emerald-mist:#173A33; --ok:#7FD1BC; --ok-l:#173A33; --bad:#EE9DB2; --bad-l:#3D1F29; --warn:#E8C36D; --warn-l:#3A2E12;
+    --white:#1C1922; --sh:0 1px 2px rgba(0,0,0,.4),0 10px 30px -16px rgba(0,0,0,.7); color-scheme:dark;
+  }
+  html[data-company="gst"] .billing-shell{--pos-accent:#5B9BFF;--pos-accent-d:#3D7FE6;--pos-accent-l:#1D2A44;--focus:#5B9BFF}
+  html[data-company="gst"] :is(.cell:focus,.sugg,.print-notice,.billing-shell .pos-top,.pos-entry,.pos-notes,.pos-scanhead,.pos-lines,.pos-actions,.billing-shell .pos-mbar,.pos-counter-dock,.pos-box-summary,.updatebar .btn){background:var(--surface);color:var(--ink)}
+  html[data-company="gst"] :is(.btn.p,.btn.g,.btn.rec){color:#fff}
+  html[data-company="gst"] .btn.dk,html[data-company="gst"] .chip[aria-pressed="true"]{color:var(--bg)}
+  html[data-company="gst"] .skel{background:linear-gradient(90deg,var(--line-2),var(--fill),var(--line-2));background-size:200% 100%}
+  html[data-company="gst"] .btn.p{background:var(--emerald-lt);border-color:var(--emerald-lt)}
+  html[data-company="gst"] .btn.p:hover{background:var(--emerald)}
+  html[data-company="gst"] .note{color:var(--ok)} html[data-company="gst"] .note.warn{color:var(--warn)} html[data-company="gst"] .note.bad{color:var(--bad)} html[data-company="gst"] .note.ok{color:#7FD1BC}
+  html[data-company="gst"] .home-job b{color:#F7EED8}
+  html[data-company="gst"] .kpi .lbl{background:none;color:inherit;box-shadow:none}
+  html[data-company="gst"] .lastscan:not(.has-item){background:var(--fill);border-left-color:var(--line)}
+  html[data-company="gst"] .subnav{background:rgba(18,16,22,.88)}
+  html[data-company="gst"] .tabs a.on{color:var(--ink)}
+  html[data-company="gst"] .purchase-photo .purchase-lines tbody tr:focus-within>td{background:#2E2A14}
+  html[data-company="gst"] .purchase-photo .purchase-lines tbody td:focus-within{background:#3D3714}
+  html[data-company="gst"] :is(.in,.wedge input,.cell)::placeholder{color:#7D7588}
+  html[data-company="gst"] .sq-part{background:var(--fill)}
+}
