@@ -12,7 +12,7 @@ import { compress, savePhoto } from "../lib/image";
 import { getRule, costCode, type PricingRule } from "../lib/pricing";
 import {
   preparePhotoRows, savePhotoPurchase, validatePhotoRows, pricePhotoRows, applyVendorTerms, repricePhotoRows, suspiciousCosts, restoreBillCosts,
-  autoArticle, autoArticleCount, draftLabelProducts, combineRepeatedRows, labelCountFor, lineSignature, isSamePage, nextPageNo, readDiscount, readMultiplier, readExtra, applyCosting, spreadExtra, costingOf, type PhotoRow,
+  autoArticle, autoArticleCount, draftLabelProducts, combineRepeatedRows, labelCountFor, lineSignature, isSamePage, nextPageNo, continueSr, readDiscount, readMultiplier, readExtra, applyCosting, spreadExtra, costingOf, type PhotoRow,
 } from "../lib/purchase-photo";
 import { applyPhotoQuantities, readCount, repeatPhotoCount, stickersPerPacket, type RepeatedCountField } from "../lib/purchase-quantities";
 import { purchaseLabelJobs } from "../lib/purchase-labels";
@@ -451,7 +451,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       await setSetting(RACK_KEY, rackId);
       // date AND time, so two un-numbered bills on one day never look like the same bill
       const billNoIn = d.billNo.trim() || `EST ${new Date().toLocaleString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).replace(",", "")}`;
-      const filled = fillGaps(d.rows, rule0);
+      const filled = continueSr(fillGaps(d.rows, rule0));
       set({ supplier: supplierId, rack: rackId, billNo: billNoIn, rows: filled });
       const D = { ...d, supplier: supplierId, rack: rackId, billNo: billNoIn };
       // a bill listing the same article twice: add identical lines together instead of refusing

@@ -46,3 +46,11 @@ describe("a page read in parts (owner, 24 Oct: 25 lines, read 18)", () => {
     expect(srSpan([{ sr: "" }, { sr: "" }, { sr: "" }])).toBe(0);
   });
 });
+
+import { continueSr } from "../src/lib/purchase-photo";
+describe("lines typed by hand carry on the bill's Sr. (owner, 25 Oct)", () => {
+  it("numbers them after the highest one read", () => {
+    expect(continueSr([{ sr: "" }, { sr: "17" }, { sr: "18" }, { sr: "" }]).map(r => r.sr)).toEqual(["19", "17", "18", "20"]);
+    expect(continueSr([{ sr: "" }, { sr: "" }]).map(r => r.sr)).toEqual(["", ""]);
+  });
+});

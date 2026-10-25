@@ -189,6 +189,10 @@ export default function Labels({ args }: { args: string[] }) {
   const [form, setForm] = useState<Product>(() => blankProduct(""));
   const [qty, setQty] = useState("1");
   const [copies, setCopies] = useState("1");
+  /* Owner, 25 Oct (voice): "on the bill screen the line number fills itself, but when I make the missing stickers by
+     hand here it starts 1, 2, 3 — the line and the bill's serial don't match". He types the bill's Sr. once; it
+     goes on the sticker and moves to the next number by itself. */
+  const [billSr, setBillSr] = useState("");
   const queueLock = useRef(false);
   const [queueBusy, setQueueBusy] = useState(false);
   const [printError, setPrintError] = useState("");
@@ -275,7 +279,8 @@ export default function Labels({ args }: { args: string[] }) {
     return saved;
     });
     if (!saved) return;
-    const job = { p: saved, qtyOnLabel: Math.max(1, parseInt(qty) || 1), copies: n, line: jobs.length + 1 };
+    const job = { p: saved, qtyOnLabel: Math.max(1, parseInt(qty) || 1), copies: n, line: billSr.trim() || jobs.length + 1 };
+    if (/^\d{1,4}$/.test(billSr.trim())) setBillSr(String(Number(billSr.trim()) + 1));
     setJobs(j => [...j, job]);
     if (print) showStart(printer.start(expandJobs([...jobs, job])));
     toast(`${n} labels queued · ${label(saved)}`);
@@ -360,6 +365,7 @@ export default function Labels({ args }: { args: string[] }) {
                 <label className="f">RATE ₹ {can(me, "rates") && form.cost_code && <span className="xs mut">code {form.cost_code}</span>}
                   <MoneyInput className="in hi mono" paise={form.rate} onPaise={v => { set("rate", v); set("price_locked", 1); }} /></label>
                 <label className="f">QTY (pieces per packet — prints as ₹RATE X QTY PCS)<input className="in mono" inputMode="numeric" value={qty} onChange={e => setQty(e.target.value.replace(/\D/g, ""))} /></label>
+                <label className="f">BILL SR. (line no. on the supplier's bill)<input className="in mono" inputMode="numeric" value={billSr} placeholder={String(jobs.length + 1)} onChange={e => setBillSr(e.target.value.replace(/[^0-9A-Za-z\-/]/g, "").slice(0, 9))} /></label>
                 <label className="f">PRINT QTY (labels)<input className="in mono" inputMode="numeric" value={copies} onChange={e => setCopies(e.target.value.replace(/\D/g, ""))}
                   onKeyDown={e => e.key === "Enter" && addJob()} /></label>
               </div>

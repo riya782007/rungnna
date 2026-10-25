@@ -292,6 +292,13 @@ export function readDiscount(out: { discount_pct?: unknown; discount_amount?: un
   const goods = rows.reduce((a, r) => a + (Number(r.qty) || 0) * (Number(r.cost) || 0), 0);
   return amt > 0 && goods > amt ? String(Math.round(amt / goods * 10000) / 100) : "";
 }
+/** Lines added by hand have no bill Sr.: they take the numbers after the bill's highest one (18 read → 19, 20 …). */
+export function continueSr<T extends { sr?: string }>(rows: T[]): T[] {
+  const nums = rows.map(r => /^\d{1,4}$/.test((r.sr || "").trim()) ? Number(r.sr) : NaN).filter(Number.isFinite);
+  if (!nums.length) return rows;
+  let next = Math.max(...nums);
+  return rows.map(r => ((r.sr || "").trim() ? r : { ...r, sr: String(++next) }));
+}
 export function lineSignature(lines: { style: string; color: string; qty: number; cost: number }[]): string {
   return lines.map(l => [l.style.trim().toUpperCase(), (l.color || "").trim().toUpperCase(), l.qty, Math.round(l.cost)].join("|")).sort().join(";");
 }
