@@ -63,6 +63,10 @@ export function StickerQuickBar({ cfg, onChange }: { cfg: LabelCfg; onChange?: (
           <button key={k} type="button" className="chip" aria-pressed={k === "ref" ? !!(cfg.show.ref ?? cfg.show.style) : !!cfg.show[k]}
             onClick={() => { const on = k === "ref" ? (cfg.show.ref ?? cfg.show.style) : !!cfg.show[k]; void apply({ show: { ...cfg.show, [k]: !on } }, `${label} ${on ? "off" : "on"}`); }}>{label}</button>))}
       </div>
+      {cfg.mode === "roll" && cfg.cols > 1 && <div className="sq-row">
+        <span className="sq-h">New line</span>
+        <button type="button" className="chip" aria-pressed={cfg.newRow ?? true} onClick={() => void apply({ newRow: !(cfg.newRow ?? true) }, (cfg.newRow ?? true) ? "Lines run on" : "Each line on a new row")}>Each line starts a new row (blanks left)</button>
+      </div>}
       {/* where each thing sits, top to bottom (owner, 22 Oct) */}
       <div className="sq-row sq-order">
         <span className="sq-h">Order, top to bottom</span>

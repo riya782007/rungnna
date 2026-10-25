@@ -125,7 +125,11 @@ export type AIPart = { text: string } | { image: { mime: string; data: string } 
 export const DEFAULT_ORDER: AIProvider[] = ["openai", "gemini", "groq"];
 
 export const geminiConfigured = () => !!env("GEMINI_API_KEY");
-export const geminiModel = () => env("GEMINI_MODEL") || "gemini-2.5-flash";
+/* 25 Oct: Google closed "gemini-2.5-flash" to new users ("This model … is no longer available to new users"), so
+   every bill fell through to Groq. "gemini-flash-latest" always points at Google's current Flash model; if a
+   model is refused as retired, the next one in this list is tried in the same request. */
+export const GEMINI_FALLBACKS = ["gemini-flash-latest", "gemini-3-flash", "gemini-2.5-flash"];
+export const geminiModel = () => env("GEMINI_MODEL") || GEMINI_FALLBACKS[0];
 /* Groq's one model that reads images (console.groq.com/docs/vision, checked Oct 2026). The model
    that used to fill this role, Llama 4 Scout, was shut down on 17 Jul 2026. Groq retires models
    often, so GROQ_VISION_MODEL overrides this without a deploy, and "off" turns photos off for Groq. */
@@ -192,17 +196,23 @@ async function chatGemini(parts: AIPart[], o: { system?: string; json?: boolean;
     generationConfig: { temperature: o.temperature ?? 0.2, ...(o.json ? { responseMimeType: "application/json" } : {}) },
   };
   if (o.system) body.systemInstruction = { parts: [{ text: o.system }] };
-  let r: Response;
-  try {
-    r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${geminiModel()}:generateContent`, {
-      method: "POST", headers: { "content-type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify(body), signal: AbortSignal.timeout(o.timeoutMs ?? 45_000),
-    });
-  } catch (e: any) {
-    const t = /timeout|abort/i.test(String(e?.name || e?.message));
-    throw new ProviderError("groq", 504, t ? "timeout" : "error", t ? "gemini took too long" : `gemini unreachable: ${e?.message || e}`);
+  const models = [...new Set([geminiModel(), ...GEMINI_FALLBACKS])];
+  let r!: Response, j: any = {};
+  for (const model of models) {
+    try {
+      r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: "POST", headers: { "content-type": "application/json", "x-goog-api-key": key },
+        body: JSON.stringify(body), signal: AbortSignal.timeout(o.timeoutMs ?? 45_000),
+      });
+    } catch (e: any) {
+      const t = /timeout|abort/i.test(String(e?.name || e?.message));
+      throw new ProviderError("groq", 504, t ? "timeout" : "error", t ? "gemini took too long" : `gemini unreachable: ${e?.message || e}`);
+    }
+    j = await r.json().catch(() => ({}));
+    // a retired or unknown model: try the next one; anything else (quota, bad photo) is the answer
+    const retired = !r.ok && (r.status === 404 || /no longer available|not found|is not supported|deprecated/i.test(String(j?.error?.message || "")));
+    if (!retired) break;
   }
-  const j: any = await r.json().catch(() => ({}));
   if (!r.ok) throw new ProviderError("groq", r.status, classify(r.status, j), j?.error?.message || `gemini error ${r.status}`);
   const text = (j?.candidates?.[0]?.content?.parts || []).map((x: any) => x.text || "").join("");
   if (!text.trim()) throw new ProviderError("groq", 502, "error", "gemini returned an empty answer");

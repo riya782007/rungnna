@@ -47,6 +47,7 @@ export type LabelCfg = {
   qr: number; font: number; pad: number; offX: number; offY: number;
   shop: string; format: "shop" | "rungnna"; layout: "shop" | "stack"; show: { shop: boolean; item: boolean; style: boolean; color: boolean; rate: boolean; tk: boolean; code: boolean; qty: boolean; cost_code: boolean; line?: boolean; ref?: boolean; collection?: boolean; material?: boolean };
   order?: string[];      // the parts top to bottom (lib/label-order); missing = the usual order
+  newRow?: boolean;      // each bill line starts on a fresh row of the roll (default on; blanks fill the row)
   batch?: number;        // stickers handed to the printer at a time (0 = all at once) — see lib/labelBatches
   testFirst?: boolean;   // a long run starts with one test row (only until this computer's setup is confirmed)
   pauseBatches?: boolean; // wait for "Print next" after every batch (default: carry on by itself)
@@ -107,7 +108,20 @@ export const DEFAULT_CFG: LabelCfg = {
   cur: "9",
 };
 
-export type Job = { p: Product; qtyOnLabel: number; copies: number; line?: number | string; labelIndex?: number; bag?: BagLabel; sourceQr?: string };   // line: see lib/purchase-labels
+export type Job = { p: Product; qtyOnLabel: number; copies: number; line?: number | string; labelIndex?: number; bag?: BagLabel; sourceQr?: string; blank?: boolean };   // line: see lib/purchase-labels; blank: a sticker left empty
+/* Owner, 25 Oct (photo + voice): on the 3-across roll one item's stickers ran on into the next item's row ("② ② ①").
+   "If a blank has to be left, leave it blank": each new line starts on a fresh row; the rest of the row stays empty. */
+export function padLines<T extends { p: { id: string }; line?: number | string; blank?: boolean }>(list: T[], cols: number): T[] {
+  if (cols <= 1) return list;
+  const out: T[] = [];
+  const key = (j: T) => `${j.line ?? ""}|${j.p.id}`;
+  for (const j of list) {
+    const prev = out[out.length - 1];
+    if (prev && key(prev) !== key(j)) while (out.length % cols) out.push({ ...prev, blank: true });
+    out.push(j);
+  }
+  return out;
+}
 export type PrintStartResult = { started: true } | { started: false; message: string; cancelled?: boolean };
 /** One entry per sticker, in queue order (capped at 5000). */
 export const expandJobs = (jobs: Job[]) => jobs.flatMap(j => Array.from({ length: Math.max(0, Math.min(5000, j.copies)) }, () => j)).slice(0, 5000);
@@ -564,8 +578,9 @@ export function useLabelPrint(cfg: LabelCfg, onConfig?: (config: LabelCfg) => vo
     }
     // start receives an expanded queue: every entry represents ONE sticker,
     // even when it originated in a purchase job with copies greater than one.
-    const queue = list.map((j, index) => ({ ...j, p: { ...j.p }, copies: 1, labelIndex: j.labelIndex ?? index }));
     const selected = configOverride || cfg;
+    const padded = selected.mode === "roll" && (selected.newRow ?? true) ? padLines(list, selected.cols) : list;
+    const queue = padded.map((j, index) => ({ ...j, p: { ...j.p }, copies: 1, labelIndex: j.labelIndex ?? index }));
     const config: LabelCfg = { ...selected, output: selected.output === "qz" ? "qz" : direct ? "tspl" : selected.output || "browser", show: { ...selected.show } };
     const verified = okSig === printerSig(config);
     const raw = config.output === "qz" || config.output === "tspl" || direct;
@@ -577,7 +592,7 @@ export function useLabelPrint(cfg: LabelCfg, onConfig?: (config: LabelCfg) => vo
       } else if (raw) tscCommands(config, queue.slice(0, 1));
     } catch (e: any) { return rejectStart(e.message || "Review printer settings and sticker quantities"); }
     // each old-format QR printed is written onto its product, so billing finds that product in one scan
-    void rememberPrintedQrs(queue, config.format || "shop").catch(() => {});
+    void rememberPrintedQrs(queue.filter(j => !j.blank), config.format || "shop").catch(() => {});
     const unit = config.mode === "roll" ? config.cols : config.cols * config.rows;
     const blank = config.mode === "sheet" && queue.length % unit ? unit - queue.length % unit : 0;
     if (blank && !confirm(`The printer feeds a whole page of ${unit} stickers at a time.\n\n${queue.length} labels leave ${blank} stickers blank on the last page.\n\nPrint anyway?`)) return rejectStart("Printing was cancelled. The labels remain ready to print.", true);
@@ -729,7 +744,7 @@ export function PrintSheet({ cfg, jobs }: { cfg: LabelCfg; jobs: Job[] }) {
         <div key={i} style={{ position: "relative", width: pageW + "mm", height: (cfg.driverPaper ? cfg.h - 0.6 : cfg.h) + "mm", overflow: "hidden", pageBreakAfter: i === rows.length - 1 ? "auto" : "always", breakAfter: i === rows.length - 1 ? "auto" : "page" }}>
           {r.map((j, k) => {
             const x = cfg.offX + k * (cfg.w + cfg.gapX), w = Math.min(cfg.w, (cfg.edgeR ?? 1e9) - x);
-            return <div key={k} style={{ position: "absolute", left: x + "mm", top: cfg.offY + "mm" }}>
+            return j.blank ? null : <div key={k} style={{ position: "absolute", left: x + "mm", top: cfg.offY + "mm" }}>
               <LabelView cfg={w < cfg.w ? { ...cfg, w } : cfg} p={j.p} qtyOnLabel={j.qtyOnLabel} line={j.line} bag={j.bag} sourceQr={j.sourceQr} labelIndex={j.labelIndex ?? i * cfg.cols + k} /></div>;
           })}
         </div>))}
@@ -743,7 +758,7 @@ export function PrintSheet({ cfg, jobs }: { cfg: LabelCfg; jobs: Job[] }) {
       <div key={i} style={{ width: cfg.sheetW + "mm", height: cfg.sheetH + "mm", position: "relative", pageBreakAfter: i === pages.length - 1 ? "auto" : "always", breakAfter: i === pages.length - 1 ? "auto" : "page", overflow: "hidden" }}>
         {pg.map((j, k) => {
           const b = cellBox(cfg, k % cfg.cols, Math.floor(k / cfg.cols));
-          return <div key={k} style={{ position: "absolute", left: b.x + "mm", top: b.y + "mm" }}>
+          return j.blank ? null : <div key={k} style={{ position: "absolute", left: b.x + "mm", top: b.y + "mm" }}>
             <LabelView cfg={b.w < cfg.w ? { ...cfg, w: b.w } : cfg} p={j.p} qtyOnLabel={j.qtyOnLabel} line={j.line} bag={j.bag} sourceQr={j.sourceQr} labelIndex={j.labelIndex ?? i * per + k} /></div>;
         })}
       </div>))}

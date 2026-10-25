@@ -101,6 +101,7 @@ export async function buildLabelBitmapJob(cfg: LabelCfg, jobs: PurchaseLabelJob[
   // Validate and decode everything before producing a printable byte stream.
   for (const row of rows) for (let col = 0; col < row.length; col++) {
     const job = row[col], w = labelBitmapCell(cfg, col).w;
+    if (job.blank) continue;   // a sticker left empty (each line starts a new row)
     let sizes = pictures.get(job);
     if (!sizes) { sizes = new Map(); pictures.set(job, sizes); }
     if (!sizes.has(w)) {
@@ -114,6 +115,7 @@ export async function buildLabelBitmapJob(cfg: LabelCfg, jobs: PurchaseLabelJob[
   for (const row of rows) {
     ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, width, height); ctx.imageSmoothingEnabled = false;
     row.forEach((job, col) => {
+      if (job.blank) return;
       const cell = labelBitmapCell(cfg, col), cellX = dots(cell.x), cellWidth = dots(cell.w);
       ctx.save(); ctx.beginPath(); ctx.rect(cellX, 0, cellWidth, height); ctx.clip();
       ctx.drawImage(pictures.get(job)!.get(cell.w)!, cellX, dots(cell.y), cellWidth, height); ctx.restore();

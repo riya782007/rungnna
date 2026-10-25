@@ -197,6 +197,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
   const [rememberPack, setRememberPack] = useState(true), [quantityNote, setQuantityNote] = useState("");
   const [pricing, setPricing] = useState<PricingRule | null>(null);
   const [atShop, setAtShop] = useState(isPhoneLike());
+  const [already, setAlready] = useState<{ p: Purchase; labels: number; lines: number } | null>(null);
   const shopQueue = useShopQueue();
   useEffect(() => { if (!pricing) void getRule().then(setPricing).catch(() => {}); }, []);
   const onCosting = (patch: { mult?: string; discount?: string; extra?: string }) => {
@@ -469,15 +470,31 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       // the same supplier bill was saved before: don't save it twice, print its labels again
       const billNo = D.billNo.trim().toUpperCase();
       const pages = await db.purchases.filter(x => !x.deleted && x.status === "final" && x.supplier_id === D.supplier && (x.supplier_bill.trim().toUpperCase() === billNo || x.supplier_bill.trim().toUpperCase().startsWith(billNo + " P"))).toArray();
-      const now = checked.map(r => ({ style: r.style, color: r.color, qty: r.qty, cost: r.cost }));
-      const before = pages.find(x => isSamePage(x.items, now));
-      // same bill no., new lines: the next page of that bill, saved under its own page number
-      if (!before && pages.length) { D.billNo = nextPageNo(D.billNo, pages.map(x => x.supplier_bill)); set({ billNo: D.billNo }); toast(`Next page of bill ${billNo} — saved as ${D.billNo}`); }
+      /* Owner, 25 Oct: "it goes to print by itself". Lines of this bill already saved (on any page) are never
+         saved or printed again: only the new lines become the next page. When every line is already saved, nothing
+         prints by itself — he chooses to print that bill's stickers again, or to clear the screen. */
+      const savedKey = (l: { style: string; color?: string; qty: number }) => [l.style.trim().toUpperCase(), (l.color || "").trim().toUpperCase(), l.qty].join("|");
+      const have = new Set(pages.flatMap(x => x.items).map(savedKey));
+      const freshIdx = checked.map((r, i) => (have.has(savedKey(r)) ? -1 : i)).filter(i => i >= 0);
+      const before = pages.length && !freshIdx.length ? pages[pages.length - 1] : undefined;
+      if (before) {
+        const queue = await jobsFor(before);
+        setAlready({ p: before, labels: expandJobs(queue).length, lines: checked.length });
+        toast(`All ${checked.length} lines of bill ${D.billNo} are already saved (${before.no}) — nothing printed`);
+        return;
+      }
+      let saveRows = rows;
+      if (pages.length) {
+        const skipped = checked.length - freshIdx.length;
+        saveRows = freshIdx.map(i => rows[i]);
+        D.billNo = nextPageNo(D.billNo, pages.map(x => x.supplier_bill)); set({ billNo: D.billNo });
+        toast(skipped ? `${skipped} line${skipped === 1 ? " was" : "s were"} already saved on ${pages.map(x => x.no).join(", ")} — saving the other ${freshIdx.length} as ${D.billNo}` : `Next page of bill ${billNo} — saved as ${D.billNo}`);
+      }
       // the same lines saved recently under another bill no. or supplier: print those stickers again rather
       // than adding the stock and the supplier's amount a second time
       const sig = lineSignature(checked.map(r => ({ style: r.style, color: r.color, qty: r.qty, cost: r.cost })));
       const since = new Date(Date.now() - 30 * 86400000).toISOString();
-      const twin = before ? undefined : await db.purchases.filter(x => !x.deleted && x.status === "final" && (x.store_id || currentStore()) === currentStore() && x.at >= since
+      const twin = pages.length ? undefined : await db.purchases.filter(x => !x.deleted && x.status === "final" && (x.store_id || currentStore()) === currentStore() && x.at >= since
         && x.items.length === checked.length && lineSignature(x.items.map(l => ({ style: l.style, color: l.color, qty: l.qty, cost: l.cost }))) === sig).last();
       if (twin && confirm(`This looks like ${twin.no}, saved ${new Date(twin.at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}${twin.supplier_name ? " · " + twin.supplier_name : ""} · bill ${twin.supplier_bill}: the same ${checked.length} line${checked.length === 1 ? "" : "s"} and pieces.\n\nOK — print its stickers again (stock is NOT added again).\nCancel — it is a different bill: save it as a new purchase.`)) {
         const queue = await jobsFor(twin);
@@ -487,15 +504,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         toast(`${twin.no} · ${how === "browser" ? "opening its labels to print" : "printing its labels again"} · stock not added again`);
         return;
       }
-      if (before) {
-        const queue = await jobsFor(before);
-        setSaved(before); setJobs(queue); await setSetting(LAST, { id: before.id });
-        if (!queue.length) { toast(`Bill ${D.billNo} was already saved as ${before.no} · it has no stickers`); return; }
-        const how = await sendToPrinter(queue, true);
-        toast(`Bill ${D.billNo} was already saved as ${before.no} · ${how === "browser" ? "opening its labels to print" : "printing its labels again"}`);
-        return;
-      }
-      const p = await savePhotoPurchase(rows, { by, rack: D.rack, supplierId: D.supplier, billNo: D.billNo, photoId: d.photoId, invoiceTotal: d.total, note: [cst.mult !== 1 || pct || cst.extra ? `Bill costing: printed rate${cst.mult !== 1 ? ` × ${cst.mult}` : ""}${pct ? ` − ${pct}% less` : ""}${cst.extra ? ` + ₹${cst.extra} packing/freight spread over the lines` : ""}` : "", d.warnings, d.total ? "Supplier invoice total (as printed): " + d.total : ""].filter(Boolean).join("\n") });
+      const p = await savePhotoPurchase(saveRows, { by, rack: D.rack, supplierId: D.supplier, billNo: D.billNo, photoId: d.photoId, invoiceTotal: d.total, note: [cst.mult !== 1 || pct || cst.extra ? `Bill costing: printed rate${cst.mult !== 1 ? ` × ${cst.mult}` : ""}${pct ? ` − ${pct}% less` : ""}${cst.extra ? ` + ₹${cst.extra} packing/freight spread over the lines` : ""}` : "", d.warnings, d.total ? "Supplier invoice total (as printed): " + d.total : ""].filter(Boolean).join("\n") });
       savedPurchase = p;
       setSaved(p); setBulkQty(""); setBulkRef(""); setQuantityNote("");
       await setSetting(LAST, { id: p.id });
@@ -788,6 +797,14 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
 
 
       {coded && <BillCosting d={d} busy={busy} onChange={onCosting} hideRupees />}
+      {already && <div className="note warn stack" role="alert" style={{ gap: 6 }}>
+        <b>All {already.lines} lines of this bill are already saved as {already.p.no}{already.p.supplier_bill ? ` (bill ${already.p.supplier_bill})` : ""}.</b>
+        <span className="sm">Nothing was saved or printed again. If this photo has lines that are missing, add them with + Line and approve again.</span>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <button className="btn" disabled={printer.busy} onClick={async () => { const q = await jobsFor(already.p); setSaved(already.p); setJobs(q); setAlready(null); try { await sendToPrinter(q, true); } catch (e: any) { setError(e.message); } }}>Print its {already.labels} stickers again</button>
+          <button className="btn p" onClick={() => { set({ rows: [], billNo: "", total: "", discount: "", mult: "", extra: "", warnings: "", check: undefined, photoId: undefined }); setAlready(null); }}>Clear — take the next bill</button>
+        </div>
+      </div>}
       {validation && <div className="note warn" role="status">{validation}</div>}
       {d.warnings && <div className="note warn" style={{ whiteSpace: "pre-wrap" }}>{d.warnings}</div>}
 

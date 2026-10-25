@@ -5,7 +5,7 @@ import { aliasFor, defaultRef } from "./old-codes";
 
 /* `line` = the line of the supplier's bill these labels are for, printed small on each sticker so whoever is
    labelling knows which goods (which line of the bill) a sticker goes on. */
-export type PurchaseLabelJob = { p: Product; qtyOnLabel: number; copies: number; line?: number | string; labelIndex?: number; bag?: BagLabel; sourceQr?: string };
+export type PurchaseLabelJob = { p: Product; qtyOnLabel: number; copies: number; line?: number | string; labelIndex?: number; bag?: BagLabel; sourceQr?: string; blank?: boolean };
 export function productForLabel(p: Product, qtyOnLabel: number): Product {
   // every printed label (screen, TSC and the QR inside) carries the even rate
   // the old software's item code and REF the owner chose for this name, so the old software reads the sticker too

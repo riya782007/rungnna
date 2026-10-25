@@ -36,3 +36,13 @@ describe("sticker order", () => {
     expect(labelLines(look, p, 1).map(l => l.text)).toEqual(["K5210"]);
   });
 });
+
+import { padLines } from "../src/pages/Labels";
+describe("each bill line starts a new row on the 3-across roll (owner, 25 Oct)", () => {
+  it("fills the rest of the row with blanks when the next line starts", () => {
+    const j = (id: string, line: number) => ({ p: { id }, line });
+    const out = padLines([j("a", 2), j("a", 2), j("a", 2), j("a", 2), j("b", 1), j("b", 1)], 3);
+    expect(out.map(x => (x.blank ? "_" : x.line)).join("")).toBe("222" + "2__" + "11");
+    expect(padLines([j("a", 1), j("b", 2)], 1).length).toBe(2);
+  });
+});
