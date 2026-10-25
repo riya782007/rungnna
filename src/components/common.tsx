@@ -47,7 +47,7 @@ export function Thumb({ photo_id, url, text, size = 48 }: { photo_id?: string; u
 }
 
 /* Opens the phone's back camera directly; compresses to <100 KB before saving. */
-export function PhotoButton({ value, onChange, label = "Photo", webcam = false }: { value?: string; onChange: (photo_id: string | undefined) => void; label?: string; webcam?: boolean }) {
+export function PhotoButton({ value, onChange, label = "Photo", webcam = false, disabled = false, onBusyChange }: { value?: string; onChange: (photo_id: string | undefined) => void; label?: string; webcam?: boolean; disabled?: boolean; onBusyChange?: (busy: boolean) => void }) {
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [camera, setCamera] = useState(false);
@@ -57,12 +57,12 @@ export function PhotoButton({ value, onChange, label = "Photo", webcam = false }
       <input ref={ref} type="file" accept="image/*" capture={webcam ? undefined : "environment"} hidden
         onChange={async e => {
           const f = e.target.files?.[0]; if (!f) return;
-          setBusy(true); try { onChange(await savePhoto(f)); } finally { setBusy(false); e.target.value = ""; }
+          setBusy(true); onBusyChange?.(true); try { onChange(await savePhoto(f)); } finally { setBusy(false); onBusyChange?.(false); e.target.value = ""; }
         }} />
-      <button type="button" className="btn sm" onClick={() => ref.current?.click()} disabled={busy}>
+      <button type="button" className="btn sm" onClick={() => ref.current?.click()} disabled={busy || disabled}>
         {busy ? "Saving…" : webcam ? "Upload photo" : value ? "Retake " + label.toLowerCase() : <><Icon n="camera" size={17} />{label}</>}
       </button>
-      {webcam && <button type="button" className="btn sm" onClick={() => setCamera(true)} disabled={busy}><Icon n="camera" size={17} />Take photo</button>}
+      {webcam && <button type="button" className="btn sm" onClick={() => setCamera(true)} disabled={busy || disabled}><Icon n="camera" size={17} />Take photo</button>}
       {camera && <Suspense fallback={<div role="status">Opening camera…</div>}><CustomerCamera onPhoto={onChange} onClose={() => setCamera(false)} /></Suspense>}
       {value && <DeleteButton className="btn sm bad" onDelete={async () => { if (await confirmDelete("Remove this photo?")) onChange(undefined); }}>Remove</DeleteButton>}
     </div>

@@ -95,6 +95,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
   const coded = !money && can(me, "rates.coded");
   const lineFields: Field[] = [...FIELDS.flatMap((f): Field[] => money ? [f] : f === "rate" ? (coded ? ["costcode", "rate"] : []) : f === "cost" ? [] : [f]), ...(more ? ["collection", "material"] as Field[] : [])];
   const [d, setD] = useState<Draft>({ store: currentStore(), rows: [], supplier: "", billNo: "", rack: "", warnings: "", total: "" });
+  const [photoUploads, setPhotoUploads] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const countFocus = useRef<HTMLInputElement | null>(null);
   useLayoutEffect(() => {
@@ -436,6 +437,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
 
   /* THE one approval: drafts the products, records the purchase, and sends the labels — one press. */
   const approve = async () => {
+    if (photoUploads.size) return;
     if (lock.current) return;
     lock.current = true; setBusy(true); setError("");
     let savedPurchase: Purchase | null = null;
@@ -699,9 +701,9 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
           onChange={e => set({ billNo: e.target.value, autoBillNo: false })} /></label>
         <RackPicker value={d.rack} onChange={rack => set({ rack })} /></div>
 
-      <label className="row sm" style={{ gap: 6 }}><input type="checkbox" checked={more} onChange={e => setMore(e.target.checked)} /> More details: collection / style, material and a photo for each line</label>
+      <label className="row sm" style={{ gap: 6 }}><input type="checkbox" checked={more} onChange={e => setMore(e.target.checked)} /> More details: collection / style and material</label>
       <div className="selection-bar"><SelectAll ids={d.rows.map(r => r.review_id!)} selected={selection} onChange={setSelection} label="Select all purchase lines" /><span className="sm">{d.rows.filter(r => selection.has(r.review_id!)).length} selected</span><DeleteButton className="btn sm bad" disabled={busy || !d.rows.some(r => selection.has(r.review_id!))} onDelete={() => removeRows(d.rows.filter(r => selection.has(r.review_id!)).map(r => r.review_id!))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }}>Keys: ↑↓ lines · ←→ fields · Space select · Shift+↑↓ range</span></div>
-      <div className="tw purchase-lines" onKeyDown={onPurchaseGridKey}><table className="pos-t"><thead><tr>{["No.", ...lineFields.map(f => captions[f]), ...(more ? ["Photo"] : []), "Supplier S.No.", ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
+      <div className="tw purchase-lines" onKeyDown={onPurchaseGridKey}><table className="pos-t"><thead><tr>{["No.", ...lineFields.map(f => captions[f]), "Jewellery photo", "Supplier S.No.", ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
         {d.rows.map((r, i) => <tr key={r.review_id || i}>
           <td className="line-no" data-l="Line" title="Line number: the same small boxed number printed on this line's stickers"><input type="checkbox" aria-label={"Select purchase line " + (i + 1)} checked={selection.has(r.review_id!)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(r.review_id!) : next.delete(r.review_id!); return next; })} />{r.sr?.trim() ? <span title={"Serial on the supplier's bill (line " + (i + 1) + " here)"}>{r.sr}</span> : i + 1}</td>
           {lineFields.map(k => k === "costcode" ? <td key={k} data-l={captions[k]} className="mono b" title="The cost as the shop's code (only people allowed to see costs see the rupees)">{codeFor(r)}</td> : <td key={k} data-l={captions[k]}>
@@ -723,7 +725,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
                 } catch (error: any) { setError(error.message); }
               } : undefined}
               style={{ minWidth: k === "item" ? 130 : ["style", "entry_code", "collection", "material"].includes(k) ? 110 : 56 }} /></td>)}
-          {more && <td data-l="Photo"><PhotoButton value={r.photo_id} onChange={v => set({ rows: d.rows.map((x, k) => k === i ? { ...x, photo_id: v } : x) })} label="" /></td>}
+          <td data-l="Jewellery photo"><PhotoButton value={r.photo_id} disabled={busy} onBusyChange={uploading => setPhotoUploads(old => { const next = new Set(old); uploading ? next.add(r.review_id!) : next.delete(r.review_id!); return next; })} onChange={v => set({ rows: draftRef.current.rows.map(x => x.review_id === r.review_id ? { ...x, photo_id: v } : x) })} label="Photo" /></td>
           <td data-l="Supplier S.No." className="supplier-number mono" title="Saved supplier roll number">{vendor?.vendor_code || "—"}</td>
           <td><DeleteButton className="iconbtn" aria-label="Remove line" disabled={busy} onDelete={() => removeRows([r.review_id!])}><Trash2 size={16} /></DeleteButton></td>
         </tr>)}</tbody></table></div>
@@ -822,7 +824,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       <label className="row"><input type="checkbox" checked={reviewed} onChange={e => setReviewed(e.target.checked)} />
         {d.check?.ok ? "The lines add up to the bill. I checked the highlighted cells and the selling rates." : "I checked quantities, units, costs, selling rates and tax/freight differences."} <span className="xs mut">(optional)</span></label>
       <label className="row"><input type="checkbox" checked={atShop} onChange={e => setAtShop(e.target.checked)} /> Print the stickers at the shop computer (not here)</label>
-      <button className="btn p" disabled={!ready4} onClick={approve}>
+      <button className="btn p" disabled={!ready4 || !!photoUploads.size} onClick={approve}>
         {busy ? "Working…" : `Approve: draft ${d.rows.length} product${d.rows.length === 1 ? "" : "s"}${labelCount ? ` & print ${labelCount} label${labelCount === 1 ? "" : "s"}` : " & save purchase"}`}
       </button>
       {!busy && !!missing.length && <div className="sm bad-text" role="status">To approve: {missing.join(" · ")}</div>}

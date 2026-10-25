@@ -1201,3 +1201,118 @@ tr.act-estimate td { background: #fde8e8; }
   html[data-company="gst"] .pos-lines{--bg:#FAF6EF;--surface:#FFFFFF;--ink:#241B2E;--ink-2:#3D3346;--muted:#6B6175;--line:#E7DBC6;--line-2:#F1E9DA;--fill:#F2EADA;color:var(--ink);background:#fff;color-scheme:light}
   html[data-company="gst"] .pos-lines .cell{color:var(--ink)}
 }
+
+/* Packing-slip counter: full-width rows, familiar columns, checkout underneath. */
+.billing-shell .pos-main{display:flex;flex-direction:column;align-items:stretch;min-height:0;gap:8px}
+.billing-shell .pos>.pos-entry{flex:none;padding:6px 8px}
+.billing-shell .pos-workspace{height:auto!important;min-height:0;gap:0!important}
+.billing-shell .pos-lines{min-height:140px}
+.billing-shell .pos-lines .pos-t{table-layout:fixed;min-width:960px}
+.billing-shell .pos-lines .pos-t th:nth-child(1){width:32px}
+.billing-shell .pos-lines .pos-t th:nth-child(2){width:44px}
+.billing-shell .pos-lines .pos-t th:nth-child(3){width:auto}
+.billing-shell .pos-lines .pos-t th:nth-child(4){width:60px}
+.billing-shell .pos-lines .pos-t th:nth-child(5){width:140px}
+.billing-shell .pos-lines .pos-t th:nth-child(6){width:105px}
+.billing-shell .pos-lines .pos-t th:nth-child(7){width:78px}
+.billing-shell .pos-lines .pos-t th:nth-child(8){width:60px}
+.billing-shell .pos-lines .pos-t th:nth-child(9){width:78px}
+.billing-shell .pos-lines .pos-t th:nth-child(10){width:58px}
+.billing-shell .pos-lines .pos-t th:nth-child(11){width:96px}
+.billing-shell .pos-lines .pos-t th:nth-child(12){width:54px}
+.billing-shell .pos-lines .pos-t td{overflow-wrap:anywhere;font-size:14px;padding:2px 5px}
+.billing-shell .pos-lines .pos-t .cell{max-width:100%;padding:0 3px;min-height:28px;height:28px}
+.billing-shell .pos-lines .pos-t th{font-size:12px;white-space:nowrap}
+.billing-shell .pos-line-actions{white-space:nowrap}
+.billing-shell .pos-line-actions input{margin:0 3px 0 0;vertical-align:middle}
+.billing-shell .pos-line-actions .x{display:inline-grid;width:21px;height:28px;font-size:14px;vertical-align:middle}
+.billing-shell .pos-sum{position:static;max-height:none;overflow:visible;display:grid;grid-template-columns:minmax(200px,1.2fr) minmax(230px,1.15fr) minmax(190px,.95fr) minmax(270px,1.3fr);grid-template-areas:'boxes actions payments amounts';gap:12px;padding:10px;align-items:start;flex:none}
+.billing-shell .counter-box-tools{grid-area:boxes;gap:6px}
+.billing-shell .counter-actions{grid-area:actions}
+.billing-shell .counter-amounts{grid-area:amounts;gap:3px;padding-left:10px;border-left:1px solid var(--line)}
+.billing-shell .counter-payments{grid-area:payments;gap:6px;padding-left:10px;border-left:1px solid var(--line)}
+.billing-shell .pos-sum .pos-box-summary{position:static;margin:0;padding:4px 0;background:var(--surface);box-shadow:none;border-bottom:1px solid var(--line)}
+.billing-shell .pos-box-totals{max-height:72px;overflow:auto}
+.billing-shell .pos-sum .pos-notes{padding:0;border:0}
+.billing-shell .pos-sum .pos-notes .in{height:32px;font-size:12px}
+.billing-shell .pos-actions{display:grid;grid-template-columns:1fr 1fr;gap:5px;overflow:visible;padding:0 10px 0 0;border:0;border-right:1px solid var(--line);background:var(--surface)}
+.billing-shell .pos-actions .btn{padding:0 6px;font-size:12px;height:32px;min-width:0;white-space:nowrap}
+.billing-shell .pos-actions select.in{grid-column:1/-1;min-width:0;max-width:none;width:100%;height:32px;min-height:32px;font-size:12px}
+.billing-shell .pos-actions-bags{grid-column:1/-1;margin:0;justify-content:space-between}
+.billing-shell .pos-actions-bags .sm{font-size:12px}
+.billing-shell .pos-sum .sumrow{font-size:13px;min-height:25px}
+.billing-shell .pos-sum .cell{height:26px;padding:0 5px}
+.billing-shell .pos-sum .net{padding:5px 0;margin:0;border-bottom:0}
+.billing-shell .pos-sum .net b{font-size:28px}
+.billing-shell .pos-sum .chips{gap:4px}
+.billing-shell .pos-sum .chip{height:26px;padding:0 6px;font-size:12px}
+.billing-shell .pos-sum .selection-bar{padding:4px;gap:4px;font-size:11px}
+.billing-shell .pos-sum .selection-bar .keys-hint{display:none}
+.billing-shell .pos-sum .selection-bar .btn{height:26px;padding:0 5px;font-size:11px}
+@media(min-width:1100px) and (min-height:700px){
+  .billing-shell{height:100dvh;min-height:0;overflow:hidden}
+  .billing-shell .main{min-height:0;overflow:hidden}
+  .billing-shell .subnav{position:static;flex:none;min-height:48px;padding-block:6px}
+  .billing-shell .page{flex:1;min-height:0;padding:8px 12px;overflow:hidden}
+  .billing-shell .pagein,.billing-shell .pos{height:100%;min-height:0}
+  .billing-shell .pos{gap:6px;padding-bottom:0}
+  .billing-shell .pos-main{flex:1;min-height:0}
+  .billing-shell .pos-workspace{flex:1;min-height:100px;overflow:hidden}
+  .billing-shell .pos-lines{flex:1;min-height:100px;overflow:auto}
+  .billing-shell .pos-counter-dock{position:static;flex:none}
+  .billing-shell .pos-mbar{display:none}
+  .billing-shell .fkeys{display:none}
+}
+@media(max-width:1099px){
+  .billing-shell .pos-sum{grid-template-columns:1fr 1fr;grid-template-areas:'boxes amounts' 'actions payments'}
+  .billing-shell .pos-main{flex:none}
+}
+@media(max-width:860px){
+  .billing-shell .pos-sum{grid-template-columns:1fr;grid-template-areas:'boxes' 'amounts' 'payments' 'actions'}
+  .billing-shell .counter-payments,.billing-shell .counter-amounts{border:0;padding:0}
+  .billing-shell .pos-lines .pos-t{min-width:0;table-layout:auto}
+  .billing-shell .pos-lines .pos-t,.billing-shell .pos-lines tbody{display:block;width:100%}
+  .billing-shell .pos-lines .pos-t tr.ln{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));padding:10px;gap:8px}
+  .billing-shell .pos-lines .pos-t tr.ln td{display:flex;order:0;grid-column:auto;align-items:flex-start;font-size:14px}
+  .billing-shell .pos-lines .pos-t tr.ln td:nth-child(3){grid-column:span 2}
+  .billing-shell .pos-lines .pos-t tr.ln td:nth-child(11){grid-column:span 2;align-items:flex-end;font-weight:700;font-size:18px}
+  .billing-shell .pos-lines .pos-t tr.ln td:nth-child(12){flex-direction:row;justify-content:flex-end;align-items:center}
+  .billing-shell .pos-lines .pos-t tr.ln td:nth-child(3)::before{display:block}
+}
+
+/* Manual stickers: the working fields and print action fit together at the counter. */
+.label-manual>header{flex-wrap:wrap;gap:8px;align-items:center}
+.label-manual>header .btn{height:36px;padding:0 12px;font-size:13px}
+.label-manual-fields{align-items:start;gap:10px}
+.label-manual-fields .label-advanced{grid-column:1/-1}
+.label-manual-fields .label-advanced>.grid{padding-top:8px}
+.label-manual-fields .label-item-photo .btn{height:34px;padding:0 10px;font-size:12px}
+.label-manual-fields .label-item-photo img{object-fit:cover}
+.purchase-lines td[data-l="Jewellery photo"]{min-width:92px}
+.purchase-lines td[data-l="Jewellery photo"] .btn{padding:0 8px;font-size:12px;height:30px}
+@media(min-width:861px){
+  .label-manual>.pad{padding:12px}
+  .label-manual-fields{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .label-manual-fields .f{font-size:12px;gap:3px}
+  .label-manual-fields .in{height:36px;padding:0 8px;font-size:14px}
+  .label-manual-fields .label-advanced>.grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media(min-width:1400px){.label-manual-fields{grid-template-columns:repeat(5,minmax(0,1fr))}}
+@media(min-width:861px){
+  .label-counter>.head{margin:0 0 8px;align-items:center}
+  .label-counter>.head .h1{font-size:24px;line-height:1.2}
+  .label-counter>.head p{font-size:12px;margin-top:2px!important}
+  .label-counter>.head .btn{height:34px;font-size:12px}
+  .label-counter .label-dock{padding:8px 12px;margin-bottom:8px;gap:12px}
+  .label-counter .label-dock .labelprev{padding:0}
+  .label-counter .label-dock .lbl{zoom:1}
+  .label-counter .label-dock .btn{height:34px;font-size:12px}
+  .label-counter .label-dock .sm{font-size:12px}
+  .label-counter .label-manual>header{padding:8px 12px}
+  .label-counter .label-manual>.pad{gap:8px}
+  .label-counter .label-manual .wedge{height:36px}
+  .label-counter .label-manual .wedge input{font-size:14px}
+  .label-counter .label-manual-fields{gap:8px}
+  .label-counter .label-manual .label-advanced summary{padding:2px 0;font-size:12px}
+  .label-counter .label-manual .sm{font-size:12px}
+}

@@ -41,7 +41,7 @@ export function SupplierNo<T extends Sup>({ suppliers, id, onPick, label = "Supp
   const listId = "roll-nos";
   return (
     <label className="f">{label}
-      <input className="in mono" value={text} list={listId} placeholder="e.g. 51" autoComplete="off"
+      <input className="in mono" aria-label={label} value={text} list={listId} placeholder="e.g. 51" autoComplete="off"
         onChange={e => { const t = e.target.value.toUpperCase(); setText(t); onPick(findRollNo(suppliers, t)); }} />
       <datalist id={listId}>{sorted.filter(s => s.vendor_code).map(s => <option key={s.id} value={s.vendor_code} />)}</datalist>
       {text.trim()

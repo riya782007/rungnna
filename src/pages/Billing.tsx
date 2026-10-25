@@ -51,7 +51,7 @@ export default function Billing({ args }: { args: string[] }) {
   const { me } = useApp();
   // the custom-item row stays open on the counter PC; phones open it with "Add item"
   // the hand-entry row opens with "Add item" (F8); closed it leaves the screen to the bill's lines (owner, 25 Oct)
-  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(() => !window.matchMedia("(max-width:860px)").matches);
   const [moreOpen, setMoreOpen] = useState(false);
   const [moneyMore, setMoneyMore] = useState(false);
   useEffect(() => { void getSetting<boolean>("bill_more_open", false).then(setMoreOpen); }, []);
@@ -590,7 +590,7 @@ export default function Billing({ args }: { args: string[] }) {
       if (k === "F9") doSave(true);
       if (k === "F10") doSave(false, true);
       if (k === "F11") boxSummaryRef.current?.focus({ preventScroll: true });
-      if (k === "F12") advanceRef.current?.focus();
+      if (k === "F12") { setMoneyMore(true); setTimeout(() => advanceRef.current?.focus(), 0); }
     };
     addEventListener("keydown", f); return () => removeEventListener("keydown", f);
   });
@@ -689,16 +689,18 @@ export default function Billing({ args }: { args: string[] }) {
             </div>
       </div>
 
-      <div className="pos-main">
-        <div className="stack pos-workspace" style={{ minWidth: 0 }}>
           {(cam && !small || editorOpen) && <div className="pos-entry stack" style={{ gap: 8 }}>
             {cam && !small && <div className="pos-cam"><CameraScanner onCode={c => onCode(c)} /></div>}
             {editorOpen && itemEditor}
           </div>}
 
+      <div className="pos-main">
+        <div className="stack pos-workspace" style={{ minWidth: 0 }}>
+
+
           <NameItemCodes codes={unnamed} onNamed={(code, name, unit) => setB(x => x && { ...x, items: x.items.map(l =>
             (l.item === "ITEM " + code || (!l.item && l.product_id && pmap.get(l.product_id)?.item_code === code)) ? { ...l, item: name, type: unit } : l) })} />
-          {selectedLines.size > 0 && <div className="selection-bar"><SelectAll ids={t.items.map(l => l.id)} selected={selectedLines} onChange={setSelectedLines} label="Select all bill lines" /><span className="sm">{t.items.filter(l => selectedLines.has(l.id)).length} selected</span><DeleteButton className="btn sm bad" disabled={saving || !t.items.some(l => selectedLines.has(l.id))} onDelete={() => dropLines(t.items.filter(l => selectedLines.has(l.id)).map(l => l.id))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }}>Keys: ↑↓ rows · ←→ fields · Space select · Shift+↑↓ range</span></div>}
+
           {(() => { const stuck = t.items.filter(l => qtyProblem.includes(l.id) && noQty(l)); return stuck.length ? (
             <div className="note bad pos-qty-problem" role="alert">
               <b>Not saved — quantity missing on {stuck.length === 1 ? "this line" : stuck.length + " lines"}:</b> {stuck.slice(0, 3).map(l => [l.item, l.style].filter(Boolean).join(" ")).join(", ")}{stuck.length > 3 ? "…" : ""}. Enter the quantity, or remove the line, then save / print again.
@@ -708,14 +710,15 @@ export default function Billing({ args }: { args: string[] }) {
             </div>) : null; })()}
           <div className="tw pos-lines" ref={linesPane} role="region" aria-label="Bill items" tabIndex={0} onKeyDown={onGridKey}>
             <table className="pos-t" aria-label="Bill items">
-              <thead><tr><th>#</th><th>Box</th><th>Item · Style · Colour</th><th className="r">Pkt</th><th className="r">Qty</th><th className="r">Rate</th><th className="r">Disc</th><th className="r">Amount</th><th /></tr></thead>
+              <thead><tr><th>#</th><th>Box</th><th>Item</th><th>Type</th><th>Style</th><th>Colour / Art no.</th><th className="r">Pkt</th><th className="r">Qty</th><th className="r">Rate</th><th className="r">Disc</th><th className="r">Amount</th><th>{!small && <SelectAll compact ids={t.items.map(l => l.id)} selected={selectedLines} onChange={setSelectedLines} label="Select all bill lines" />}</th></tr></thead>
               <tbody>
                 {displayOrder(t.items).map(l => [l, t.items.indexOf(l)] as const).map(([l, i]) => (
                   <tr key={l.id} className={"ln" + (lastScanId === l.id ? " scanned" : "") + (flashId === l.id ? " flash" : "") + (noQty(l) ? (qtyProblem.includes(l.id) ? " noqty stop" : " noqty") : "")} aria-current={lastScanId === l.id ? "true" : undefined} ref={row => { if (row) rowRefs.current.set(l.id, row); else rowRefs.current.delete(l.id); }}>
-                    <td className="mut" data-l="#"><input type="checkbox" aria-label={"Select bill line " + (i + 1)} checked={selectedLines.has(l.id)} onChange={event => setSelectedLines(old => { const next = new Set(old); event.target.checked ? next.add(l.id) : next.delete(l.id); return next; })} /><span className="line-no">{i + 1}</span></td>
+                    <td className="mut" data-l="#"><span className="line-no">{i + 1}</span></td>
                     <td data-l="Box"><input className="cell" style={{ width: 38 }} inputMode="numeric" value={l.box_no} onChange={e => setLine(l.id, { box_no: Math.max(1, parseInt(e.target.value) || 1) })}
                       onBlur={() => setB(x => x ? { ...x, items: mergeBoxLine(x.items, l.id) } : x)} /></td>
-                    <td data-l=""><input className="cell" style={{ width: "100%", fontWeight: 700 }} title={l.item} aria-label={`Product name for line ${i + 1}`} placeholder="Product name" value={/^ITEM\s+\d+$/i.test(l.item || "") ? "" : l.item || ""} onChange={e => setLine(l.id, { item: e.target.value })} /> <span className="mono">{l.style}</span> <span className="mut">{l.color} · {l.type}</span>{!l.product_id && <span className="pill">Custom</span>}{l.product_id && pmap.get(l.product_id)?.tk?.trim() ? <span className="pill warn" style={{ marginLeft: 6 }}>dead stock</span> : null}</td>
+                    <td data-l=""><input className="cell" style={{ width: "100%", fontWeight: 700 }} title={l.item} aria-label={`Product name for line ${i + 1}`} placeholder="Product name" value={/^ITEM\s+\d+$/i.test(l.item || "") ? "" : l.item || ""} onChange={e => setLine(l.id, { item: e.target.value })} />{!l.product_id && <span className="pill">Custom</span>}{l.product_id && pmap.get(l.product_id)?.tk?.trim() ? <span className="pill warn" style={{ marginLeft: 6 }}>dead stock</span> : null}</td>
+                    <td data-l="Type">{l.type}</td><td data-l="Style" className="mono">{l.style || "—"}</td><td data-l="Colour / Art no.">{l.color || "—"}</td>
                     <td className="r" data-l="Packets">{l.pack > 1 ? <span className="row" style={{ gap: 2, justifyContent: "flex-end", flexWrap: "nowrap" }}>
                       <input className="cell r" style={{ width: 44 }} inputMode="numeric" value={l.pkts || ""} onChange={e => setLine(l.id, { pkts: parseInt(e.target.value) || 0 })} /><span className="xs mut">×{l.pack}</span></span> : <span className="mut">—</span>}</td>
                     <td className="r" data-l={l.type || "Quantity"}><input className="cell r" style={{ width: 56 }} inputMode="numeric" value={l.qty || ""} disabled={l.pack > 1 && l.pkts > 0}
@@ -723,18 +726,32 @@ export default function Billing({ args }: { args: string[] }) {
                     <td className="r" data-l="Rate"><MoneyInput className="cell r" style={{ width: 70 }} disabled={!can(me, "billing.rates") && !!(l.product_id && pmap.get(l.product_id)?.rate)} paise={l.rate} onPaise={v => setLine(l.id, { rate: v })} /></td>
                     <td className="r" data-l="Disc"><input className={"cell r" + (discError(l.disc) ? " bad" : "")} style={{ width: 54 }} placeholder="—" title={discError(l.disc) || "10% or amount"} value={l.disc} onChange={e => setLine(l.id, { disc: e.target.value })} /></td>
                     <td className="r mono b" data-l="Amount">{(l.amount / 100).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-                    <td data-l=""><DeleteButton className="x" aria-label="Remove line" onDelete={() => dropLines([l.id])}>✕</DeleteButton></td>
+                    <td data-l="Select" className="pos-line-actions"><input type="checkbox" aria-label={"Select bill line " + (i + 1)} checked={selectedLines.has(l.id)} onChange={event => setSelectedLines(old => { const next = new Set(old); event.target.checked ? next.add(l.id) : next.delete(l.id); return next; })} /><DeleteButton className="x" aria-label="Remove line" onDelete={() => dropLines([l.id])}>✕</DeleteButton></td>
                   </tr>))}
-                {!t.items.length && <tr><td colSpan={9} className="mut" style={{ padding: 28, textAlign: "center" }}>No items yet</td></tr>}
+                {!t.items.length && <tr><td colSpan={12} className="mut" style={{ padding: 28, textAlign: "center" }}>No items yet</td></tr>}
               </tbody>
             </table>
           </div>
-          <div className="pos-notes">
+
+        </div>
+
+        <aside className="pos-sum card" aria-label="Bill totals and payment">
+          <div className="counter-box-tools stack">          <div className="pos-notes">
             <label className="f"><input className="in" aria-label="Remarks" value={b.remarks} onChange={e => set({ remarks: e.target.value })} placeholder="Remarks — transport, marka, instructions…" /></label>
           </div>
-          {/* Print / save actions sit under the lines (counter request 21/10/2026): the right
-              panel keeps only the box summary and the money, so it needs no scrolling. */}
-          <div className="pos-actions" aria-label="Print and save">
+
+          {selectedLines.size > 0 && <div className="selection-bar"><span className="sm">{t.items.filter(l => selectedLines.has(l.id)).length} selected</span><DeleteButton className="btn sm bad" disabled={saving || !t.items.some(l => selectedLines.has(l.id))} onDelete={() => dropLines(t.items.filter(l => selectedLines.has(l.id)).map(l => l.id))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }}>Keys: ↑↓ rows · ←→ fields · Space select · Shift+↑↓ range</span></div>}
+{small && <SelectAll ids={t.items.map(l => l.id)} selected={selectedLines} onChange={setSelectedLines} label="Select all bill lines" />}
+          <section className="pos-box-summary" ref={boxSummaryRef} tabIndex={-1} aria-label="Box summary">
+            <b>Box summary</b> <span className="xs mut">— tap a box to put the next scans in it</span>
+            <div className="pos-box-totals">{boxes.map(n => <button key={n} className="chip" aria-pressed={n === box} onClick={() => setBox(n)} aria-label={`Box ${n}, quantity ${t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}`}>
+              Box {n} · <b>{t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}</b> qty
+            </button>)}</div>
+          </section>
+          <div className="sumrow"><span>Pieces · Boxes</span><b className="mono">{t.total_qty} · {t.box_count}</b></div>
+          {b.rfid_tags?.length ? <div className="sumrow"><span>RFID tags</span><b className="mono">{b.rfid_tags.length}</b></div> : null}
+          </div>
+          <div className="counter-actions">          <div className="pos-actions" aria-label="Print and save">
             <select className="in" aria-label="Print size" title="Roll printer: choose 58 mm or 80 mm thermal to match your paper. Enable auto-cut in the printer's preferences." value={fmt} onChange={e => { setFmt(e.target.value as PrintFormat); setSetting("print_fmt", e.target.value); }}>
               <option value="a5">A5 invoice</option><option value="a4">A4 invoice</option><option value="80mm">80 mm thermal</option><option value="58mm">58 mm thermal</option><option value="packing">Packing slip (no rates)</option></select>
             <button className="btn" disabled={saving} onClick={doHold}>Hold · F3</button>
@@ -747,19 +764,9 @@ export default function Billing({ args }: { args: string[] }) {
               <button className="btn" disabled={saving || !t.items.length} onClick={() => doSave(false, false, true)}>Bag stickers</button>
             </span>
             {lastSaved && (priv || !isEstimate(lastSaved)) && <button className="linkbtn sm" onClick={() => go("bills/" + lastSaved.id)}>View saved {lastSaved.bill_type === "estimate" ? "estimate" : lastSaved.bill_type === "gst" ? "tax invoice" : "challan"} {lastSaved.no}</button>}
-          </div>
-        </div>
-
-        <aside className="pos-sum card">
-          <section className="pos-box-summary" ref={boxSummaryRef} tabIndex={-1} aria-label="Box summary">
-            <b>Boxes</b> <span className="xs mut">— tap a box to put the next scans in it</span>
-            <div className="pos-box-totals">{boxes.map(n => <button key={n} className="chip" aria-pressed={n === box} onClick={() => setBox(n)} aria-label={`Box ${n}, quantity ${t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}`}>
-              Box {n} <b>{t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}</b>
-            </button>)}</div>
-          </section>
-          <div className="sumrow"><span>Pieces · Boxes</span><b className="mono">{t.total_qty} · {t.box_count}</b></div>
-          {b.rfid_tags?.length ? <div className="sumrow"><span>RFID tags</span><b className="mono">{b.rfid_tags.length}</b></div> : null}
-          <div className="sumrow"><span>Gross</span><b className="mono">{billAmount(t.gross)}</b></div>
+          </div></div>
+          <div className="counter-amounts stack">
+          <div className="sumrow"><span>Total amount</span><b className="mono">{billAmount(t.gross)}</b></div>
           {/* Owner, 23 Oct: he typed 50 for a 50% discount (his old software's discount box is a percentage; half
               the sticker rate is the wholesale rate) and it took off ₹50 from the small "Amount" box. Percent is
               now the main box, first and labelled; a rupee amount is the smaller "or ₹" box. */}
@@ -780,11 +787,13 @@ export default function Billing({ args }: { args: string[] }) {
           {t.igst ? <div className="xs mut" style={{ textAlign: "right" }}>IGST (other state)</div> : t.gst ? <div className="xs mut" style={{ textAlign: "right" }}>CGST {billAmount(t.cgst)} + SGST {billAmount(t.sgst)}</div> : null}
           {t.adjust ? <div className="sumrow"><span>Round off</span><span className="mono">{billAmount(t.adjust)}</span></div> : null}
           <div className="net"><span>{b.bill_type === "challan" ? "VALUE" : "NET"}</span><b>{billAmount(t.net)}</b></div>
+          </div><div className="counter-payments stack">
           {b.bill_type === "challan" ? <div className="note sm">A challan sends the goods out with no money taken. Convert it to an invoice from Bills when the customer is billed.</div> : <>
           {(moneyMore || !!b.advance) ? <div className="sumrow"><span>Advance</span><MoneyInput inputRef={advanceRef} className="cell r" style={{ width: 80 }} paise={b.advance} onPaise={v => set({ advance: v })} /></div>
             : <button type="button" className="linkbtn xs" style={{ alignSelf: "flex-end" }} onClick={() => setMoneyMore(true)}>+ Packing / advance</button>}
           <Payments pays={b.payments} left={t.net - b.advance} onChange={payments => set({ payments })} />
           <div className={"sumrow " + (balance > 0 ? "due" : "")}><span>{balance > 0 ? "Balance (credit)" : balance < 0 ? "Return to customer" : "Balance"}</span><b className="mono">{billAmount(Math.abs(balance))}</b></div></>}
+          </div>
         </aside>
       </div>
 

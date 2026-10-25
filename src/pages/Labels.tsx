@@ -11,7 +11,7 @@ import { db, getSetting, setSetting, recordMovement, type Product } from "../lib
 import { ownPayload, parseLabel } from "../lib/parse";
 import { blankProduct, saveProduct, findByScan, fromParsed, fillFromItemCode, distinct, DEFAULT_ITEMS, DEFAULT_TYPES, label, itemCodeFor, labelCodeProblem, itemMap, rememberPrintedQrs } from "../lib/products";
 import { VERIFIED_ITEM_CODES, verifiedCodeFor } from "../lib/verified-labels";
-import { Head, DeadToggle , MoneyInput } from "../components/common";
+import { Head, DeadToggle, MoneyInput, PhotoButton } from "../components/common";
 import { RackPicker } from "../components/RackPicker";
 import { SupplierNo } from "../components/SupplierNo";
 import { WedgeInput } from "../components/Scanner";
@@ -187,6 +187,9 @@ export default function Labels({ args }: { args: string[] }) {
   useEffect(() => { void itemMap(); }, []);   // load the shop's own item names for the label check
   const [queueSelection, setQueueSelection] = useState<Set<string>>(new Set());
   const [form, setForm] = useState<Product>(() => blankProduct(""));
+  const styleInput = useRef<HTMLInputElement>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [lastJob, setLastJob] = useState<Job | null>(null);
   const [qty, setQty] = useState("1");
   const [copies, setCopies] = useState("1");
   /* Owner, 25 Oct (voice): "on the bill screen the line number fills itself, but when I make the missing stickers by
@@ -249,16 +252,16 @@ export default function Labels({ args }: { args: string[] }) {
   const set = (k: keyof Product, v: any) => setForm(f => ({ ...f, [k]: v }));
 
   const addJob = async (print = false) => {
-    if (queueLock.current || printer.busy) return;
+    if (queueLock.current || printer.busy || photoBusy) return;
     if (!form.item && !form.style) { toast("Fill ITEM or STYLE first", true); return; }
     if (addStock && !loc) return toast("Choose the rack the new stock goes to", true);
     const n = Number(copies), packet = Number(qty);
     if (!Number.isSafeInteger(n) || n < 1 || n > 5000 || !Number.isSafeInteger(packet) || packet < 1 || packet > 1000000) return toast("Check packet quantity and print quantity (1–5000)", true);
-    if (jobs.reduce((sum, j) => sum + j.copies, 0) + n > 5000) return toast("Print this queue before adding more than 5000 labels", true);
+    if (!print && jobs.reduce((sum, j) => sum + j.copies, 0) + n > 5000) return toast("Print this queue before adding more than 5000 labels", true);
     queueLock.current = true; setQueueBusy(true);
     try {
     const legacyCode = form.item_code || await itemCodeFor(form.item);
-    if (print) validateLabelPrint(cfg, [...jobs, { p: { ...form, item_code: legacyCode || undefined, item: form.item || "Pending" }, qtyOnLabel: packet, copies: n }]);
+    if (print) validateLabelPrint(cfg, [{ p: { ...form, item_code: legacyCode || undefined, item: form.item || "Pending" }, qtyOnLabel: packet, copies: n }]);
     const saved = await db.transaction("rw", [db.products, db.config, db.settings, db.stock, db.locations, db.movements, db.outbox], async () => {
     // make sure the product exists so a scan of the new QR always finds it
     const existing = form.style ? await findByScan(form.code, { raw: form.code, how: "x", tokens: [], style: form.style, color: form.color, item: form.item }) : undefined;
@@ -268,7 +271,7 @@ export default function Labels({ args }: { args: string[] }) {
       ? { ...existing, rate: form.rate || existing.rate, tk: form.tk || existing.tk, pack, item_code: existing.item_code || item_code,
           // carry the new pricing / vendor / keying fields onto the matched product
           cost: form.cost || existing.cost, cost_code: form.cost_code || existing.cost_code, price_locked: form.price_locked ?? existing.price_locked,
-          model: form.model || existing.model, vendor_id: form.vendor_id || existing.vendor_id, vendor_name: form.vendor_name || existing.vendor_name }
+          model: form.model || existing.model, vendor_id: form.vendor_id || existing.vendor_id, vendor_name: form.vendor_name || existing.vendor_name, photo_id: form.photo_id || existing.photo_id }
       : { ...form, pack, item_code, created_by: form.created_by || me?.id || "" };
     const saved = await saveProduct({ ...p, rate: evenRate(p.rate) });   // same even rate as the label it prints
     if (!saved.item.trim()) throw new Error("Enter the product name before printing labels");
@@ -281,10 +284,11 @@ export default function Labels({ args }: { args: string[] }) {
     if (!saved) return;
     const job = { p: saved, qtyOnLabel: Math.max(1, parseInt(qty) || 1), copies: n, line: billSr.trim() || jobs.length + 1 };
     if (/^\d{1,4}$/.test(billSr.trim())) setBillSr(String(Number(billSr.trim()) + 1));
-    setJobs(j => [...j, job]);
-    if (print) showStart(printer.start(expandJobs([...jobs, job])));
-    toast(`${n} labels queued · ${label(saved)}`);
-    setForm(blankProduct(me?.id || "")); setQty("1"); setCost("");
+    setLastJob(job);
+    if (print) showStart(printer.start(expandJobs([job]))); else setJobs(j => [...j, job]);
+    toast(`${n} labels ${print ? "prepared" : "queued"} · ${label(saved)}`);
+    setForm({ ...blankProduct(me?.id || ""), item: form.item, type: form.type, color: form.color, vendor_id: form.vendor_id, vendor_name: form.vendor_name }); setCost("");
+    styleInput.current?.focus({ preventScroll: true });
     } catch (e: any) { setPrintError(e.message || "Could not prepare labels"); toast(e.message || "Could not prepare labels", true); }
     finally { queueLock.current = false; setQueueBusy(false); }
   };
@@ -304,20 +308,7 @@ export default function Labels({ args }: { args: string[] }) {
     showStart(printer.start(flat, true, prompt));
   };
 
-  return (
-    <div className="label-counter">
-      <Head eyebrow="Barcode print" title="QR labels" sub="Same fields as the old BARCODE PRINT screen. Every label carries its own details inside the QR, so it scans even on a phone with no internet.">
-        {cfg.output !== "qz" && cfg.mode === "roll" && cfg.cols === 1 && directPrintSupported() && <button className="btn dk" disabled={!total || printer.busy} onClick={() => doPrintTSC()} title="Send straight to a compatible TSC label printer">{`Print to TSC ${total || ""}`}</button>}
-        <button className="btn g" disabled={!total || printer.busy} onClick={doPrint}>Print {total || ""} labels</button>
-      </Head>
-      {printError && <div className="note warn" role="alert">{printError}</div>}
-      <details className="card pad item-code-check"><summary><b>Item code check</b> <span className="xs mut">— finds products whose label name and QR code disagree</span></summary><ItemCodeCheck /></details>
-      <div className="label-dock card" aria-label="Pinned sticker preview">
-        <div className="labelprev"><LabelView cfg={cfg} p={oldCopy?.p || jobs[0]?.p || form} qtyOnLabel={oldCopy?.qtyOnLabel || jobs[0]?.qtyOnLabel || parseInt(qty) || 1} line={oldCopy ? undefined : jobs[0]?.line} sourceQr={oldCopy?.sourceQr || jobs[0]?.sourceQr} /></div>
-        <div className="grow stack" style={{ gap: 3 }}><b>{oldCopy?.p.item || jobs[0]?.p.item || form.item || "Sticker preview"}</b><span className="sm">{oldCopy?.p.type || jobs[0]?.p.type || form.type} · {cfg.w} × {cfg.h} mm · all text bold</span><span className="xs">QR: {oldCopy || cfg.format === "shop" ? "Old software format" : "Rungnna only"}</span>{oldCopy && <span className="xs">Exact old QR copy — original price, packet and reference</span>}</div>
-        {can(me, "printers.manage") && <button className="btn" aria-pressed={settingsOpen} onClick={() => setSettingsOpen(open => !open)}>{settingsOpen ? "Back to label workspace" : "Printer settings"}</button>}
-      </div>
-      {settingsOpen ? <LabelSettings cfg={cfg} upd={upd} onTest={cfg.output === "qz" ? undefined : () => { if (!printer.busy) setAligning(true); }} sample={jobs[0]?.p || form} qty={jobs[0]?.qtyOnLabel || parseInt(qty) || 1} /> : <>
+  const purchaseEntry = <>
       {cfg.format === "rungnna" && !oldCopy && <div className="note warn row" role="status"><span className="grow sm"><b>These new QR codes are for Rungnna billing only.</b> For billing in the older software, use its QR format with the original item code and reference, or scan a working old sticker for an exact copy.</span><button className="btn" onClick={() => upd({ format: "shop" })}>Use old-software QR format</button></div>}
       <div className="label-purchase">
           {can(me, "purchases.photo") ? <details className="card purchase-import" open={args[0] === "bill"}>
@@ -330,10 +321,28 @@ export default function Labels({ args }: { args: string[] }) {
           : <div className="card pad row"><span className="grow sm"><b>From a purchase bill</b> — needs “Read purchase bill photos”, which {roleName(me) || "this person"} does not have.</span>
               <button className="btn sm" onClick={() => setMe(null)}>Switch person</button></div>}
       </div>
+  </>;
+  const previewJob: Job = oldCopy || (form.style.trim() || form.rate > 0 || (!lastJob && !jobs.length) ? { p: form, qtyOnLabel: parseInt(qty) || 1, copies: Number(copies) || 1 } : lastJob || jobs[jobs.length - 1]);
+
+  return (
+    <div className="label-counter">
+      <Head eyebrow="Barcode print" title="QR labels" sub="Enter item details, then print. Scan an existing label to copy it.">
+        {cfg.output !== "qz" && cfg.mode === "roll" && cfg.cols === 1 && directPrintSupported() && <button className="btn dk" disabled={!total || printer.busy} onClick={() => doPrintTSC()} title="Send straight to a compatible TSC label printer">{`Print to TSC ${total || ""}`}</button>}
+        <button className="btn g" disabled={!total || printer.busy} onClick={doPrint}>Print {total || ""} labels</button>
+      </Head>
+      {printError && <div className="note warn" role="alert">{printError}</div>}
+
+      <div className="label-dock card" aria-label="Pinned sticker preview">
+        <div className="labelprev"><LabelView cfg={cfg} p={previewJob.p} qtyOnLabel={previewJob.qtyOnLabel} line={previewJob.line} sourceQr={previewJob.sourceQr} /></div>
+        <div className="grow stack" style={{ gap: 3 }}><b>{previewJob.p.item || "Sticker preview"}</b><span className="sm">{previewJob.p.type} · {cfg.w} × {cfg.h} mm · all text bold</span><span className="xs">QR: {oldCopy || cfg.format === "shop" ? "Old software format" : "Rungnna only"}</span>{oldCopy && <span className="xs">Exact old QR copy — original price, packet and reference</span>}</div>
+        {can(me, "printers.manage") && <button className="btn" aria-pressed={settingsOpen} onClick={() => setSettingsOpen(open => !open)}>{settingsOpen ? "Back to label workspace" : "Printer settings"}</button>}
+      </div>
+      {settingsOpen ? <LabelSettings cfg={cfg} upd={upd} onTest={cfg.output === "qz" ? undefined : () => { if (!printer.busy) setAligning(true); }} sample={jobs[0]?.p || form} qty={jobs[0]?.qtyOnLabel || parseInt(qty) || 1} /> : <>
+      {args[0] === "bill" && purchaseEntry}
       <div className="label-workspace">
         <div className="stack">
-          <div className="card">
-            <header><h3>Barcode print</h3><span className="xs mut">scan an existing label to copy its details</span></header>
+          <div className="card label-manual">
+            <header><h3 className="grow">Barcode print</h3><div className="row"><button className="btn p" disabled={queueBusy || printer.busy || photoBusy} onClick={() => addJob(true)}>Print barcode</button><button className="btn" disabled={queueBusy || printer.busy || photoBusy} onClick={() => addJob()}>Add to queue</button></div></header>
             <div className="pad stack">
               <WedgeInput autoFocus={false} placeholder="Scan an old label to pre-fill (optional)" onCode={async raw => {
                 const parsed = parseLabel(raw);
@@ -345,33 +354,37 @@ export default function Labels({ args }: { args: string[] }) {
                 } catch (error: any) { setOldCopy(null); toast(error.message, true); }
               }} />
               {oldCopy && <div className="note stack" role="status"><b>Copy a working old sticker</b><span className="sm">This copy keeps the original QR exactly, including its old reference and price. Edits in the item form below apply only to newly generated labels.</span><code style={{ overflowWrap: "anywhere" }}>{oldCopy.sourceQr}</code><div className="row"><button className="btn p" disabled={printer.busy} onClick={() => { const n = Number(copies); if (!Number.isSafeInteger(n) || n < 1 || n > 5000) return toast("Check print quantity (1–5000)", true); showStart(printer.start(expandJobs([{ ...oldCopy, p: { ...oldCopy.p, item: oldCopy.p.item || form.item }, copies: n }]))); }}>Print exact old QR copy</button><button className="btn" onClick={() => setOldCopy(null)}>Use edited item instead</button></div></div>}
-              <div className="grid g2">
+              <div className="grid g2 label-manual-fields">
                 <label className="f">ITEM
                   <input className="in" list="litems" value={form.item} onChange={e => { const v = e.target.value.toUpperCase(); set("item", v); const c = verifiedCodeFor(v); if (c && !form.item_code) set("item_code", c); }} autoFocus />
                   <datalist id="litems">{[...new Set([...items, ...DEFAULT_ITEMS, ...Object.values(VERIFIED_ITEM_CODES).map(v => v.name)])].map(i => <option key={i} value={i} />)}</datalist></label>
                 <label className="f">TYPE
-                  <select className="in" value={form.type} onChange={e => set("type", e.target.value)}>{DEFAULT_TYPES.map(t => <option key={t}>{t}</option>)}</select></label>
-                <label className="f">STYLE<input className="in mono" value={form.style} onChange={e => set("style", e.target.value.toUpperCase())} placeholder="K5209/59SH" /></label>
+                  <select aria-label="TYPE" className="in" value={form.type} onChange={e => set("type", e.target.value)}>{DEFAULT_TYPES.map(t => <option key={t}>{t}</option>)}</select></label>
+                <label className="f">STYLE<input ref={styleInput} className="in mono" value={form.style} onChange={e => set("style", e.target.value.toUpperCase())} placeholder="K5209/59SH" /></label>
                 <label className="f">COLOR<input className="in mono" value={form.color} onChange={e => set("color", e.target.value.toUpperCase())} placeholder="K/GBN" /></label>
                 <label className="f">TK<input className="in mono" value={form.tk} onChange={e => set("tk", e.target.value.toUpperCase())} /></label>
-                <details className="label-advanced" open={cfg.format === "shop"}><summary>More details</summary><div className="grid g2">
-                <label className="f">MODEL / ARTICLE No.<input className="in mono" value={form.model || ""} onChange={e => set("model", e.target.value.toUpperCase() || undefined)} placeholder="vendor's article no" /></label>
                 <SupplierNo suppliers={vendors} id={form.vendor_id} label="VENDOR roll no." onPick={v => { set("vendor_id", v?.id); set("vendor_name", v?.name); }} />
-                <label className="f">ITEM CODE (old software)<input className="in mono" inputMode="numeric" value={form.item_code || ""} placeholder="Copy the old system’s numeric code" onChange={e => { const c = e.target.value.replace(/\D/g, "") || undefined; set("item_code", c); const known = c ? VERIFIED_ITEM_CODES[c]?.name : ""; if (known && !form.item.trim()) set("item", known); }} /></label>
-                <label className="f">REF / roll reference (old software)<input className="in mono" value={form.ref || ""} onChange={e => set("ref", e.target.value || undefined)} placeholder="Copy the working label’s reference" /></label>
                 {can(me, "rates") && <label className="f">COST ₹
                   <input className="in mono" inputMode="decimal" value={cost} placeholder="enter cost" onChange={e => applyCost(e.target.value)} /></label>}
-                </div></details>
+
                 <label className="f">RATE ₹ {can(me, "rates") && form.cost_code && <span className="xs mut">code {form.cost_code}</span>}
                   <MoneyInput className="in hi mono" paise={form.rate} onPaise={v => { set("rate", v); set("price_locked", 1); }} /></label>
                 <label className="f">QTY (pieces per packet — prints as ₹RATE X QTY PCS)<input className="in mono" inputMode="numeric" value={qty} onChange={e => setQty(e.target.value.replace(/\D/g, ""))} /></label>
                 <label className="f">BILL SR. (line no. on the supplier's bill)<input className="in mono" inputMode="numeric" value={billSr} placeholder={String(jobs.length + 1)} onChange={e => setBillSr(e.target.value.replace(/[^0-9A-Za-z\-/]/g, "").slice(0, 9))} /></label>
                 <label className="f">PRINT QTY (labels)<input className="in mono" inputMode="numeric" value={copies} onChange={e => setCopies(e.target.value.replace(/\D/g, ""))}
-                  onKeyDown={e => e.key === "Enter" && addJob()} /></label>
+                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); void addJob(true); } }} /></label>
+                <div className="f label-item-photo"><span>Jewellery photo</span><PhotoButton value={form.photo_id} label="Item photo" disabled={queueBusy || printer.busy} onBusyChange={setPhotoBusy} onChange={photo_id => setForm(current => current.id === form.id ? { ...current, photo_id } : current)} /></div>
+                <details className="label-advanced" open={cfg.format === "shop"}><summary>More details</summary><div className="grid g2">
+                <label className="f">MODEL / ARTICLE No.<input className="in mono" value={form.model || ""} onChange={e => set("model", e.target.value.toUpperCase() || undefined)} placeholder="vendor's article no" /></label>
+
+                <label className="f">ITEM CODE (old software)<input className="in mono" inputMode="numeric" value={form.item_code || ""} placeholder="Copy the old system’s numeric code" onChange={e => { const c = e.target.value.replace(/\D/g, "") || undefined; set("item_code", c); const known = c ? VERIFIED_ITEM_CODES[c]?.name : ""; if (known && !form.item.trim()) set("item", known); }} /></label>
+                <label className="f">REF / roll reference (old software)<input className="in mono" value={form.ref || ""} onChange={e => set("ref", e.target.value || undefined)} placeholder="Copy the working label’s reference" /></label>
+
+                </div></details>
               </div>
               <label className="row sm"><input type="checkbox" checked={addStock} onChange={e => setAddStock(e.target.checked)} /> These are new packets — also add them to stock</label>
               {addStock && <RackPicker value={loc} onChange={setLoc} label="Into rack" />}
-              <div className="row"><button className="btn p" disabled={queueBusy} onClick={() => addJob(true)}>Print barcode</button><button className="btn" disabled={queueBusy} onClick={() => addJob()}>Add to queue</button></div>
+              <div className="xs mut">Enter in PRINT QTY prints this item. Item, type, colour, supplier and packet size stay ready for the next style.</div>
             </div>
           </div>
           {jobs.length > 0 && (
@@ -391,6 +404,8 @@ export default function Labels({ args }: { args: string[] }) {
         </div>
 
       </div>
+      {args[0] !== "bill" && purchaseEntry}
+      <details className="card pad item-code-check"><summary><b>Item code check</b> <span className="xs mut">— finds products whose label name and QR code disagree</span></summary><ItemCodeCheck /></details>
       </>}
       {printer.panel}
       {aligning && createPortal(<AlignSheet cfg={cfg} />, document.getElementById("printroot")!)}
