@@ -125,6 +125,7 @@ export interface Bill extends Row {
   price_level?: "wholesale" | "retail" | "dealer";
   salesman: string; helper?: string; packed_by?: string; checked_by?: string; box_count: number; total_qty: number;
   gross: number; discount: number; discount_pct: number; packing: number; adjust: number;
+  less_pct?: number;    // a second cut, after the discount (owner, 25 Oct): 50% then 3% less = 51.5% off, not 53%
   gst_mode: "exclusive" | "inclusive"; gst_rate: number; gst: number; cgst: number; sgst: number; igst: number;
   net: number; advance: number; paid: number;
   remarks: string; payments: Payment[]; items: BillLine[];

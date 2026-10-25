@@ -320,7 +320,9 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
             toast(`Still ${got} of ${seen} lines — reading the page in ${n} parts…`);
             const strips = await splitPage(part[0], n).catch(() => null);
             if (strips) {
-              const reads = await Promise.all(strips.map(async h => { const { blob } = await compress(h, 2800, 1050000); return api<any>("purchase-photo", { images: [{ data: await blobToB64(blob), mime: blob.type }] }).catch(() => null); }));
+              const whole = await compress(part[0], 1600, 420000);
+              const page = { data: await blobToB64(whole.blob), mime: whole.blob.type };
+              const reads = await Promise.all(strips.map(async (h, k) => { const { blob } = await compress(h, 2400, 800000); return api<any>("purchase-photo", { images: [page, { data: await blobToB64(blob), mime: blob.type }], part: { k: k + 1, n: strips.length } }).catch(() => null); }));
               const joined = joinParts([rowsOf(out), ...reads.map(rowsOf)]);
               if (joined.length > got) out = { ...out, rows: joined, invoice_total: out.invoice_total || reads.map(x => x?.invoice_total).filter(Boolean).pop(), lines_on_bill: String(seen) };
             }
@@ -649,7 +651,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         <button type="button" className="linkbtn" onClick={() => { setSaved(null); setJobs([]); void setSetting(LAST, null); }}>Close</button>
       </div>
       <StickerQuickBar cfg={cfg} onChange={setCfg} />
-      <div className="xs mut">This stays here until you close it or approve the next bill — no need to read the bill photo again. Change the sticker above, then “Print saved labels”.</div>
+      <div className="xs mut">This stays here until you close it or approve the next bill — no need to read the bill photo again. Change the sticker above, then “Print saved labels”. The stock went in when the bill was approved: printing the stickers again never adds stock again.</div>
       <div className="tw"><table className="pos-t"><thead><tr><th>Item</th><th>Style</th><th>Colour</th><th className="r">Qty</th><th className="r">Rate</th></tr></thead><tbody>
         {saved.items.map((l, i) => <tr key={i}><td>{l.item}</td><td className="mono">{l.style}</td><td>{l.color}</td><td className="r">{l.pack > 1 ? l.pkts * l.pack : l.qty}</td><td className="r">{l.rate ? (l.rate / 100).toFixed(2) : "—"}</td></tr>)}
       </tbody></table></div>

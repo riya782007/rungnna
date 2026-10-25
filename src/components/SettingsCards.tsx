@@ -6,6 +6,7 @@ import { toast } from "../lib/app";
 import { rupees, toPaise, when } from "../lib/format";
 import { getRule, saveRule, validateKey, priceSteps, costCode, DEFAULT_RULE, type PricingRule, type RoundTo } from "../lib/pricing";
 import { blankProduct } from "../lib/products";
+import { setNoLessItems } from "../lib/billing";
 import { DEFAULT_CFG, LabelView, loadLabelCfg, type LabelCfg } from "../pages/Labels";
 import { rateMark } from "../lib/label-tspl";
 import { saveLabelPatch } from "./StickerQuickBar";
@@ -297,4 +298,23 @@ export function NumberText({ value, onValue, fallback = 0 }: { value: number; on
     const n = Number(t);
     onValue(t.trim() === "" || t === "-" || t === "." || !Number.isFinite(n) ? fallback : n);
   }} />;
+}
+
+/* Owner, 25 Oct (voice): "some items have no margin left — they must never get the extra 2–3% less". */
+export const NO_LESS_KEY = "no_less_items";
+export function NoLessCard() {
+  const row = useLiveQuery(() => db.config.get(NO_LESS_KEY), []);
+  const saved = ((row?.value as string[]) || []).join(", ");
+  const [text, setText] = useState<string | null>(null);
+  const save = async () => {
+    const names = [...new Set((text ?? saved).split(/[,\n]/).map(x => x.trim().toUpperCase()).filter(Boolean))];
+    await put("config", { id: NO_LESS_KEY, value: names, updated_at: now() } as any);
+    setNoLessItems(names); setText(null); toast(names.length ? `${names.length} item${names.length === 1 ? "" : "s"} never get the extra less` : "Every item gets the extra less");
+  };
+  return <div className="card"><header><h3>Items with no extra less</h3></header>
+    <div className="pad stack">
+      <div className="xs mut">The bill's "Less % after discount" (2–3% for good customers) is never cut on these items. Write item names, separated by commas.</div>
+      <textarea className="in" rows={3} value={text ?? saved} placeholder="e.g. BRIDAL SET, KUNDAN SET" onChange={e => setText(e.target.value)} />
+      <div className="row"><button className="btn p sm" disabled={text === null} onClick={() => void save()}>Save</button></div>
+    </div></div>;
 }

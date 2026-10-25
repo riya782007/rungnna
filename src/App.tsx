@@ -14,6 +14,7 @@ import { setCompanyOpen, getPrivate } from "./lib/privacy";
 import { exitCompany, watchIdle } from "./lib/companyLock";
 import { useShopQueue, isPhoneLike } from "./lib/print-queue";
 import { setEstimatesOnly } from "./lib/company-kind";
+import { setNoLessItems } from "./lib/billing";
 import { permsOf } from "./lib/roles";
 /* someone allowed private estimates but not "Make bills": the bill screen makes only estimates for them */
 const estimatesOnlyFor = (me: { role: string; perms?: string[]; role_id?: string } | null) => {
@@ -109,7 +110,7 @@ function Shell() {
   const stores = useLiveQuery(() => db.stores.filter(s => !s.deleted && !!s.active).toArray(), [], []);
   const [route, args] = useRoute();
   // the owner's pricing switches (e.g. even sticker rates) apply on this counter as soon as they sync in
-  useLiveQuery(async () => { try { await getRule(); await loadOldCodes(); } catch { /* keeps the last known rule */ } return 0; }, [], 0);
+  useLiveQuery(async () => { try { await getRule(); await loadOldCodes(); setNoLessItems(((await db.config.get("no_less_items"))?.value as string[]) || []); } catch { /* keeps the last known rule */ } return 0; }, [], 0);
   const [pal, setPal] = useState(false);
   const [compact, setCompact] = useState(true);
   useEffect(() => { getSetting("compact_menu", true).then(setCompact); }, []);

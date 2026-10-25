@@ -71,3 +71,16 @@ describe("billing maths", () => {
   it("financial year", () => { expect(fy(new Date(2026, 8, 25))).toBe("26-27"); expect(fy(new Date(2027, 1, 1))).toBe("26-27"); expect(fy(new Date(2027, 3, 1))).toBe("27-28"); });
   it("amount in words, Indian system", () => { expect(inWords(12345600)).toBe("Rupees One Lakh Twenty Three Thousand Four Hundred Fifty Six Only"); expect(inWords(89000)).toBe("Rupees Eight Hundred Ninety Only"); });
 });
+
+import { setNoLessItems } from "../src/lib/billing";
+describe("less % after the discount (owner, 25 Oct)", () => {
+  it("₹1000 at 50% then 3% less is ₹485, not ₹470 (53%); items with no extra less are left out", () => {
+    const one = (item: string, id = "l") => line({ id, item, pack: 1, pkts: 1, qty: 1, rate: 100000 });
+    const a = totals(bill({ bill_type: "estimate", gst_rate: 0, items: [one("CHAIN")], discount_pct: 50, less_pct: 3 }));
+    expect(a.gross).toBe(100000); expect(a.discount).toBe(51500); expect(a.net).toBe(48500);
+    setNoLessItems(["BRIDAL SET"]);
+    const b = totals(bill({ bill_type: "estimate", gst_rate: 0, items: [one("BRIDAL SET"), one("CHAIN", "l2")], discount_pct: 50, less_pct: 3 }));
+    expect(b.discount).toBe(100000 + 1500);   // 50% of ₹2000, then 3% of the chain's ₹500
+    setNoLessItems([]);
+  });
+});

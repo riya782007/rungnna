@@ -109,6 +109,10 @@ export function fixLine(l: BillLine): BillLine {
 export { allocate } from "./allocate";
 /** " 3%" for a single-rate bill; "" (just "GST") when lines carry different rates. */
 export const gstLabel = (b: Bill) => (b.items.some(l => l.tax != null) ? "" : ` ${b.gst_rate}%`);
+/* Items that never get the extra less (Settings › Prices), kept here so totals stay a plain calculation. */
+let noLessItems = new Set<string>();
+export const setNoLessItems = (names: string[]) => { noLessItems = new Set(names.map(n => n.trim().toUpperCase()).filter(Boolean)); };
+export const noLess = (item?: string) => noLessItems.has((item || "").trim().toUpperCase());
 export function totals(b: Bill, shopState = "", shopGstin = ""): Bill {
   const items = b.items.map(fixLine);
   const gross = items.reduce((a, l) => a + l.amount, 0);
@@ -116,7 +120,12 @@ export function totals(b: Bill, shopState = "", shopGstin = ""): Bill {
   const box_count = Math.max(b.box_count || 0, new Set(items.map(l => l.box_no)).size);
   // a discount can never exceed the goods on the bill, so NET can't go negative
   const pct = Number.isFinite(b.discount_pct) ? Math.min(100, Math.max(0, b.discount_pct)) : 0;
-  const discount = Math.min(gross, Math.max(0, pct ? Math.round(gross * pct / 100) : (Number.isFinite(b.discount) ? b.discount : 0)));
+  const first = Math.min(gross, Math.max(0, pct ? Math.round(gross * pct / 100) : (Number.isFinite(b.discount) && !b.less_pct ? b.discount : 0)));
+  /* Owner, 25 Oct: the "less" (2–3% for good customers) is cut on what is left after the discount — ₹1000 at 50%
+     is ₹500, 3% less makes ₹485 (not 53% = ₹470) — and never on the items he marks as having no room for it. */
+  const lessPct = Number.isFinite(b.less_pct) ? Math.min(100, Math.max(0, b.less_pct || 0)) : 0;
+  const lessBase = lessPct ? items.filter(l => !noLess(l.item)).reduce((a, l) => a + l.amount, 0) * (gross ? (gross - first) / gross : 0) : 0;
+  const discount = Math.min(gross, first + Math.round(lessBase * lessPct / 100));
   const packing = Number.isFinite(b.packing) ? Math.max(0, b.packing) : 0;
   // a credit note against a tax invoice reverses its GST; estimates, challans and their returns carry none
   const rate = b.bill_type === "gst" || (b.bill_type === "return" && b.src_type === "gst") ? b.gst_rate : 0;
@@ -148,7 +157,7 @@ export function totals(b: Bill, shopState = "", shopGstin = ""): Bill {
   const raw = base + gst;
   const net = Math.round(raw / 100) * 100;
   const paid = b.bill_type === "challan" ? 0 : b.payments.filter(p => p.mode !== "credit").reduce((a, p) => a + (Number.isFinite(p.amount) ? p.amount : 0), 0);
-  return { ...b, items: lines, gross, total_qty, box_count, discount, discount_pct: pct, packing, gst, cgst, sgst, igst, adjust: net - raw, net, paid };
+  return { ...b, items: lines, gross, total_qty, box_count, discount, discount_pct: pct, less_pct: lessPct, packing, gst, cgst, sgst, igst, adjust: net - raw, net, paid };
 }
 
 type RateGroup = { rate: number; taxable: number; tax: number };

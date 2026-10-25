@@ -109,7 +109,7 @@ export function InvoiceSheet({ b, shop, format, copy }: { b: Bill; shop: Shop; f
         </div>
         {prices && <table className="inv-sum"><tbody>
           <tr><td>Gross</td><td className="r">{billAmount(b.gross)}</td></tr>
-          {b.discount ? <tr><td>Discount{b.discount_pct ? ` ${b.discount_pct}%` : ""}</td><td className="r">-{billAmount(b.discount)}</td></tr> : null}
+          {b.discount ? <tr><td>Discount{b.discount_pct ? ` ${b.discount_pct}%` : ""}{b.less_pct ? ` + less ${b.less_pct}%` : ""}</td><td className="r">-{billAmount(b.discount)}</td></tr> : null}
           {b.packing ? <tr><td>Packing</td><td className="r">{billAmount(b.packing)}</td></tr> : null}
           {taxDoc && b.gst ? <tr><td>Taxable value</td><td className="r">{billAmount(b.net - b.adjust - b.gst)}</td></tr> : null}
           {byRate.map(g => <Fragment key={g.rate}>{g.cgst ? <tr key={"c" + g.rate}><td>CGST {pct(g.rate / 2)}%</td><td className="r">{billAmount(g.cgst)}</td></tr> : null}

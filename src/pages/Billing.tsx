@@ -760,6 +760,11 @@ export default function Billing({ args }: { args: string[] }) {
               <b className="sm">%</b>
               {b.discount_pct ? <span className="mono sm mut" title="Discount in rupees">= {billAmount(t.discount)}</span>
                 : <MoneyInput className="cell r" style={{ width: 64 }} placeholder="or ₹" aria-label="Discount in rupees" paise={b.discount} onPaise={v => set({ discount: v })} />}</span></div>
+          {/* Owner, 25 Oct: the extra 2–3% for good customers, cut on what is left after the discount */}
+          <div className="sumrow"><span title="Cut after the discount, on what is left. Items set as 'no extra less' (Settings › Prices) are left out.">Less % <span className="xs mut">after discount</span></span>
+            <span className="row" style={{ gap: 4, flexWrap: "nowrap", alignItems: "center" }}>
+              <MoneyInput className="cell r" style={{ width: 64 }} placeholder="%" aria-label="Less percent after discount" paise={Math.round((b.less_pct || 0) * 100)} onPaise={v => set({ less_pct: v / 100 })} />
+              <b className="sm">%</b></span></div>
           <div className="sumrow"><span>Packing</span><MoneyInput className="cell r" style={{ width: 80 }} paise={b.packing} onPaise={v => set({ packing: v })} /></div>
           {b.bill_type === "gst" && <div className="sumrow"><span>GST{gstLabel(t)} <button className="linkbtn" onClick={() => set({ gst_mode: b.gst_mode === "exclusive" ? "inclusive" : "exclusive" })}>{b.gst_mode === "exclusive" ? "added" : "included"}</button></span><b className="mono">{billAmount(t.gst)}</b></div>}
           {b.bill_type === "gst" && b.party_state && !placeCode(b.party_gstin, b.party_state) && <div className="xs" style={{ textAlign: "right", color: "var(--bad)" }}>Check buyer state “{b.party_state}” — not recognised, GST type may be wrong</div>}

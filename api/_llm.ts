@@ -211,7 +211,9 @@ async function chatGemini(parts: AIPart[], o: { system?: string; json?: boolean;
     j = await r.json().catch(() => ({}));
     // a retired or unknown model: try the next one; anything else (quota, bad photo) is the answer
     const retired = !r.ok && (r.status === 404 || /no longer available|not found|is not supported|deprecated/i.test(String(j?.error?.message || "")));
-    if (!retired) break;
+    // 25 Oct: "This model is currently experiencing high demand" (503) — another Flash model usually answers
+    const busy = !r.ok && (r.status === 503 || /high demand|overloaded|unavailable/i.test(String(j?.error?.message || "")));
+    if (!retired && !busy) break;
   }
   if (!r.ok) throw new ProviderError("groq", r.status, classify(r.status, j), j?.error?.message || `gemini error ${r.status}`);
   const text = (j?.candidates?.[0]?.content?.parts || []).map((x: any) => x.text || "").join("");
