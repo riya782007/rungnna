@@ -50,7 +50,11 @@ const PosCalculator = lazy(() => import("../components/PosTools").then(m => ({ d
 export default function Billing({ args }: { args: string[] }) {
   const { me } = useApp();
   // the custom-item row stays open on the counter PC; phones open it with "Add item"
-  const [editorOpen, setEditorOpen] = useState(() => !(typeof matchMedia !== "undefined" && matchMedia("(max-width: 860px)").matches));
+  // the hand-entry row opens with "Add item" (F8); closed it leaves the screen to the bill's lines (owner, 25 Oct)
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [moneyMore, setMoneyMore] = useState(false);
+  useEffect(() => { void getSetting<boolean>("bill_more_open", false).then(setMoreOpen); }, []);
   const [entryFocus, setEntryFocus] = useState(0), [calculator, setCalculator] = useState(false), [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const switchingRef = useRef(false);
@@ -214,6 +218,13 @@ export default function Billing({ args }: { args: string[] }) {
   /* Scan order: the line touched by the latest scan is shown first, right under the
      scan box, so it is visible without scrolling. Display only — the bill, its line
      numbers and the printed order stay as added. */
+  /* Owner, 25 Oct (voice): "black screen = GST: when a GST invoice is being made it should look like dark mode on
+     the phone; estimates white". With one company, the bill screen goes dark while a tax invoice is open. */
+  useEffect(() => {
+    const el = document.documentElement, mine = b?.bill_type === "gst" && companyKindNow() !== "estimate";
+    if (mine) el.dataset.company = "gst"; else if (companyKindNow() !== "gst") delete el.dataset.company;
+    return () => { if (companyKindNow() !== "gst") delete el.dataset.company; };
+  }, [b?.bill_type]);
   const [touched, setTouched] = useState<string[]>([]);
   const [lastRead, setLastRead] = useState("");
   function displayOrder(items: BillLine[]): BillLine[] {
@@ -639,15 +650,18 @@ export default function Billing({ args }: { args: string[] }) {
         <label className="f" style={{ minWidth: 130 }}>Salesman
           <select className="in" value={b.salesman} onChange={e => set({ salesman: e.target.value })}>
             <option value="">—</option>{staff.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}</select></label>
+        {/* Owner, 25 Oct (voice): "after 3–4 scans the lines go below and I scroll up and down — at least 8–10 lines
+            must be in front of me". The rarely-changed fields fold away under "More" so the lines get the screen. */}
+        <button type="button" className="linkbtn sm" aria-expanded={moreOpen} onClick={() => { setMoreOpen(o => !o); void setSetting("bill_more_open", !moreOpen); }}>{moreOpen ? "Less ▴" : `More ▾${[b.helper, b.packed_by, b.checked_by].filter(Boolean).length ? " (" + [b.helper, b.packed_by, b.checked_by].filter(Boolean).length + ")" : ""}`}</button>
         {/* who worked the bill, in counter order: salesman → helper → packed by → rechecked by */}
-        {([["Helper", "helper", "helper"], ["Packing done by", "packed_by", "packer"], ["Rechecked by", "checked_by", ""]] as const).map(([title, key, prefer]) =>
+        {moreOpen && ([["Helper", "helper", "helper"], ["Packing done by", "packed_by", "packer"], ["Rechecked by", "checked_by", ""]] as const).map(([title, key, prefer]) =>
           <label key={key} className="f" style={{ minWidth: 130 }}>{title}
             <select className="in" value={b[key] || ""} onChange={e => set({ [key]: e.target.value } as Partial<Bill>)}>
               <option value="">—</option>
               {[...staff].sort((x, y) => Number(!!prefer && y.role === prefer) - Number(!!prefer && x.role === prefer)).map(s => <option key={s.id} value={s.name}>{s.name}{prefer && s.role === prefer ? ` (${prefer})` : ""}</option>)}</select></label>)}
-        <div className="pos-box"><span className="xs mut">Box qty: {b.box_count} · Current box {box}</span>
+        {moreOpen && <div className="pos-box"><span className="xs mut">Box qty: {b.box_count} · Current box {box}</span>
           <div className="row" style={{ gap: 4 }}>{boxes.map(x => <button key={x} className="chip" aria-pressed={x === box} onClick={() => setBox(x)}>{x}</button>)}
-            <button className="chip" onClick={() => setBox(Math.max(...boxes) + 1)}>+</button></div></div>
+            <button className="chip" onClick={() => setBox(Math.max(...boxes) + 1)}>+</button></div></div>}
       </div>
             <div className="pos-scanhead stack" style={{ gap: 8 }}>
             <div className="row scanrow">
@@ -684,7 +698,7 @@ export default function Billing({ args }: { args: string[] }) {
 
           <NameItemCodes codes={unnamed} onNamed={(code, name, unit) => setB(x => x && { ...x, items: x.items.map(l =>
             (l.item === "ITEM " + code || (!l.item && l.product_id && pmap.get(l.product_id)?.item_code === code)) ? { ...l, item: name, type: unit } : l) })} />
-          <div className="selection-bar"><SelectAll ids={t.items.map(l => l.id)} selected={selectedLines} onChange={setSelectedLines} label="Select all bill lines" /><span className="sm">{t.items.filter(l => selectedLines.has(l.id)).length} selected</span><DeleteButton className="btn sm bad" disabled={saving || !t.items.some(l => selectedLines.has(l.id))} onDelete={() => dropLines(t.items.filter(l => selectedLines.has(l.id)).map(l => l.id))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }}>Keys: ↑↓ rows · ←→ fields · Space select · Shift+↑↓ range</span></div>
+          {selectedLines.size > 0 && <div className="selection-bar"><SelectAll ids={t.items.map(l => l.id)} selected={selectedLines} onChange={setSelectedLines} label="Select all bill lines" /><span className="sm">{t.items.filter(l => selectedLines.has(l.id)).length} selected</span><DeleteButton className="btn sm bad" disabled={saving || !t.items.some(l => selectedLines.has(l.id))} onDelete={() => dropLines(t.items.filter(l => selectedLines.has(l.id)).map(l => l.id))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }}>Keys: ↑↓ rows · ←→ fields · Space select · Shift+↑↓ range</span></div>}
           {(() => { const stuck = t.items.filter(l => qtyProblem.includes(l.id) && noQty(l)); return stuck.length ? (
             <div className="note bad pos-qty-problem" role="alert">
               <b>Not saved — quantity missing on {stuck.length === 1 ? "this line" : stuck.length + " lines"}:</b> {stuck.slice(0, 3).map(l => [l.item, l.style].filter(Boolean).join(" ")).join(", ")}{stuck.length > 3 ? "…" : ""}. Enter the quantity, or remove the line, then save / print again.
@@ -715,13 +729,8 @@ export default function Billing({ args }: { args: string[] }) {
               </tbody>
             </table>
           </div>
-          <div className="pos-notes grid g2">
-            <label className="f">Remarks<input className="in" value={b.remarks} onChange={e => set({ remarks: e.target.value })} placeholder="Transport, marka, instructions…" /></label>
-            <div className="pos-bill-total" aria-label="Bill total">
-              <div><span>Total</span><b className="mono">{billAmount(t.gross)}</b><small>{t.total_qty} pcs · {t.items.length} lines</small></div>
-              <div><span>Discount</span><b className="mono">{t.discount ? "− " + billAmount(t.discount) : billAmount(0)}</b></div>
-              <div className="net"><span>Net amount</span><b className="mono">{billAmount(t.net)}</b></div>
-            </div>
+          <div className="pos-notes">
+            <label className="f"><input className="in" aria-label="Remarks" value={b.remarks} onChange={e => set({ remarks: e.target.value })} placeholder="Remarks — transport, marka, instructions…" /></label>
           </div>
           {/* Print / save actions sit under the lines (counter request 21/10/2026): the right
               panel keeps only the box summary and the money, so it needs no scrolling. */}
@@ -732,10 +741,10 @@ export default function Billing({ args }: { args: string[] }) {
             <button className="btn" disabled={saving} onClick={() => setHeld(true)}>Held · F4</button>
             <button className="btn p" disabled={saving} title={"Saves to Bills → " + (b.bill_type === "estimate" ? "Estimates" : b.bill_type === "gst" ? "Tax invoices" : "Challans")} onClick={() => doSave(false)}>{saving ? "Saving…" : `Save ${documentName}`}</button>
             <button className="btn dk" disabled={saving} onClick={() => doSave(true)}>Print {documentName}</button>
-            <button className="btn g" disabled={saving} onClick={() => doSave(false, true)}>Save & WhatsApp · F10</button>
+            <button className="btn g" disabled={saving} onClick={() => doSave(false, true)}>WhatsApp · F10</button>
             <span className="pos-actions-bags">
-              <label className="row sm" title="Also print customer bag stickers with the bill"><input type="checkbox" checked={bagWithBill} onChange={event => { setBagWithBill(event.target.checked); void setSetting("bag_labels_with_bill", event.target.checked); }} /> Bag stickers with print</label>
-              <button className="btn" disabled={saving || !t.items.length} onClick={() => doSave(false, false, true)}>Save & bag stickers</button>
+              <label className="row sm" title="Also print customer bag stickers with the bill"><input type="checkbox" checked={bagWithBill} onChange={event => { setBagWithBill(event.target.checked); void setSetting("bag_labels_with_bill", event.target.checked); }} /> + bags</label>
+              <button className="btn" disabled={saving || !t.items.length} onClick={() => doSave(false, false, true)}>Bag stickers</button>
             </span>
             {lastSaved && (priv || !isEstimate(lastSaved)) && <button className="linkbtn sm" onClick={() => go("bills/" + lastSaved.id)}>View saved {lastSaved.bill_type === "estimate" ? "estimate" : lastSaved.bill_type === "gst" ? "tax invoice" : "challan"} {lastSaved.no}</button>}
           </div>
@@ -743,7 +752,7 @@ export default function Billing({ args }: { args: string[] }) {
 
         <aside className="pos-sum card">
           <section className="pos-box-summary" ref={boxSummaryRef} tabIndex={-1} aria-label="Box summary">
-            <b>Box summary</b>
+            <b>Boxes</b> <span className="xs mut">— tap a box to put the next scans in it</span>
             <div className="pos-box-totals">{boxes.map(n => <button key={n} className="chip" aria-pressed={n === box} onClick={() => setBox(n)} aria-label={`Box ${n}, quantity ${t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}`}>
               Box {n} <b>{t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}</b>
             </button>)}</div>
@@ -765,14 +774,15 @@ export default function Billing({ args }: { args: string[] }) {
             <span className="row" style={{ gap: 4, flexWrap: "nowrap", alignItems: "center" }}>
               <MoneyInput className="cell r" style={{ width: 64 }} placeholder="%" aria-label="Less percent after discount" paise={Math.round((b.less_pct || 0) * 100)} onPaise={v => set({ less_pct: v / 100 })} />
               <b className="sm">%</b></span></div>
-          <div className="sumrow"><span>Packing</span><MoneyInput className="cell r" style={{ width: 80 }} paise={b.packing} onPaise={v => set({ packing: v })} /></div>
+          {(moneyMore || !!b.packing) && <div className="sumrow"><span>Packing</span><MoneyInput className="cell r" style={{ width: 80 }} paise={b.packing} onPaise={v => set({ packing: v })} /></div>}
           {b.bill_type === "gst" && <div className="sumrow"><span>GST{gstLabel(t)} <button className="linkbtn" onClick={() => set({ gst_mode: b.gst_mode === "exclusive" ? "inclusive" : "exclusive" })}>{b.gst_mode === "exclusive" ? "added" : "included"}</button></span><b className="mono">{billAmount(t.gst)}</b></div>}
           {b.bill_type === "gst" && b.party_state && !placeCode(b.party_gstin, b.party_state) && <div className="xs" style={{ textAlign: "right", color: "var(--bad)" }}>Check buyer state “{b.party_state}” — not recognised, GST type may be wrong</div>}
           {t.igst ? <div className="xs mut" style={{ textAlign: "right" }}>IGST (other state)</div> : t.gst ? <div className="xs mut" style={{ textAlign: "right" }}>CGST {billAmount(t.cgst)} + SGST {billAmount(t.sgst)}</div> : null}
           {t.adjust ? <div className="sumrow"><span>Round off</span><span className="mono">{billAmount(t.adjust)}</span></div> : null}
           <div className="net"><span>{b.bill_type === "challan" ? "VALUE" : "NET"}</span><b>{billAmount(t.net)}</b></div>
           {b.bill_type === "challan" ? <div className="note sm">A challan sends the goods out with no money taken. Convert it to an invoice from Bills when the customer is billed.</div> : <>
-          <div className="sumrow"><span>Advance</span><MoneyInput inputRef={advanceRef} className="cell r" style={{ width: 80 }} paise={b.advance} onPaise={v => set({ advance: v })} /></div>
+          {(moneyMore || !!b.advance) ? <div className="sumrow"><span>Advance</span><MoneyInput inputRef={advanceRef} className="cell r" style={{ width: 80 }} paise={b.advance} onPaise={v => set({ advance: v })} /></div>
+            : <button type="button" className="linkbtn xs" style={{ alignSelf: "flex-end" }} onClick={() => setMoneyMore(true)}>+ Packing / advance</button>}
           <Payments pays={b.payments} left={t.net - b.advance} onChange={payments => set({ payments })} />
           <div className={"sumrow " + (balance > 0 ? "due" : "")}><span>{balance > 0 ? "Balance (credit)" : balance < 0 ? "Return to customer" : "Balance"}</span><b className="mono">{billAmount(Math.abs(balance))}</b></div></>}
         </aside>

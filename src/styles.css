@@ -1152,3 +1152,52 @@ tr.act-estimate td { background: #fde8e8; }
 .photo-tile{position:relative;display:flex;flex-direction:column;gap:4px;padding:8px;border:2px solid var(--line);border-radius:12px;cursor:pointer;background:var(--surface)}
 .photo-tile.on{border-color:var(--emerald)}
 .photo-tile input{position:absolute;top:10px;left:10px;width:20px;height:20px}
+
+/* Owner, 25 Oct (voice): "at least 8–10 bill lines must be in front of me without scrolling". Compact lines, a
+   one-line "Added" bar, and the fixed (no page scroll) bill layout on ordinary laptop screens too. */
+.pos-lines .pos-t td,.billing-shell .pos-lines .pos-t td{padding:2px 5px}
+.pos-lines .pos-t th,.billing-shell .pos-lines .pos-t th{padding:5px}
+.pos-lines .pos-t .cell,.billing-shell .pos-lines .pos-t .cell{height:32px;min-height:32px}
+.billing-shell .pos-lines .pos-t td:nth-child(3)>.mono,.billing-shell .pos-lines .pos-t td:nth-child(3)>.mut{font-size:12px;line-height:1.2}
+.billing-shell .pos-actions{padding:4px 10px;row-gap:4px}
+.billing-shell .pos-actions .btn{height:34px}
+.pos-lines .pos-t td:nth-child(3) .xs,.pos-lines .pos-t td:nth-child(3) small{font-size:11px;line-height:1.2}
+.lastscan{min-height:0;padding:3px 8px}
+.lastscan.has-item b{font-size:15px}
+.lastscan>span>span{display:inline;margin-left:8px}
+@media(min-width:1000px) and (min-height:600px) and (max-height:849px){
+  .billing-shell{height:100dvh;min-height:0;overflow:hidden}
+  .billing-shell .main{min-height:0;overflow:hidden}
+  .billing-shell .subnav{position:static;flex:none;min-height:48px;padding-top:6px;padding-bottom:6px}
+  .billing-shell .page{flex:1;min-height:0;padding:8px 12px;overflow:hidden}
+  .billing-shell .pagein,.billing-shell .pos{height:100%;min-height:0}
+  .billing-shell .pos{gap:6px;padding-bottom:0}
+  .billing-shell .pos-main{flex:1;min-height:0;align-items:stretch}
+  .billing-shell .pos-workspace{height:100%;overflow:hidden;gap:6px}
+  .billing-shell .pos-entry{flex:none}
+  .billing-shell .pos-lines{flex:1;min-height:130px;overflow:auto}
+  .billing-shell .pos-sum{overflow:auto;overscroll-behavior:contain}
+  .billing-shell .fkeys{display:none}
+  .billing-shell .pos-top{padding:6px 10px}
+  .billing-shell .pos-notes{padding:4px 10px}
+  .billing-shell .pos-notes label.f{flex-direction:row;align-items:center;gap:8px}
+  .billing-shell .pos-notes .in{height:32px}
+  .billing-shell .pos-counter-dock{position:static}
+  .billing-shell .pos-actions select.in{min-width:120px;max-width:140px}
+  .billing-shell .pos-actions .btn{padding:0 10px}
+  .billing-shell .pos-actions-bags{margin-left:0}
+  .billing-shell .pos-actions{flex-wrap:nowrap;overflow-x:auto}
+  .billing-shell .pos-actions>*{flex:none}
+  .billing-shell .scanrow{flex-wrap:nowrap}
+  .billing-shell .scanrow .wedge{flex:1 1 auto}
+  .billing-shell .pos-lines .pos-t .cell{height:28px;min-height:28px;font-size:16px}
+  .billing-shell .pos-lines .pos-t td:nth-child(3) .cell{font-size:16px}
+  .billing-shell .pos-lines .pos-t .line-no,.billing-shell .pos-lines .pos-t td[data-l="Box"] .cell{font-size:17px}
+  .billing-shell .pos-lines .pos-t td[data-l="Amount"]{font-size:16px}
+  .billing-shell .pos-lines .pos-t td:nth-child(3)>.mono,.billing-shell .pos-lines .pos-t td:nth-child(3)>.mut{font-size:11px}
+}
+/* the bill's lines stay black on white in the dark (GST) screen, so every number reads clearly */
+@media screen {
+  html[data-company="gst"] .pos-lines{--bg:#FAF6EF;--surface:#FFFFFF;--ink:#241B2E;--ink-2:#3D3346;--muted:#6B6175;--line:#E7DBC6;--line-2:#F1E9DA;--fill:#F2EADA;color:var(--ink);background:#fff;color-scheme:light}
+  html[data-company="gst"] .pos-lines .cell{color:var(--ink)}
+}

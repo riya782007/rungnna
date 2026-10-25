@@ -197,6 +197,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
   const [rememberPack, setRememberPack] = useState(true), [quantityNote, setQuantityNote] = useState("");
   const [pricing, setPricing] = useState<PricingRule | null>(null);
   const [atShop, setAtShop] = useState(isPhoneLike());
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [already, setAlready] = useState<{ p: Purchase; labels: number; lines: number } | null>(null);
   const shopQueue = useShopQueue();
   useEffect(() => { if (!pricing) void getRule().then(setPricing).catch(() => {}); }, []);
@@ -698,6 +699,38 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
           onChange={e => set({ billNo: e.target.value, autoBillNo: false })} /></label>
         <RackPicker value={d.rack} onChange={rack => set({ rack })} /></div>
 
+      <label className="row sm" style={{ gap: 6 }}><input type="checkbox" checked={more} onChange={e => setMore(e.target.checked)} /> More details: collection / style, material and a photo for each line</label>
+      <div className="selection-bar"><SelectAll ids={d.rows.map(r => r.review_id!)} selected={selection} onChange={setSelection} label="Select all purchase lines" /><span className="sm">{d.rows.filter(r => selection.has(r.review_id!)).length} selected</span><DeleteButton className="btn sm bad" disabled={busy || !d.rows.some(r => selection.has(r.review_id!))} onDelete={() => removeRows(d.rows.filter(r => selection.has(r.review_id!)).map(r => r.review_id!))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }}>Keys: ↑↓ lines · ←→ fields · Space select · Shift+↑↓ range</span></div>
+      <div className="tw purchase-lines" onKeyDown={onPurchaseGridKey}><table className="pos-t"><thead><tr>{["No.", ...lineFields.map(f => captions[f]), ...(more ? ["Photo"] : []), "Supplier S.No.", ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
+        {d.rows.map((r, i) => <tr key={r.review_id || i}>
+          <td className="line-no" data-l="Line" title="Line number: the same small boxed number printed on this line's stickers"><input type="checkbox" aria-label={"Select purchase line " + (i + 1)} checked={selection.has(r.review_id!)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(r.review_id!) : next.delete(r.review_id!); return next; })} />{r.sr?.trim() ? <span title={"Serial on the supplier's bill (line " + (i + 1) + " here)"}>{r.sr}</span> : i + 1}</td>
+          {lineFields.map(k => k === "costcode" ? <td key={k} data-l={captions[k]} className="mono b" title="The cost as the shop's code (only people allowed to see costs see the rupees)">{codeFor(r)}</td> : <td key={k} data-l={captions[k]}>
+            <input className={"in" + ((k === "style" && r.autoStyle) || d.check?.fixes.some(f => f.line === i + 1 && f.field === k) ? " auto-filled" : "") + (k === "cost" && lowCost.includes(i + 1) ? " cost-low" : "")} aria-label={`${k} line ${i + 1}`}
+              title={k === "entry_code" ? "Editable maker initial + entry date (DDMMYY). This assumed code does not encode price." : ["qty", "pack", "stickers"].includes(k) ? `Enter copies this ${captions[k].toLowerCase()} to the next line. Type a new number to change it.${k === "stickers" ? " Blank means one per packet; 0 prints none." : ""}` : k === "style" && r.autoStyle ? "The bill printed no article number — this was built from the item and its rate. Edit it if you have the supplier's own code." : undefined}
+              inputMode={k === "cost" || k === "rate" ? "decimal" : ["qty", "pack", "stickers"].includes(k) ? "numeric" : undefined}
+              maxLength={k === "entry_code" ? 24 : undefined}
+              placeholder={k === "entry_code" ? "e.g. K201026" : k === "stickers" ? defaultStickers(r) : undefined}
+              value={r[k] ?? ""} onChange={e => row(i, k, e.target.value)}
+              onKeyDown={["qty", "pack", "stickers"].includes(k) ? e => {
+                if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+                e.preventDefault(); e.stopPropagation();
+                if (e.repeat || busy || lock.current) return;
+                try {
+                  const rows = repeatPhotoCount(d.rows, i, k as RepeatedCountField, e.currentTarget.value);
+                  countFocus.current = e.currentTarget.closest("tbody")?.querySelector<HTMLInputElement>(`input[aria-label="${k} line ${i + 2}"]`) ?? null;
+                  set({ rows });
+                  setError("");
+                } catch (error: any) { setError(error.message); }
+              } : undefined}
+              style={{ minWidth: k === "item" ? 130 : ["style", "entry_code", "collection", "material"].includes(k) ? 110 : 56 }} /></td>)}
+          {more && <td data-l="Photo"><PhotoButton value={r.photo_id} onChange={v => set({ rows: d.rows.map((x, k) => k === i ? { ...x, photo_id: v } : x) })} label="" /></td>}
+          <td data-l="Supplier S.No." className="supplier-number mono" title="Saved supplier roll number">{vendor?.vendor_code || "—"}</td>
+          <td><DeleteButton className="iconbtn" aria-label="Remove line" disabled={busy} onDelete={() => removeRows([r.review_id!])}><Trash2 size={16} /></DeleteButton></td>
+        </tr>)}</tbody></table></div>
+      {/* Owner, 25 Oct (voice): "remove this part from here and bring it down — or give a small box to tick". The
+          tools that change many lines at once sit under the lines, folded, so the bill's lines come first. */}
+      <details className="note purchase-tools" open={toolsOpen} onToggle={e => setToolsOpen((e.currentTarget as HTMLDetailsElement).open)}>
+        <summary><b>Change many lines at once</b> <span className="xs mut">— reference code, item, packet size, stickers per packet, old-software codes</span></summary>
       <BulkEdit rows={d.rows} selection={selection} disabled={busy} onApply={(ids, patch) => {
         const all = !ids;
         set({ rows: d.rows.map(r => (all || ids!.has(r.review_id!)) ? { ...r, ...patch, ...(patch.item || patch.unit ? { item_code: undefined } : {}) } : r) });
@@ -747,34 +780,7 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         </label>)}</div>
       </details>}
 
-      <label className="row sm" style={{ gap: 6 }}><input type="checkbox" checked={more} onChange={e => setMore(e.target.checked)} /> More details: collection / style, material and a photo for each line</label>
-      <div className="selection-bar"><SelectAll ids={d.rows.map(r => r.review_id!)} selected={selection} onChange={setSelection} label="Select all purchase lines" /><span className="sm">{d.rows.filter(r => selection.has(r.review_id!)).length} selected</span><DeleteButton className="btn sm bad" disabled={busy || !d.rows.some(r => selection.has(r.review_id!))} onDelete={() => removeRows(d.rows.filter(r => selection.has(r.review_id!)).map(r => r.review_id!))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }}>Keys: ↑↓ lines · ←→ fields · Space select · Shift+↑↓ range</span></div>
-      <div className="tw purchase-lines" onKeyDown={onPurchaseGridKey}><table className="pos-t"><thead><tr>{["No.", ...lineFields.map(f => captions[f]), ...(more ? ["Photo"] : []), "Supplier S.No.", ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
-        {d.rows.map((r, i) => <tr key={r.review_id || i}>
-          <td className="line-no" data-l="Line" title="Line number: the same small boxed number printed on this line's stickers"><input type="checkbox" aria-label={"Select purchase line " + (i + 1)} checked={selection.has(r.review_id!)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(r.review_id!) : next.delete(r.review_id!); return next; })} />{r.sr?.trim() ? <span title={"Serial on the supplier's bill (line " + (i + 1) + " here)"}>{r.sr}</span> : i + 1}</td>
-          {lineFields.map(k => k === "costcode" ? <td key={k} data-l={captions[k]} className="mono b" title="The cost as the shop's code (only people allowed to see costs see the rupees)">{codeFor(r)}</td> : <td key={k} data-l={captions[k]}>
-            <input className={"in" + ((k === "style" && r.autoStyle) || d.check?.fixes.some(f => f.line === i + 1 && f.field === k) ? " auto-filled" : "") + (k === "cost" && lowCost.includes(i + 1) ? " cost-low" : "")} aria-label={`${k} line ${i + 1}`}
-              title={k === "entry_code" ? "Editable maker initial + entry date (DDMMYY). This assumed code does not encode price." : ["qty", "pack", "stickers"].includes(k) ? `Enter copies this ${captions[k].toLowerCase()} to the next line. Type a new number to change it.${k === "stickers" ? " Blank means one per packet; 0 prints none." : ""}` : k === "style" && r.autoStyle ? "The bill printed no article number — this was built from the item and its rate. Edit it if you have the supplier's own code." : undefined}
-              inputMode={k === "cost" || k === "rate" ? "decimal" : ["qty", "pack", "stickers"].includes(k) ? "numeric" : undefined}
-              maxLength={k === "entry_code" ? 24 : undefined}
-              placeholder={k === "entry_code" ? "e.g. K201026" : k === "stickers" ? defaultStickers(r) : undefined}
-              value={r[k] ?? ""} onChange={e => row(i, k, e.target.value)}
-              onKeyDown={["qty", "pack", "stickers"].includes(k) ? e => {
-                if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
-                e.preventDefault(); e.stopPropagation();
-                if (e.repeat || busy || lock.current) return;
-                try {
-                  const rows = repeatPhotoCount(d.rows, i, k as RepeatedCountField, e.currentTarget.value);
-                  countFocus.current = e.currentTarget.closest("tbody")?.querySelector<HTMLInputElement>(`input[aria-label="${k} line ${i + 2}"]`) ?? null;
-                  set({ rows });
-                  setError("");
-                } catch (error: any) { setError(error.message); }
-              } : undefined}
-              style={{ minWidth: k === "item" ? 130 : ["style", "entry_code", "collection", "material"].includes(k) ? 110 : 56 }} /></td>)}
-          {more && <td data-l="Photo"><PhotoButton value={r.photo_id} onChange={v => set({ rows: d.rows.map((x, k) => k === i ? { ...x, photo_id: v } : x) })} label="" /></td>}
-          <td data-l="Supplier S.No." className="supplier-number mono" title="Saved supplier roll number">{vendor?.vendor_code || "—"}</td>
-          <td><DeleteButton className="iconbtn" aria-label="Remove line" disabled={busy} onDelete={() => removeRows([r.review_id!])}><Trash2 size={16} /></DeleteButton></td>
-        </tr>)}</tbody></table></div>
+      </details>
 
       {!!invented && <div className="note sm">{invented} line{invented === 1 ? "" : "s"} had no article number on the bill. An article was built from the item and its rate (e.g. CHOTI-273) so lines at different rates stay separate — and so buying the same thing again at the same rate matches the same product. Edit any of them if the supplier has a code.</div>}
 
