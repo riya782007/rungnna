@@ -1420,3 +1420,16 @@ tr.act-estimate td { background: #fde8e8; }
   .billing-shell .pos-line-actions .x{height:26px}
   .billing-shell .pos-lines .pos-t th{padding-block:3px}
 }
+/* Owner, 26 Oct: box picker in the right column (grows + scrolls); save / print / WhatsApp at the bottom. */
+.counter-boxes{display:flex;flex-direction:column;gap:4px;min-height:0;margin-bottom:8px}
+.counter-boxes>.xs{line-height:1.2}
+.counter-box-grid{display:flex;flex-wrap:wrap;gap:4px;max-height:120px;overflow:auto}
+.counter-box-grid .chip{height:30px;min-width:34px;padding:0 8px;justify-content:center;font-weight:700}
+.counter-box-grid .chip[aria-pressed="true"]{background:#241B2E;border-color:#241B2E;color:#fff}
+@media(min-width:1100px){
+  .billing-shell .counter-actions{display:flex;flex-direction:column;gap:8px}
+  .billing-shell .counter-boxes{flex:1 1 auto;margin:0;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  .billing-shell .counter-box-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-content:start;flex:1 1 auto;max-height:none;min-height:34px;overflow:auto}
+  .billing-shell .counter-box-grid .chip{min-width:0;padding:0;height:30px;min-height:30px}
+  .billing-shell .counter-actions .pos-actions{flex:none;margin-top:auto}
+}
