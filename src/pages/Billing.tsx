@@ -655,9 +655,10 @@ export default function Billing({ args }: { args: string[] }) {
           <b>{b.party_name || "Walk-in / cash"}</b>
           <span className="xs">{b.party_phone}{due0 > 0 ? <span className="pill bad" style={{ marginLeft: 6 }}>Due {billAmount(due0)}</span> : null}</span>
         </button>
+        {/* Karan, 26 Oct: names are typed on the spot, hand to hand — the people list only suggests */}
         <label className="f" style={{ minWidth: 130 }}>Salesman
-          <select className="in" value={b.salesman} onChange={e => set({ salesman: e.target.value })}>
-            <option value="">—</option>{staff.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}</select></label>
+          <input className="in" list="pos-names-salesman" autoComplete="off" placeholder="Type or pick" value={b.salesman || ""} onChange={e => set({ salesman: e.target.value.toUpperCase().slice(0, 60) })} />
+          <datalist id="pos-names-salesman">{staff.map(s => <option key={s.id} value={s.name} />)}</datalist></label>
         {/* Owner, 25 Oct (voice): "after 3–4 scans the lines go below and I scroll up and down — at least 8–10 lines
             must be in front of me". The rarely-changed fields fold away under "More" so the lines get the screen. */}
         <button type="button" className="linkbtn sm" aria-expanded={moreOpen} onClick={() => { setMoreOpen(o => !o); void setSetting("bill_more_open", !moreOpen); }}>{moreOpen ? "Less ▴" : `More ▾${[b.helper, b.packed_by, b.checked_by].filter(Boolean).length ? " (" + [b.helper, b.packed_by, b.checked_by].filter(Boolean).length + ")" : ""}`}</button>
@@ -665,9 +666,9 @@ export default function Billing({ args }: { args: string[] }) {
         {/* who worked the bill, in counter order: salesman → helper → packed by → rechecked by */}
         {moreOpen && ([["Helper", "helper", "helper"], ["Packing done by", "packed_by", "packer"], ["Rechecked by", "checked_by", ""]] as const).map(([title, key, prefer]) =>
           <label key={key} className="f" style={{ minWidth: 130 }}>{title}
-            <select className="in" value={b[key] || ""} onChange={e => set({ [key]: e.target.value } as Partial<Bill>)}>
-              <option value="">—</option>
-              {[...staff].sort((x, y) => Number(!!prefer && y.role === prefer) - Number(!!prefer && x.role === prefer)).map(s => <option key={s.id} value={s.name}>{s.name}{prefer && s.role === prefer ? ` (${prefer})` : ""}</option>)}</select></label>)}
+            <input className="in" list={"pos-names-" + key} autoComplete="off" placeholder="Type or pick" value={b[key] || ""} onChange={e => set({ [key]: e.target.value.toUpperCase().slice(0, 60) } as Partial<Bill>)} />
+            <datalist id={"pos-names-" + key}>
+              {[...staff].sort((x, y) => Number(!!prefer && y.role === prefer) - Number(!!prefer && x.role === prefer)).map(s => <option key={s.id} value={s.name}>{prefer && s.role === prefer ? prefer : ""}</option>)}</datalist></label>)}
         {moreOpen && <div className="pos-box"><span className="xs mut">Box qty: {b.box_count} · Current box {box}</span>
           <div className="row" style={{ gap: 4 }}>{boxes.map(x => <button key={x} className="chip" aria-pressed={x === box} onClick={() => setBox(x)}>{x}</button>)}
             <button className="chip" onClick={() => setBox(Math.max(...boxes) + 1)}>+</button></div></div>}
@@ -744,6 +745,16 @@ export default function Billing({ args }: { args: string[] }) {
 
         </div>
 
+        {/* Karan, 26 Oct: the box summary stands at the right, full height, so box 5, 6, 7… show without scrolling;
+            Save / Print / WhatsApp moved down into the totals panel in its place. */}
+        <section className="pos-box-summary counter-boxes" ref={boxSummaryRef} tabIndex={-1} aria-label="Box summary">
+          <b>Boxes <span className="xs mut">· qty</span></b>
+          <div className="pos-box-totals">{boxes.map(n => <button key={n} className="chip" aria-pressed={n === box} onClick={() => setBox(n)} aria-label={`Box ${n}, quantity ${t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}`}>
+            Box {n} <b>{t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}</b>
+          </button>)}</div>
+          <button className="chip counter-box-new" title="Next scans go into a new box" onClick={() => setBox(Math.max(...boxes) + 1)}>+ New box</button>
+        </section>
+        <aside className="pos-sum card" aria-label="Bill totals and payment">
           <div className="counter-actions">          <div className="pos-actions" aria-label="Print and save">
             <select className="in" aria-label="Print size" title="Roll printer: choose 58 mm or 80 mm thermal to match your paper. Enable auto-cut in the printer's preferences." value={fmt} onChange={e => { setFmt(e.target.value as PrintFormat); setSetting("print_fmt", e.target.value); }}>
               <option value="a5">A5 invoice</option><option value="a4">A4 invoice</option><option value="80mm">80 mm thermal</option><option value="58mm">58 mm thermal</option><option value="packing">Packing slip (no rates)</option></select>
@@ -758,7 +769,6 @@ export default function Billing({ args }: { args: string[] }) {
             </span>
             {lastSaved && (priv || !isEstimate(lastSaved)) && <button className="linkbtn sm" onClick={() => go("bills/" + lastSaved.id)}>View saved {lastSaved.bill_type === "estimate" ? "estimate" : lastSaved.bill_type === "gst" ? "tax invoice" : "challan"} {lastSaved.no}</button>}
           </div></div>
-        <aside className="pos-sum card" aria-label="Bill totals and payment">
           <div className="counter-box-tools stack">          <div className="pos-notes">
             <label className="f"><textarea ref={remarksRef} className="in" rows={2} aria-label="Remarks" value={b.remarks} onChange={e => set({ remarks: e.target.value })} placeholder="Remarks / narration — required before Hold" /></label>
             {paymentNarration(b.payments) && <div className="xs payment-narration" aria-label="Automatic payment narration">{paymentNarration(b.payments)}</div>}
@@ -766,12 +776,6 @@ export default function Billing({ args }: { args: string[] }) {
 
           {selectedLines.size > 0 && <div className="selection-bar"><span className="sm">{t.items.filter(l => selectedLines.has(l.id)).length} selected</span><DeleteButton className="btn sm bad" disabled={saving || !t.items.some(l => selectedLines.has(l.id))} onDelete={() => dropLines(t.items.filter(l => selectedLines.has(l.id)).map(l => l.id))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }}>Keys: ↑↓ rows · ←→ fields · Space select · Shift+↑↓ range</span></div>}
 {small && <SelectAll ids={t.items.map(l => l.id)} selected={selectedLines} onChange={setSelectedLines} label="Select all bill lines" />}
-          <section className="pos-box-summary" ref={boxSummaryRef} tabIndex={-1} aria-label="Box summary">
-            <b>Box summary <span className="xs mut">· quantity</span></b> <span className="xs mut">— tap a box to put the next scans in it</span>
-            <div className="pos-box-totals">{boxes.map(n => <button key={n} className="chip" aria-pressed={n === box} onClick={() => setBox(n)} aria-label={`Box ${n}, quantity ${t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}`}>
-              Box {n} · <b>{t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}</b>
-            </button>)}</div>
-          </section>
           <div className="sumrow"><span>Pieces · Boxes</span><b className="mono">{t.total_qty} · {t.box_count}</b></div>
           {b.rfid_tags?.length ? <div className="sumrow"><span>RFID tags</span><b className="mono">{b.rfid_tags.length}</b></div> : null}
           </div>
