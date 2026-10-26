@@ -607,6 +607,9 @@ export default function Billing({ args }: { args: string[] }) {
   const documentName = b.bill_type === "estimate" ? "estimate" : b.bill_type === "gst" ? "tax invoice" : "challan";
   const unnamed = unnamedCodes(t.items, id => (id ? pmap.get(id)?.item_code : undefined));
   const boxes = [...new Set([...t.items.map(l => l.box_no), box])].sort((a, z) => a - z);
+  /* Owner, 26 Oct: each box shows which bill lines (# column) it holds — e.g. box 4 = lines 23 to 28 */
+  const boxRange = (n: number) => { const nums = t.items.flatMap((l, i) => l.box_no === n ? [i + 1] : []);
+    if (!nums.length) return ""; const lo = Math.min(...nums), hi = Math.max(...nums); return lo === hi ? String(lo) : `${lo}–${hi}`; };
   const balance = due(t);
   const lastScan = t.items.find(l => l.id === lastScanId);
   const itemEditor = <Suspense fallback={<div className="pos-entry-loading" role="status">Loading items…</div>}><ManualItems key={b.id} inline persistent focusRequest={entryFocus} products={products} box={box} level={b.price_level || "wholesale"} canRates={can(me, "billing.rates")} onClose={() => {}}
@@ -747,7 +750,7 @@ export default function Billing({ args }: { args: string[] }) {
               column, where it can grow and scroll; save / print / WhatsApp sit under it at the bottom. */}
           <div className="counter-boxes" role="group" aria-label="Boxes">
             <span className="xs mut">Box qty {b.box_count} · Current <b>{box}</b></span>
-            <div className="counter-box-grid">{boxes.map(x => <button key={x} className="chip" aria-pressed={x === box} aria-label={`Box ${x}`} onClick={() => setBox(x)}>{x}</button>)}
+            <div className="counter-box-grid">{boxes.map(x => { const r = boxRange(x); return <button key={x} className="chip" aria-pressed={x === box} aria-label={`Box ${x}${r ? ", lines " + r : ", empty"}`} title={r ? `Box ${x}: lines ${r}` : `Box ${x}: empty`} onClick={() => setBox(x)}><b>{x}</b><span className="counter-box-range">{r ? "#" + r : "—"}</span></button>; })}
               <button className="chip" aria-label="New box" title="New box" onClick={() => setBox(Math.max(...boxes) + 1)}>+</button></div>
           </div>
           <div className="pos-actions" aria-label="Print and save">
@@ -775,7 +778,7 @@ export default function Billing({ args }: { args: string[] }) {
           <section className="pos-box-summary" ref={boxSummaryRef} tabIndex={-1} aria-label="Box summary">
             <b>Box summary <span className="xs mut">· quantity</span></b> <span className="xs mut">— tap a box to put the next scans in it</span>
             <div className="pos-box-totals">{boxes.map(n => <button key={n} className="chip" aria-pressed={n === box} onClick={() => setBox(n)} aria-label={`Box ${n}, quantity ${t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}`}>
-              Box {n} · <b>{t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}</b>
+              Box {n} · <b>{t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}</b>{boxRange(n) && <span className="xs mut">#{boxRange(n)}</span>}
             </button>)}</div>
           </section>
           <div className="sumrow"><span>Pieces · Boxes</span><b className="mono">{t.total_qty} · {t.box_count}</b></div>

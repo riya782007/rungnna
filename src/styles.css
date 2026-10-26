@@ -1433,3 +1433,15 @@ tr.act-estimate td { background: #fde8e8; }
   .billing-shell .counter-box-grid .chip{min-width:0;padding:0;height:30px;min-height:30px}
   .billing-shell .counter-actions .pos-actions{flex:none;margin-top:auto}
 }
+/* box chips: box no. on top, its line range (#23–28) under it */
+.counter-box-grid .chip{flex-direction:column;gap:0;line-height:1.05;height:auto;min-height:38px;padding:3px 6px}
+.counter-box-grid .chip b{font-size:15px}
+.counter-box-range{font-size:10px;font-weight:600;white-space:nowrap;opacity:.8}
+@media(min-width:1100px){
+  .billing-shell .counter-box-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .billing-shell .counter-box-grid .chip{height:auto;min-height:38px;padding:3px 2px}
+}
+/* Owner, 26 Oct: colours swapped — the scan bar on top is the dark yellow, the scanned line below is light yellow */
+.lastscan.has-item{background:#FFC800;border-left:6px solid #8A5A00;color:#2B2100}
+.pos-lines .pos-t tr.ln.scanned td,.pos-lines .pos-t tr.ln.flash td{background:#FFF3B0}
+.pos-lines .pos-t tr.ln.scanned .cell{background:#FFFBE6}
