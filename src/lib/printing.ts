@@ -16,6 +16,16 @@ export function receiptCutSetup(cut: ReceiptCut) {
     : `Windows printer preferences: ${cut === "partial" ? "Partial / Half cut" : "Full cut"} at End of Document / End of Job, not after each page. This device preference does not change the printer driver.`;
 }
 
+/* Blank paper after the last line of a receipt (owner's photo, 26 Oct: the tear went through "Box qty" and the
+   totals). The print head sits behind the tear bar / cutter, so without this the last lines are still inside the
+   printer when the slip is torn off. */
+export const RECEIPT_FEEDS = [0, 10, 15, 20, 25, 30, 40] as const;
+export const DEFAULT_RECEIPT_FEED = 20;
+export function receiptFeed(value: unknown): number {
+  const n = Number(value);
+  return value !== null && value !== "" && (RECEIPT_FEEDS as readonly number[]).includes(n) ? n : DEFAULT_RECEIPT_FEED;
+}
+
 export async function printDocument(source: Document, frame: () => Promise<void>, onDone = () => {}, cancelled = () => false) {
   const content = source.getElementById("printroot");
   if (!content?.textContent?.trim() || !content.children.length) throw new Error("No printable content. Close print and try again.");

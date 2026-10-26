@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState } from "react";
 import { getSetting } from "../lib/db";
-import { usePrintJob } from "../lib/printing";
+import { usePrintJob, receiptFeed, DEFAULT_RECEIPT_FEED } from "../lib/printing";
 import { createPortal } from "react-dom";
 import type { Bill } from "../lib/db";
 import { due, docName, taxSummary, type Shop } from "../lib/billing";
@@ -34,7 +34,7 @@ export function inWords(paise: number) {
 /* GST rule 48: a tax invoice for goods is made out in triplicate. Each printed copy says which one it is. */
 export const COPY_NAMES = ["ORIGINAL FOR RECIPIENT", "DUPLICATE FOR TRANSPORTER", "TRIPLICATE FOR SUPPLIER"];
 
-export function InvoiceSheet({ b, shop, format, copy }: { b: Bill; shop: Shop; format: PrintFormat; copy?: string }) {
+export function InvoiceSheet({ b, shop, format, copy, feed = 0 }: { b: Bill; shop: Shop; format: PrintFormat; copy?: string; feed?: number }) {
   const d = due(b);
   const money = b.bill_type !== "challan" && b.bill_type !== "return"; // no "pay now" on a challan or credit note
   const upi = money && shop.upi && d > 0 ? qrSvg(`upi://pay?pa=${shop.upi}&pn=${encodeURIComponent(shop.name)}&am=${(d / 100).toFixed(2)}&cu=INR&tn=${encodeURIComponent(b.no)}`).svg : "";
@@ -132,6 +132,8 @@ export function InvoiceSheet({ b, shop, format, copy }: { b: Bill; shop: Shop; f
       {/* Estimates and challans end at the totals (owner's request). A GST tax invoice keeps the
           supplier's signature line, which CGST Rule 46 requires; its terms come from Settings. */}
       {taxDoc && <div className="inv-terms">{shop.terms}<span>For {shop.name}{!thermal ? <><br /><br />Authorised signatory</> : null}</span></div>}
+      {/* blank paper so the last line has come out past the tear bar / cutter (Settings › Printing) */}
+      {thermal && feed > 0 && <div className="inv-feed" aria-hidden="true" style={{ height: feed + "mm" }} />}
     </div>
   );
 }
@@ -139,15 +141,19 @@ export function InvoiceSheet({ b, shop, format, copy }: { b: Bill; shop: Shop; f
 /* How many copies of a tax invoice (Settings › Printing), read before anything prints so the job starts once. */
 export function PrintBill(props: { b: Bill; shop: Shop; format: PrintFormat; onDone: () => void }) {
   const [copies, setCopies] = useState<number | null>(null);
-  useEffect(() => { getSetting<number>("invoice_copies", 1).then(n => setCopies(Number(n) || 1)).catch(() => setCopies(1)); }, []);
-  return copies === null ? null : <PrintBillNow {...props} copies={copies} />;
+  const [feed, setFeed] = useState<number | null>(null);
+  useEffect(() => {
+    getSetting<number>("invoice_copies", 1).then(n => setCopies(Number(n) || 1)).catch(() => setCopies(1));
+    getSetting<number>("receipt_feed", DEFAULT_RECEIPT_FEED).then(n => setFeed(receiptFeed(n))).catch(() => setFeed(DEFAULT_RECEIPT_FEED));
+  }, []);
+  return copies === null || feed === null ? null : <PrintBillNow {...props} copies={copies} feed={feed} />;
 }
 
-function PrintBillNow({ b, shop, format, onDone, copies = 1 }: { b: Bill; shop: Shop; format: PrintFormat; onDone: () => void; copies?: number }) {
+function PrintBillNow({ b, shop, format, onDone, copies = 1, feed = 0 }: { b: Bill; shop: Shop; format: PrintFormat; onDone: () => void; copies?: number; feed?: number }) {
   usePrintJob(true, onDone, b.id + format + copies, message => toast(message, true));
   // copies are for numbered tax invoices on sheets; a receipt, slip or estimate prints once
   const n = (format === "a4" || format === "a5") && b.bill_type === "gst" && b.no ? Math.max(1, Math.min(3, copies)) : 1;
-  const sheets = n === 1 ? <InvoiceSheet b={b} shop={shop} format={format} /> :
+  const sheets = n === 1 ? <InvoiceSheet b={b} shop={shop} format={format} feed={feed} /> :
     <>{COPY_NAMES.slice(0, n).map((c, i) => <div key={c} className="inv-copy-page" style={{ breakAfter: i < n - 1 ? "page" : "auto", pageBreakAfter: i < n - 1 ? "always" : "auto" }}><InvoiceSheet b={b} shop={shop} format={format} copy={c} /></div>)}</>;
   return <>{createPortal(sheets, document.getElementById("printroot")!)}<div className="print-notice" role="status">Print prepared · {b.no}<button className="btn sm" onClick={onDone}>Close print</button></div></>;
 }
