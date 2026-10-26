@@ -705,18 +705,26 @@ html{scrollbar-gutter:stable}
 /* keep a scanned row clear of the sticky top/subnav bars when it is scrolled into view */
 .pos-lines .pos-t tr.ln{scroll-margin-top:120px;scroll-margin-bottom:80px}
 .pos-lines .pos-t tr.ln:nth-child(even){background:#FAFBFC}
-/* the line touched by the latest scan: strong, unmistakable yellow */
-.pos-lines .pos-t tr.ln.scanned td{background:#FFD60A;font-weight:700;border-top:2px solid #B77900;border-bottom:2px solid #B77900}
+/* Owner, 26 Oct (voice): colours reversed — the dark yellow sits on the scan box, the line just scanned
+   (and the "Added" strip) below it is light yellow, still with the dark edges so it stands out. */
+.pos-lines .pos-t tr.ln.scanned td{background:#FFF3B0;color:#2B2100;font-weight:700;border-top:2px solid #B77900;border-bottom:2px solid #B77900}
 .pos-lines .pos-t tr.ln.scanned td:first-child{box-shadow:inset 6px 0 #8A5A00}
-.pos-lines .pos-t tr.ln.scanned .cell{background:#FFF7CC;font-weight:700}
-.pos-lines .pos-t tr.ln.flash td{animation:none;background:#FFD60A}
+.pos-lines .pos-t tr.ln.scanned .cell{background:#FFFBE6;color:#2B2100;font-weight:700}
+.pos-lines .pos-t tr.ln.flash td{animation:none;background:#FFF3B0}
 .pos-lines .pos-t tr.ln.flash td:first-child{box-shadow:inset 6px 0 #8A5A00}
 .pos-lines .pos-t tr.ln.noqty td:nth-child(5) .cell{border-color:var(--bad);background:var(--bad-l)}
 .pos-lines .pos-t tr.ln.noqty.stop td{background:#FBD5DD}
 .pos-lines .pos-t tr.ln.noqty.stop td:first-child{box-shadow:inset 6px 0 var(--bad)}
 .pos-qty-problem{font-size:14px;display:flex;flex-direction:column}
 .lastscan{min-height:54px;border-radius:0;background:#F8F9FA;border-left:3px solid #DADCE0;padding:5px 8px;flex-wrap:nowrap}
-.lastscan.has-item{background:#FFD60A;border-left:6px solid #8A5A00;color:#2B2100}
+.lastscan.has-item{background:#FFF3B0;border-left:6px solid #8A5A00;color:#2B2100}
+.billing-shell .pos-scanhead .wedge{background:#FFD60A;border:2px solid #8A5A00;color:#2B2100}
+.billing-shell .pos-scanhead .wedge:focus-within{border-color:#5C3D00;box-shadow:0 0 0 3px rgba(138,90,0,.25)}
+.billing-shell .pos-scanhead .wedge :is(svg,input){color:#2B2100}
+.billing-shell .pos-scanhead .wedge input::placeholder{color:#6B5300}
+.pos-box-totals .chip .box-name{display:flex;align-items:baseline;gap:5px;min-width:0}
+.pos-box-totals .chip .box-range{font-size:.82em;color:var(--muted);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pos-box-totals .chip[aria-pressed="true"] .box-range{color:#6B4500}
 .lastscan.has-item b{font-size:17px}
 .lastscan>span{flex:1;min-width:0;overflow-wrap:anywhere}
 .lastscan>span>span{display:block}
