@@ -607,6 +607,8 @@ export default function Billing({ args }: { args: string[] }) {
   const documentName = b.bill_type === "estimate" ? "estimate" : b.bill_type === "gst" ? "tax invoice" : "challan";
   const unnamed = unnamedCodes(t.items, id => (id ? pmap.get(id)?.item_code : undefined));
   const boxes = [...new Set([...t.items.map(l => l.box_no), box])].sort((a, z) => a - z);
+  /* Owner, 26 Oct (voice): each box shows which bill line numbers (#) it holds — "box 4: 23 to 28" */
+  const boxLines = (n: number) => boxLineRange(t.items.map((l, i) => l.box_no === n ? i + 1 : 0).filter(Boolean));
   const balance = due(t);
   const lastScan = t.items.find(l => l.id === lastScanId);
   const itemEditor = <Suspense fallback={<div className="pos-entry-loading" role="status">Loading items…</div>}><ManualItems key={b.id} inline persistent focusRequest={entryFocus} products={products} box={box} level={b.price_level || "wholesale"} canRates={can(me, "billing.rates")} onClose={() => {}}
@@ -749,9 +751,9 @@ export default function Billing({ args }: { args: string[] }) {
             Save / Print / WhatsApp moved down into the totals panel in its place. */}
         <section className="pos-box-summary counter-boxes" ref={boxSummaryRef} tabIndex={-1} aria-label="Box summary">
           <b>Boxes <span className="xs mut">· qty</span></b>
-          <div className="pos-box-totals">{boxes.map(n => <button key={n} className="chip" aria-pressed={n === box} onClick={() => setBox(n)} aria-label={`Box ${n}, quantity ${t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}`}>
-            Box {n} <b>{t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}</b>
-          </button>)}</div>
+          <div className="pos-box-totals">{boxes.map(n => { const lines = boxLines(n); return <button key={n} className="chip" aria-pressed={n === box} onClick={() => setBox(n)} title={lines ? `Box ${n}: bill lines ${lines}` : `Box ${n}: no lines yet`} aria-label={`Box ${n}${lines ? ", lines " + lines : ""}, quantity ${t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}`}>
+            <span className="box-name">Box {n}{lines && <small className="box-range mono">#{lines}</small>}</span> <b>{t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}</b>
+          </button>; })}</div>
           <button className="chip counter-box-new" title="Next scans go into a new box" onClick={() => setBox(Math.max(...boxes) + 1)}>+ New box</button>
         </section>
         <aside className="pos-sum card" aria-label="Bill totals and payment">
@@ -832,6 +834,17 @@ export default function Billing({ args }: { args: string[] }) {
       {printing && <PrintBill b={printing.bill} shop={shop} format={printing.fmt} onDone={() => { setPrinting(null); if (printing.bags) setBagBill(printing.bill); }} />}
     </div>
   );
+}
+
+/** Line numbers [23,24,25,26,27,28] → "23–28"; gaps are kept honest: [1,2,3,7] → "1–3, 7". */
+function boxLineRange(nums: number[]): string {
+  const runs: string[] = [];
+  for (let i = 0; i < nums.length; i++) {
+    const start = nums[i];
+    while (i + 1 < nums.length && nums[i + 1] === nums[i] + 1) i++;
+    runs.push(start === nums[i] ? String(start) : `${start}–${nums[i]}`);
+  }
+  return runs.join(", ");
 }
 
 function Payments({ pays, left, onChange }: { pays: Payment[]; left: number; onChange: (p: Payment[]) => void }) {
