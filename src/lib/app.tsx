@@ -1,7 +1,7 @@
 import { setOwnerOpen, lockNow } from "./privacy";
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { db, put, uid, now, getSetting, setSetting, deviceId, type Staff, type Location } from "./db";
-import { initStores } from "./stores";
+import { initStores, isEstimateCompany } from "./stores";
 import { setScope, setScopePerms, currentStore, MAIN_STORE } from "./scope";
 import { resetCounterAccess } from "./entryAuth";
 import { setRolesCache, setBuiltinCache, permsOf, sessionAllowed } from "./roles";
@@ -131,6 +131,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
      effect below, there would be one commit where `role` is the new person and `perms` are still
      the previous person's — reachable on a shared counter when someone switches and scans at once. */
   useEffect(() => { setOwnerOpen(me?.role === "owner"); }, [me?.role, me?.id]);
+  // one company again (owner, 26 Oct): a counter or person still set to the old estimate company works in the main one
+  useEffect(() => { void isEstimateCompany(store).then(est => {
+    if (!est) return;
+    setScope(MAIN_STORE, me?.role || "", me ? permsOf(me) : undefined); setStore(MAIN_STORE);
+    if (me?.role === "owner" || !me) void setSetting("active_store", MAIN_STORE);
+  }); }, [store, me?.id]);
   const setMe = (s: Staff | null) => { const id = s?.role === "owner" ? store : s?.store_id || MAIN_STORE; setScope(id, s?.role || ""); setScopePerms(permsOf(s)); setStore(id); setMeS(s); setSetting("me", s?.id || ""); };
   // the owner opens any company; anyone else the companies ticked for them (owner, 23 Oct)
   const switchStore = async (id: string) => {
