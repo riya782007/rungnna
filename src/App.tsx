@@ -8,6 +8,7 @@ import { Icon } from "./components/Icon";
 import { AskHost } from "./components/AskHost";
 import { ViewCodeGate } from "./components/ViewCodeGate";
 import { CompanyPicker } from "./components/CompanyPicker";
+import { CompanyToggle } from "./components/CompanyToggle";
 import { companiesFor, companyKind } from "./lib/stores";
 import { setCompanyKind } from "./lib/scope";
 import { setCompanyOpen, getPrivate } from "./lib/privacy";
@@ -230,10 +231,11 @@ function Shell() {
             collapsed rail had no other way back, the toggle lives in the phone-only top bar */}
         <div className="brand"><button type="button" className="mark markbtn" onClick={() => { setCompact(!compact); setSetting("compact_menu", !compact); }}
           title={compact ? "Show menu" : "Hide menu"} aria-label={compact ? "Show menu" : "Hide menu"} aria-expanded={!compact}>R</button><div><b>Rungnna</b><span>Jewellery &amp; Co</span></div></div>
+        <CompanyToggle companies={companies} />
         {can(me, "bill") && <a href="#/bill" className="newbill"><Icon n="plus" size={18} /><span className="t">{t("New bill")}</span><kbd style={{ background: "rgba(255,255,255,.15)", color: "#fff" }}>F2</kbd></a>}
         <button className="railsearch" onClick={() => setPal(true)}><Icon n="search" size={17} /><span className="grow">Search</span><kbd>Ctrl K</kbd></button>
         {visible.map(s => <a key={s.key} href={hrefOf(s)} title={t(s.label)} aria-label={t(s.label) + (s.key === "sell" && waiting ? ` · ${waiting} waiting` : "")} className={"nav" + (sec === s.key ? " on" : "")}><Icon n={s.icon} /><span className="grow">{t(s.label)}</span>{s.key === "sell" && waiting > 0 && <span className="navbadge" title={`${waiting} trade order${waiting > 1 ? "s" : ""} / dealer sign-up${waiting > 1 ? "s" : ""} waiting`}>{waiting > 9 ? "9+" : waiting}</span>}</a>)}
-        {companies.length > 1 && <label className="f store-switch">Company<select className="in" value={store} onChange={e => void switchStore(e.target.value)}>{companies.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>}
+        {companies.length > 1 && !(companies.length === 2 && companies.some(c => c.kind === "estimate")) && <label className="f store-switch">Company<select className="in" value={store} onChange={e => void switchStore(e.target.value)}>{companies.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>}
         {can(me, "stores.transfer") && <a className="nav" href="#/stores" title="Transfers and stores" aria-label="Transfers and stores"><Icon n="stock" /><span>Transfers{me.role === "owner" ? " & stores" : ""}</span></a>}
         {can(me, "bank.reconcile") && <a className="nav" href="#/bank" title="Bank reconciliation" aria-label="Bank reconciliation"><Icon n="sales" /><span>Bank reconciliation</span></a>}
         <div className="railfoot">
@@ -249,7 +251,8 @@ function Shell() {
           <button className="iconbtn menu-toggle" title={compact ? "Show menu" : "Hide menu"} aria-label={compact ? "Show menu" : "Hide menu"} onClick={() => { setCompact(!compact); setSetting("compact_menu", !compact); }}>{compact ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button>
           <span className="brandm"><span className="mark">R</span>{cur.label === "Home" ? "Rungnna" : t(cur.label)}</span>
           <span className="grow" />
-          {companies.length > 1 && <select aria-label="Company" className="in mobile-store" value={store} onChange={e => void switchStore(e.target.value)}>{companies.map(s => <option key={s.id} value={s.id}>{s.code}</option>)}</select>}
+          <CompanyToggle companies={companies} />
+          {companies.length > 1 && !(companies.length === 2 && companies.some(c => c.kind === "estimate")) && <select aria-label="Company" className="in mobile-store" value={store} onChange={e => void switchStore(e.target.value)}>{companies.map(s => <option key={s.id} value={s.id}>{s.code}</option>)}</select>}
           <button className="iconbtn" aria-label="Search" onClick={() => setPal(true)}><Icon n="search" size={18} /></button>
           <button className="avatar" onClick={() => go("settings")} aria-label="Me">{me.name.slice(0, 1).toUpperCase()}</button>
         </div>
