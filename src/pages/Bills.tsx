@@ -159,6 +159,7 @@ function BillView({ id }: { id: string }) {
   const [printing, setPrinting] = useState<PrintFormat | null>(null);
   const [bags, setBags] = useState(false);
   const [payAmt, setPayAmt] = useState("");
+  const [payRecipient, setPayRecipient] = useState("");
   const [split, setSplit] = useState(false);
   const [ret, setRet] = useState(false);
   const [conv, setConv] = useState(false);
@@ -170,9 +171,9 @@ function BillView({ id }: { id: string }) {
   const boss = can(me, "void");
   const cns = related.filter(x => x.status === "final" && (openP || !isEstimate(x)));
   const addPayment = async (mode: Payment["mode"]) => {
-    const amt = toPaise(payAmt || String(d / 100)); if (!amt) return;
-    await put("bills", { ...b, payments: [...b.payments, { mode, amount: amt, ref: "Received " + new Date().toLocaleDateString("en-IN"), at: new Date().toISOString() }], paid: b.paid + amt });
-    setPayAmt(""); toast("Payment recorded");
+    const amt = toPaise(payAmt); if (!amt) return toast("Enter the amount received first", true);
+    await put("bills", { ...b, payments: [...b.payments, { mode, amount: amt, ...(mode === "upi" && payRecipient.trim() ? { recipient: payRecipient.trim() } : {}), ref: "Received " + new Date().toLocaleDateString("en-IN"), at: new Date().toISOString() }], paid: b.paid + amt });
+    setPayAmt(""); setPayRecipient(""); toast("Payment recorded");
   };
   return (
     <div>
@@ -188,7 +189,9 @@ function BillView({ id }: { id: string }) {
         <div className="stack">
           <GstBill b={b} shop={shop} />
           {b.status === "final" && d > 0 && <div className="card"><header><h3>Receive payment</h3><span className="pill bad">Due {rupees(d)}</span></header>
-            <div className="pad stack"><input className="in mono" inputMode="decimal" placeholder={String(d / 100)} value={payAmt} onChange={e => setPayAmt(e.target.value)} />
+            <div className="pad stack"><input className="in mono" aria-label="Amount received" inputMode="decimal" placeholder="Amount received" value={payAmt} onChange={e => setPayAmt(e.target.value)} />
+              <button type="button" className="linkbtn sm" onClick={() => setPayAmt(String(d / 100))}>Use balance {rupees(d)}</button>
+              <input className="in" aria-label="UPI received by" placeholder="UPI received by / name (optional)" value={payRecipient} onChange={e => setPayRecipient(e.target.value)} />
               <div className="chips">{(["cash", "upi", "card", "bank"] as const).map(m => <button key={m} className="chip" onClick={() => addPayment(m)}>{m.toUpperCase()}</button>)}</div>
               {b.party_phone && <a className="btn sm" target="_blank" rel="noreferrer" href={waLink(b.party_phone, `Namaste ${b.party_name}, a gentle reminder: ${rupees(d)} is pending on bill ${b.no}.${shop.upi ? `\nUPI: upi://pay?pa=${shop.upi}&am=${(d / 100).toFixed(2)}&cu=INR` : ""}\n— ${shop.name}`)}>💬 Send payment reminder</a>}
             </div></div>}

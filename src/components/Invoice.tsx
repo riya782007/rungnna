@@ -8,6 +8,7 @@ import { placeCode, GST_STATES } from "../lib/states";
 import { billAmount } from "../lib/format";
 import { qrSvg } from "../lib/qr";
 import { toast } from "../lib/app";
+import { billNarration } from "../lib/payment-narration";
 
 export type PrintFormat = "a5" | "a4" | "80mm" | "58mm" | "packing";
 
@@ -38,6 +39,7 @@ export function InvoiceSheet({ b, shop, format, copy }: { b: Bill; shop: Shop; f
   const money = b.bill_type !== "challan" && b.bill_type !== "return"; // no "pay now" on a challan or credit note
   const upi = money && shop.upi && d > 0 ? qrSvg(`upi://pay?pa=${shop.upi}&pn=${encodeURIComponent(shop.name)}&am=${(d / 100).toFixed(2)}&cu=INR&tn=${encodeURIComponent(b.no)}`).svg : "";
   const prices = format !== "packing";
+  const narration = prices ? billNarration(b) : b.remarks;
   const estimate = prices && b.bill_type === "estimate";
   const title = format === "packing" ? "PACKING SLIP" : docName(b).toUpperCase();
   const boxes = [...new Set(b.items.map(l => l.box_no))].sort((a, z) => a - z);
@@ -62,7 +64,7 @@ export function InvoiceSheet({ b, shop, format, copy }: { b: Bill; shop: Shop; f
         {/* Owner, 22 Oct: an estimate carries only the shop's initials ("RJ") at the top, no name or tagline.
             Tax invoices keep the full name, as the law needs. */}
         <div><div className="inv-shop">{estimate ? initials(shop.name) : shop.name}</div>{!estimate && <div className="inv-sub">{shop.tagline}</div>}
-          {!estimate && <div className="inv-sub">{[shop.address, shop.phone].filter(Boolean).join(" · ")}</div>}
+          {!estimate && <div className="inv-sub">{[shop.address, shop.phone, shop.email].filter(Boolean).join(" · ")}</div>}
           {shop.gstin && taxDoc && <div className="inv-sub">GSTIN: <b>{shop.gstin}</b>{shop.state ? " · State: " + shop.state + (shopCode ? " (" + shopCode + ")" : "") : ""}</div>}</div>
         <div className="inv-title">{title}{estimate && <div className="inv-approval">APPROVAL CHALLAN</div>}{copy && <div className="inv-copy">{copy}</div>}{b.status === "void" && <div className="inv-void">CANCELLED</div>}
           {notExecuted && <div><span className="inv-notexec">SALE NOT EXECUTED · बिक्री निष्पादित नहीं</span></div>}</div>
@@ -103,7 +105,7 @@ export function InvoiceSheet({ b, shop, format, copy }: { b: Bill; shop: Shop; f
           {taxDoc && prices && (byHsn.length > 1
             ? <div className="inv-sub">{byHsn.map(h => <span key={h.hsn + h.rate} style={{ display: "block" }}>HSN {h.hsn} · GST {pct(h.rate)}% · taxable {billAmount(h.taxable)}</span>)}{b.gst_mode === "inclusive" ? "(GST included in rates)" : ""}</div>
             : <div className="inv-sub">HSN {byHsn[0]?.hsn || shop.hsn} · GST {pct(byRate[0]?.rate ?? b.gst_rate)}% {b.gst_mode === "inclusive" ? "(included in rates)" : ""} · Reverse charge: No</div>)}
-          {b.remarks && <div><b>Remarks:</b> {b.remarks}</div>}
+          {narration && <div style={{ whiteSpace: "pre-wrap" }}><b>Remarks:</b> {narration}</div>}
           {shop.bank && prices && <div className="inv-sub">Bank: {shop.bank}</div>}
           {upi && prices && <div className="row" style={{ gap: 6, alignItems: "center" }}><span className="inv-qr" dangerouslySetInnerHTML={{ __html: upi }} /><span className="inv-sub">Scan to pay {billAmount(d)}<br />UPI: {shop.upi}</span></div>}
         </div>

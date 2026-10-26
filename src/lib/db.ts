@@ -110,7 +110,7 @@ export interface BillLine {
   stock_done?: 1;          // these pieces already left the racks on another document (merged / challan / split)
   src_line?: string;       // credit note: the line of the original bill being returned
 }
-export interface Payment { mode: "cash" | "upi" | "card" | "bank" | "credit"; amount: number; ref?: string; at?: string }
+export interface Payment { mode: "cash" | "upi" | "card" | "bank" | "credit"; amount: number; ref?: string; at?: string; recipient?: string }
 /* gst = tax invoice · estimate = private bill · challan = delivery challan (goods out, no money) · return = credit note */
 export type BillType = "gst" | "estimate" | "challan" | "return";
 export type BillStatus = "hold" | "final" | "void" | "converted" | "merged";

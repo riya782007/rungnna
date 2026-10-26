@@ -38,6 +38,7 @@ import { parseLabel } from "../lib/parse";
 import { BagLabels } from "../components/BagLabels";
 import { BAG_PREFIX, parseBagPayload } from "../lib/bag-labels";
 import { BillScanNotice, type BillScanFeedback } from "../components/BillScanNotice";
+import { paymentNarration } from "../lib/payment-narration";
 
 /* The counter screen. Built like the shop's current PACKING SLIP: scan → lines → totals → save/print,
    every action on a function key, works with no internet (numbers come from this counter's own series). */
@@ -263,6 +264,7 @@ export default function Billing({ args }: { args: string[] }) {
   const [due0, setDue0] = useState(0);
   const scanRef = useRef<HTMLInputElement>(null);
   const advanceRef = useRef<HTMLInputElement>(null);
+  const remarksRef = useRef<HTMLTextAreaElement>(null);
   const boxSummaryRef = useRef<HTMLElement>(null);
   const counterDockRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -504,6 +506,11 @@ export default function Billing({ args }: { args: string[] }) {
 
   async function doSave(print = false, share = false, bags = false) {
     if (!b || !t) return;
+    if (b.bill_type !== "challan" && b.payments.some(p => p.mode !== "credit" && p.amount <= 0)) {
+      toast("Enter the amount received, or remove the unused payment row. No payment is assumed.", true);
+      document.querySelector<HTMLInputElement>('.payment-row input[aria-label$="amount"]')?.focus();
+      return;
+    }
     if (bags && !b.party_name.trim()) return toast("Enter the customer name before printing bag labels", true);
     if (savingRef.current || switchingRef.current) return;
     if (b.status === "final") {
@@ -550,6 +557,7 @@ export default function Billing({ args }: { args: string[] }) {
   async function doHold() {
     if (savingRef.current || switchingRef.current) return;
     if (!b?.items.length) return toast("Nothing to hold", true);
+    if (!b.remarks?.trim()) { toast("Write a remark before Hold — customer, reason or what is pending.", true); remarksRef.current?.focus(); return; }
     await parkBillingDraft(b, box, shop); await setSetting("draft_bill", null);
     toast("Bill on hold — F4 to bring it back"); setB(newBill(me?.id || "", shop, b.bill_type)); setBox(1);
   }
@@ -641,7 +649,7 @@ export default function Billing({ args }: { args: string[] }) {
             <button aria-pressed={b.bill_type === "challan"} onClick={() => void openDocument("challan")} title="Send goods now, invoice later">Challan</button>
           </div></div>}
         <div className="pos-no"><span className="xs mut">{b.no ? "Bill no" : "Next no"}</span><b className="mono">{b.no || nextNo}</b>
-          {b.bill_type === "estimate" && <input className="in xs mono" style={{ marginTop: 4, maxWidth: 170 }} aria-label="Invoice no. for this estimate" placeholder="Invoice no. (optional)" value={b.inv_no || ""} onChange={e => set({ inv_no: e.target.value.toUpperCase().slice(0, 24) })} />}</div>
+          {b.bill_type === "estimate" && (moreOpen || !!b.inv_no) && <input className="in xs mono" style={{ marginTop: 4, maxWidth: 170 }} aria-label="Invoice no. for this estimate" placeholder="Invoice no. (optional)" value={b.inv_no || ""} onChange={e => set({ inv_no: e.target.value.toUpperCase().slice(0, 24) })} />}</div>
         <button className="pos-cust" onClick={() => setCustOpen(true)}>
           <span className="xs mut">Client name</span>
           <b>{b.party_name || "Walk-in / cash"}</b>
@@ -653,6 +661,7 @@ export default function Billing({ args }: { args: string[] }) {
         {/* Owner, 25 Oct (voice): "after 3–4 scans the lines go below and I scroll up and down — at least 8–10 lines
             must be in front of me". The rarely-changed fields fold away under "More" so the lines get the screen. */}
         <button type="button" className="linkbtn sm" aria-expanded={moreOpen} onClick={() => { setMoreOpen(o => !o); void setSetting("bill_more_open", !moreOpen); }}>{moreOpen ? "Less ▴" : `More ▾${[b.helper, b.packed_by, b.checked_by].filter(Boolean).length ? " (" + [b.helper, b.packed_by, b.checked_by].filter(Boolean).length + ")" : ""}`}</button>
+        {moreOpen && me?.role === "owner" && !companyKindNow() && <a className="linkbtn sm" href="#/stores">Separate Estimates / GST companies →</a>}
         {/* who worked the bill, in counter order: salesman → helper → packed by → rechecked by */}
         {moreOpen && ([["Helper", "helper", "helper"], ["Packing done by", "packed_by", "packer"], ["Rechecked by", "checked_by", ""]] as const).map(([title, key, prefer]) =>
           <label key={key} className="f" style={{ minWidth: 130 }}>{title}
@@ -735,22 +744,6 @@ export default function Billing({ args }: { args: string[] }) {
 
         </div>
 
-        <aside className="pos-sum card" aria-label="Bill totals and payment">
-          <div className="counter-box-tools stack">          <div className="pos-notes">
-            <label className="f"><input className="in" aria-label="Remarks" value={b.remarks} onChange={e => set({ remarks: e.target.value })} placeholder="Remarks — transport, marka, instructions…" /></label>
-          </div>
-
-          {selectedLines.size > 0 && <div className="selection-bar"><span className="sm">{t.items.filter(l => selectedLines.has(l.id)).length} selected</span><DeleteButton className="btn sm bad" disabled={saving || !t.items.some(l => selectedLines.has(l.id))} onDelete={() => dropLines(t.items.filter(l => selectedLines.has(l.id)).map(l => l.id))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }}>Keys: ↑↓ rows · ←→ fields · Space select · Shift+↑↓ range</span></div>}
-{small && <SelectAll ids={t.items.map(l => l.id)} selected={selectedLines} onChange={setSelectedLines} label="Select all bill lines" />}
-          <section className="pos-box-summary" ref={boxSummaryRef} tabIndex={-1} aria-label="Box summary">
-            <b>Box summary</b> <span className="xs mut">— tap a box to put the next scans in it</span>
-            <div className="pos-box-totals">{boxes.map(n => <button key={n} className="chip" aria-pressed={n === box} onClick={() => setBox(n)} aria-label={`Box ${n}, quantity ${t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}`}>
-              Box {n} · <b>{t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}</b> qty
-            </button>)}</div>
-          </section>
-          <div className="sumrow"><span>Pieces · Boxes</span><b className="mono">{t.total_qty} · {t.box_count}</b></div>
-          {b.rfid_tags?.length ? <div className="sumrow"><span>RFID tags</span><b className="mono">{b.rfid_tags.length}</b></div> : null}
-          </div>
           <div className="counter-actions">          <div className="pos-actions" aria-label="Print and save">
             <select className="in" aria-label="Print size" title="Roll printer: choose 58 mm or 80 mm thermal to match your paper. Enable auto-cut in the printer's preferences." value={fmt} onChange={e => { setFmt(e.target.value as PrintFormat); setSetting("print_fmt", e.target.value); }}>
               <option value="a5">A5 invoice</option><option value="a4">A4 invoice</option><option value="80mm">80 mm thermal</option><option value="58mm">58 mm thermal</option><option value="packing">Packing slip (no rates)</option></select>
@@ -765,6 +758,23 @@ export default function Billing({ args }: { args: string[] }) {
             </span>
             {lastSaved && (priv || !isEstimate(lastSaved)) && <button className="linkbtn sm" onClick={() => go("bills/" + lastSaved.id)}>View saved {lastSaved.bill_type === "estimate" ? "estimate" : lastSaved.bill_type === "gst" ? "tax invoice" : "challan"} {lastSaved.no}</button>}
           </div></div>
+        <aside className="pos-sum card" aria-label="Bill totals and payment">
+          <div className="counter-box-tools stack">          <div className="pos-notes">
+            <label className="f"><textarea ref={remarksRef} className="in" rows={2} aria-label="Remarks" value={b.remarks} onChange={e => set({ remarks: e.target.value })} placeholder="Remarks / narration — required before Hold" /></label>
+            {paymentNarration(b.payments) && <div className="xs payment-narration" aria-label="Automatic payment narration">{paymentNarration(b.payments)}</div>}
+          </div>
+
+          {selectedLines.size > 0 && <div className="selection-bar"><span className="sm">{t.items.filter(l => selectedLines.has(l.id)).length} selected</span><DeleteButton className="btn sm bad" disabled={saving || !t.items.some(l => selectedLines.has(l.id))} onDelete={() => dropLines(t.items.filter(l => selectedLines.has(l.id)).map(l => l.id))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }}>Keys: ↑↓ rows · ←→ fields · Space select · Shift+↑↓ range</span></div>}
+{small && <SelectAll ids={t.items.map(l => l.id)} selected={selectedLines} onChange={setSelectedLines} label="Select all bill lines" />}
+          <section className="pos-box-summary" ref={boxSummaryRef} tabIndex={-1} aria-label="Box summary">
+            <b>Box summary <span className="xs mut">· quantity</span></b> <span className="xs mut">— tap a box to put the next scans in it</span>
+            <div className="pos-box-totals">{boxes.map(n => <button key={n} className="chip" aria-pressed={n === box} onClick={() => setBox(n)} aria-label={`Box ${n}, quantity ${t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}`}>
+              Box {n} · <b>{t.items.filter(l => l.box_no === n).reduce((a, l) => a + l.qty, 0)}</b>
+            </button>)}</div>
+          </section>
+          <div className="sumrow"><span>Pieces · Boxes</span><b className="mono">{t.total_qty} · {t.box_count}</b></div>
+          {b.rfid_tags?.length ? <div className="sumrow"><span>RFID tags</span><b className="mono">{b.rfid_tags.length}</b></div> : null}
+          </div>
           <div className="counter-amounts stack">
           <div className="sumrow"><span>Total amount</span><b className="mono">{billAmount(t.gross)}</b></div>
           {/* Owner, 23 Oct: he typed 50 for a 50% discount (his old software's discount box is a percentage; half
@@ -821,16 +831,27 @@ export default function Billing({ args }: { args: string[] }) {
 }
 
 function Payments({ pays, left, onChange }: { pays: Payment[]; left: number; onChange: (p: Payment[]) => void }) {
+  const paymentInputs = useRef<HTMLDivElement>(null);
+  const focusNew = useRef(false);
+  useEffect(() => {
+    if (!focusNew.current) return;
+    focusNew.current = false;
+    const inputs = paymentInputs.current?.querySelectorAll<HTMLInputElement>('.payment-row input[aria-label$="amount"]');
+    inputs?.[inputs.length - 1]?.focus();
+  }, [pays.length]);
   const paid = pays.reduce((a, p) => a + (p.mode === "credit" ? 0 : p.amount), 0);
   const rest = Math.max(0, left - paid);
-  const add = (mode: Payment["mode"]) => onChange([...pays, { mode, amount: rest, at: new Date().toISOString() }]);
+  const add = (mode: Payment["mode"]) => { focusNew.current = true; onChange([...pays, { mode, amount: 0, at: new Date().toISOString() }]); };
   return (
-    <div className="stack" style={{ gap: 4 }}>
+    <div ref={paymentInputs} className="stack" style={{ gap: 4 }}>
       {pays.map((p, i) => (
-        <div key={i} className="sumrow"><span className="pill">{p.mode.toUpperCase()}</span>
+        <div key={i} className="payment-row"><div className="sumrow"><span className="pill">{p.mode.toUpperCase()}</span>
           <span className="row" style={{ gap: 4, flexWrap: "nowrap" }}>
-            <MoneyInput className="cell r" style={{ width: 90 }} paise={p.amount} onPaise={v => onChange(pays.map((x, j) => j === i ? { ...x, amount: v } : x))} />
-            <DeleteButton className="x" aria-label="Remove payment" onDelete={async () => { if (await confirmDelete("Remove this payment from the bill?")) onChange(pays.filter((_, j) => j !== i)); }}>✕</DeleteButton></span></div>))}
+            <MoneyInput className="cell r" aria-label={`${p.mode.toUpperCase()} payment ${i + 1} amount`} style={{ width: 90 }} paise={p.amount} onPaise={v => onChange(pays.map((x, j) => j === i ? { ...x, amount: v } : x))} />
+            <DeleteButton className="x" aria-label="Remove payment" onDelete={async () => { if (await confirmDelete("Remove this payment from the bill?")) onChange(pays.filter((_, j) => j !== i)); }}>✕</DeleteButton></span></div>
+          {p.mode === "upi" && <input className="in payment-recipient" aria-label={`UPI payment ${i + 1} received by`} placeholder="Received by / UPI name" value={p.recipient || ""} onChange={e => onChange(pays.map((x, j) => j === i ? { ...x, recipient: e.target.value } : x))} />}
+          {!p.amount && rest > 0 && <button type="button" className="linkbtn xs" onClick={() => onChange(pays.map((x, j) => j === i ? { ...x, amount: rest } : x))}>Use balance {billAmount(rest)}</button>}
+        </div>))}
       <div className="chips">{(["cash", "upi", "card", "bank"] as const).map(m => <button key={m} className="chip" onClick={() => add(m)} disabled={!rest}>+ {m.toUpperCase()}</button>)}</div>
     </div>
   );
@@ -877,7 +898,7 @@ function HeldBills({ activeId, onPick, onClose }: { activeId: string; onPick: (b
       <div className="stack" style={{ gap: 6 }}>
         {list.map(b => (
           <div key={b.id} className="item">
-            <span className="grow"><span className="pill">{b.bill_type === "estimate" ? "Estimate" : b.bill_type === "gst" ? "Tax invoice" : "Challan"}</span> <b>{b.party_name || "Walk-in"}</b><div className="xs mut">{b.items.length} lines · {b.total_qty} pcs · {new Date(b.at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</div></span>
+            <span className="grow"><span className="pill">{b.bill_type === "estimate" ? "Estimate" : b.bill_type === "gst" ? "Tax invoice" : "Challan"}</span> <b>{b.party_name || "Walk-in"}</b><div className="xs mut">{b.items.length} lines · {b.total_qty} pcs · {new Date(b.at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</div>{b.remarks && <div className="sm" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{b.remarks}</div>}</span>
             <b className="mono">{billAmount(b.net)}</b>
             <button className="btn sm p" onClick={() => onPick(b)}>Resume</button>
             <DeleteButton className="btn sm bad" onDelete={async () => { if (await confirmDelete("Discard this held bill?")) await put("bills", { ...b, deleted: 1 }); }}>Discard</DeleteButton>

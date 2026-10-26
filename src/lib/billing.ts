@@ -1,4 +1,5 @@
 import { allocate } from "./allocate";
+import { billNarration } from "./payment-narration";
 import { trackCustomLines, unassignedRack } from "./stock-adjustment";
 import { db, put, uid, now, deviceId, getSetting, setSetting, type Bill, type BillLine, type BillType, type Movement, type Party, type Product, type Config } from "./db";
 import { rupees, billAmount } from "./format";
@@ -9,12 +10,13 @@ import { currentStore, inStore, assertStoreRow, storeLocations } from "./stores"
 import { fillBillNames } from "./billing-products";
 import { validatePosLines } from "./pos";
 import { isInterState } from "./states";
-import { requirePerm, typeForCompany } from "./scope";
+import { requirePerm, typeForCompany, MAIN_STORE } from "./scope";
 import { purgeEstimates } from "./estimatePurge";
 
 /* ---------------- shop profile (synced to every device) ---------------- */
 export interface Shop {
   name: string; tagline: string; address: string; phone: string; whatsapp: string; gstin: string;
+  email?: string;
   state: string; upi: string; bank: string; terms: string; hsn: string; gst_rate: number; gst_mode: "exclusive" | "inclusive"; max_disc: number;
   /** what a bill line shows: just the item name (default, owner 22 Oct: bills of 100–150 lines stay short) or item + style + colour */
   bill_lines?: "item" | "full";
@@ -24,8 +26,12 @@ export const DEFAULT_SHOP: Shop = {
   state: "Delhi", upi: "", bank: "", terms: "Goods once sold will not be taken back. Subject to local jurisdiction.",
   hsn: "7117", gst_rate: 3, gst_mode: "exclusive", max_disc: 10,
 };
-export async function getShop(): Promise<Shop> {
-  const c = await db.config.get("shop");
+async function shopConfigKey(store: string) {
+  const company = await db.stores.get(store);
+  return store !== MAIN_STORE && company?.kind ? `shop_${store}` : "shop";
+}
+export async function getShop(store = currentStore()): Promise<Shop> {
+  const c = await db.config.get(await shopConfigKey(store));
   /* The shop is in Sadar Bazar, Delhi. A blank state (as saved on 16 Oct) made every out-of-state tax invoice charge
      CGST + SGST while printing "Place of supply: Rajasthan": the state decides IGST, so it is never left blank. */
   const v = { ...DEFAULT_SHOP, ...(c?.value || {}) };
@@ -33,7 +39,8 @@ export async function getShop(): Promise<Shop> {
 }
 export async function saveShop(v: Shop) {
   requirePerm("settings.manage", "changing shop settings");
-  await put("config", { id: "shop", value: v, updated_at: now() } as Config);
+  const store = currentStore();
+  await put("config", { id: await shopConfigKey(store), value: v, updated_at: now() } as Config);
 }
 
 /* ---------------- numbering: each counter owns its own series, so offline numbers never clash ---------------- */
@@ -394,7 +401,7 @@ export function billText(b: Bill, shop: Shop) {
   const d = isSale(b) ? due(b) : 0; if (d > 0) L.push(`Balance due: ${billAmount(d)}`);
   if (isSale(b) && d < 0) L.push(`Excess received: ${billAmount(-d)}`);
   if (isSale(b) && b.prev_due) L.push(`Previous balance: ${billAmount(b.prev_due)}`, `Total due: ${billAmount(b.prev_due + d)}`);
-  if (b.remarks) L.push(`Remarks: ${b.remarks}`);
+  if (billNarration(b)) L.push(`Remarks: ${billNarration(b)}`);
   if (shop.upi && d > 0) L.push(`Pay by UPI: upi://pay?pa=${encodeURIComponent(shop.upi)}&pn=${encodeURIComponent(shop.name)}&am=${(d / 100).toFixed(2)}&cu=INR`);
   L.push("", "Thank you! 🙏");
   return L.join("\n");
@@ -477,7 +484,7 @@ export async function billImage(b: Bill, shop: Shop): Promise<Blob> {
   if (d > 0) row("Balance due", d, true);
   if (isSale(b) && d < 0) row("Excess received", -d);
   if (isSale(b) && b.prev_due) { row("Previous balance", b.prev_due); row("Total due", b.prev_due + d, true); }
-  if (b.remarks) { y += 10; block("Remarks: " + b.remarks); }
+  if (billNarration(b)) { y += 10; block("Remarks: " + billNarration(b)); }
   if (shop.bank) block("Bank: " + shop.bank);
   y += 16; block("Thank you for shopping with us", "italic 16px Georgia", 24, "#A07E2E");
   c.height = Math.ceil(y + pad);

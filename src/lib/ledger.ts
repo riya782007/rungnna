@@ -6,6 +6,7 @@ import { isOpen, isEstimate } from "./privacy";
 import { Pdf, fit } from "./pdf";
 import { assertUnlocked } from "./finance";
 import { requirePerm } from "./scope";
+import { billNarration, paymentNarration } from "./payment-narration";
 
 /* A customer's account, the way a khata reads: what they bought (debit), what they paid (credit), balance. */
 export type Entry = { at: string; kind: "opening" | "bill" | "paid" | "receipt" | "return" | "refund"; ref: string; id?: string; debit: number; credit: number; balance: number; note?: string };
@@ -32,9 +33,9 @@ export async function ledger(party: Party): Promise<{ entries: Entry[]; balance:
   }
   for (const b of bills) {
     // the narration: pieces, and whatever was written on the bill (transport, marka…)
-    raw.push({ at: b.at, kind: "bill", ref: b.no, id: b.id, debit: b.net, credit: 0, note: [`${b.total_qty} pcs`, b.remarks?.trim()].filter(Boolean).join(" · ") });
+    raw.push({ at: b.at, kind: "bill", ref: b.no, id: b.id, debit: b.net, credit: 0, note: [`${b.total_qty} pcs`, billNarration(b)].filter(Boolean).join(" · ") });
     const paid = b.advance + b.payments.filter(p => p.mode !== "credit" && !fromReceipt(p)).reduce((a, p) => a + p.amount, 0);
-    if (paid) raw.push({ at: b.at, kind: "paid", ref: "Paid on " + b.no, id: b.id, debit: 0, credit: paid });
+    if (paid) raw.push({ at: b.at, kind: "paid", ref: "Paid on " + b.no, id: b.id, debit: 0, credit: paid, note: paymentNarration(b.payments.filter(p => !fromReceipt(p))) || undefined });
   }
   for (const r of rcpts) { const amt = visibleAmount(r); if (amt) raw.push({ at: r.at, kind: "receipt", ref: r.no + " · " + r.mode.toUpperCase(), id: r.id, debit: 0, credit: amt, note: r.note }); }
   raw.sort((a, z) => (a.at < z.at ? -1 : a.at > z.at ? 1 : a.kind === "bill" ? -1 : 1));

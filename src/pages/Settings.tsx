@@ -512,10 +512,11 @@ function ShopProfile() {
   return (
     <div className="card"><header><h3>Shop profile (printed on bills)</h3><span className="grow" /><SaveState dirty={dirty} /></header>
       <div className="pad stack">
-        <div className="set-intro">Printed at the top and bottom of every bill, on every counter.</div>
+        <div className="set-intro">Bill details for the selected company. Separate GST and Estimates companies keep separate profiles, email, UPI and bank details. The cloud sign-in email is managed under Backup &amp; devices.</div>
         <div className="grid g2">
           {f("name", "Shop name")}{f("tagline", "Tagline")}
           {f("phone", "Phone")}{f("whatsapp", "WhatsApp number")}
+          {f("email", "Company email", "Company contact email")}
           {f("gstin", "GSTIN", "07ABCDE1234F1Z5")}{f("state", "State", "Delhi")}
           {f("upi", "UPI ID (for pay-QR on bills)", "rungnna@okaxis")}{f("hsn", "HSN code", "7117")}
           {f("gst_rate", "GST %", "3")}
@@ -524,7 +525,7 @@ function ShopProfile() {
         </div>
         {f("address", "Address")}{f("bank", "Bank details", "HDFC · A/c 123… · IFSC …")}{f("terms", "Terms (bottom of bill)")}
         <button className={"btn" + (dirty ? " p" : "")} disabled={!dirty} onClick={async () => { await saveShop(s); setSaved(s); setJustSaved(true); toast("Shop profile saved — every counter gets it"); }}>{dirty ? "Save shop profile" : "Saved"}</button>
-        {justSaved && !dirty && <div className="note ok applied-note sm" role="status">✓ Saved. The next bill on every counter prints these details.</div>}
+        {justSaved && !dirty && <div className="note ok applied-note sm" role="status">✓ Saved for this company. Its next bill uses these details.</div>}
         <div className="grid g2">
           <label className="f">This counter's code (in bill numbers)<input className="in mono" value={cc} maxLength={4} onChange={e => setCc(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))} onBlur={() => cc && setSetting("counter_code", cc)} /></label>
           <label className="f">New bills start as<select className="in" value={def} onChange={e => { setDef(e.target.value); setSetting("default_bill_type", e.target.value); }}><option value="estimate">Estimate</option><option value="gst">GST invoice</option></select></label>

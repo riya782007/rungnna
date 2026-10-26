@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { billNarration } from "../lib/payment-narration";
 import { createPortal } from "react-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, getSetting, setSetting, type Bill, type Party } from "../lib/db";
@@ -52,7 +53,7 @@ export function SalesSummaryButton({ party, shop }: { party: Party; shop: Shop }
       <div className="inv-meta"><div><b>Bill To</b><br /><b>{party.name}</b><br />{[party.address, party.city].filter(Boolean).join(", ")}<br />{party.phone}{party.gstin ? <><br />GSTIN: {party.gstin}</> : null}</div></div>
       <b>Vouchers</b>
       <table className="inv-t"><thead><tr><th>Sr.</th><th>Date</th><th>{doc.bills.every(b => b.bill_type === "estimate") ? "Estimate No" : "Bill No"}</th><th>Narration</th><th style={{ textAlign: "right" }}>Amount</th></tr></thead>
-        <tbody>{doc.bills.map((b, i) => <tr key={b.id}><td>{i + 1}</td><td>{new Date(b.at).toLocaleDateString("en-IN")}</td><td>{b.no}{b.inv_no ? ` · ${b.inv_no}` : ""}</td><td>{b.remarks || ""}</td><td style={{ textAlign: "right" }}>{(b.net / 100).toFixed(2)}</td></tr>)}</tbody></table>
+        <tbody>{doc.bills.map((b, i) => <tr key={b.id}><td>{i + 1}</td><td>{new Date(b.at).toLocaleDateString("en-IN")}</td><td>{b.no}{b.inv_no ? ` · ${b.inv_no}` : ""}</td><td>{billNarration(b)}</td><td style={{ textAlign: "right" }}>{(b.net / 100).toFixed(2)}</td></tr>)}</tbody></table>
       <div className="inv-foot">
         <table className="inv-t"><thead><tr><th>HSN</th><th>Tax</th><th>IGST</th><th>SGST</th><th>CGST</th></tr></thead>
           <tbody><tr><td>{shop.hsn || "711719"}</td><td>{(tax / 100).toFixed(0)} ({rate}%)</td><td>{same ? "0" : (tax / 100).toFixed(0)}</td><td>{same ? (tax / 200).toFixed(2) : "0"} ({rate / 2}%)</td><td>{same ? (tax / 200).toFixed(2) : "0"} ({rate / 2}%)</td></tr></tbody></table>

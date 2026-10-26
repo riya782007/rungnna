@@ -4,7 +4,7 @@ import { db, put } from "../src/lib/db";
 import { permsOf, can } from "../src/lib/roles";
 import { setScope, setCompanyKind, typeForCompany, MAIN_STORE } from "../src/lib/scope";
 import { setUpTwoCompanies, companiesFor } from "../src/lib/stores";
-import { newBill, DEFAULT_SHOP } from "../src/lib/billing";
+import { newBill, DEFAULT_SHOP, getShop, saveShop } from "../src/lib/billing";
 import { getRule, saveRule, DEFAULT_RULE } from "../src/lib/pricing";
 import { viewCodeMatches, setViewCode } from "../src/lib/viewCode";
 import { isOpen, setOwnerOpen, setCompanyOpen } from "../src/lib/privacy";
@@ -22,6 +22,19 @@ describe("a person is a name with ticks", () => {
 });
 
 describe("two companies", () => {
+  it("keeps contact email, GSTIN, UPI and bank profiles separate without copying tax details into estimates", async () => {
+    await db.stores.put({ id: MAIN_STORE, code: "MAIN", name: "Main", address: "", active: 1, updated_at: "1970-01-01" });
+    await saveShop({ ...DEFAULT_SHOP, email: "gst@example.test", gstin: "07ABCDE1234F1Z5", upi: "gst@bank", bank: "GST account" });
+    const est = await setUpTwoCompanies();
+    setScope(est.id, "owner");
+    expect((await getShop()).gstin).toBe("");
+    expect((await getShop()).email).toBeUndefined();
+    expect((await getShop()).upi).toBe("");
+    await saveShop({ ...DEFAULT_SHOP, email: "est@example.test", upi: "est@bank", bank: "Estimate account" });
+    setScope(MAIN_STORE, "owner");
+    expect(await getShop()).toMatchObject({ email: "gst@example.test", gstin: "07ABCDE1234F1Z5", upi: "gst@bank", bank: "GST account" });
+    expect(await getShop(est.id)).toMatchObject({ email: "est@example.test", gstin: "", upi: "est@bank", bank: "Estimate account" });
+  });
   it("sets up the estimate company beside the tax-invoice one, and each bills only its own kind", async () => {
     await db.stores.put({ id: MAIN_STORE, code: "MAIN", name: "Main", address: "", active: 1, updated_at: "1970-01-01" });
     const est = await setUpTwoCompanies();
