@@ -655,9 +655,10 @@ export default function Billing({ args }: { args: string[] }) {
           <b>{b.party_name || "Walk-in / cash"}</b>
           <span className="xs">{b.party_phone}{due0 > 0 ? <span className="pill bad" style={{ marginLeft: 6 }}>Due {billAmount(due0)}</span> : null}</span>
         </button>
+        {/* Owner, 26 Oct: type any name at the counter, hand to hand — the staff list only suggests, it never limits */}
         <label className="f" style={{ minWidth: 130 }}>Salesman
-          <select className="in" value={b.salesman} onChange={e => set({ salesman: e.target.value })}>
-            <option value="">—</option>{staff.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}</select></label>
+          <input className="in" list="pos-staff-salesman" autoComplete="off" placeholder="Type or pick" value={b.salesman || ""} onChange={e => set({ salesman: e.target.value })} onBlur={e => { const v = e.target.value.replace(/\s+/g, " ").trim(); if (v !== e.target.value) set({ salesman: v }); }} />
+          <datalist id="pos-staff-salesman">{staff.map(s => <option key={s.id} value={s.name} />)}</datalist></label>
         {/* Owner, 25 Oct (voice): "after 3–4 scans the lines go below and I scroll up and down — at least 8–10 lines
             must be in front of me". The rarely-changed fields fold away under "More" so the lines get the screen. */}
         <button type="button" className="linkbtn sm" aria-expanded={moreOpen} onClick={() => { setMoreOpen(o => !o); void setSetting("bill_more_open", !moreOpen); }}>{moreOpen ? "Less ▴" : `More ▾${[b.helper, b.packed_by, b.checked_by].filter(Boolean).length ? " (" + [b.helper, b.packed_by, b.checked_by].filter(Boolean).length + ")" : ""}`}</button>
@@ -665,12 +666,9 @@ export default function Billing({ args }: { args: string[] }) {
         {/* who worked the bill, in counter order: salesman → helper → packed by → rechecked by */}
         {moreOpen && ([["Helper", "helper", "helper"], ["Packing done by", "packed_by", "packer"], ["Rechecked by", "checked_by", ""]] as const).map(([title, key, prefer]) =>
           <label key={key} className="f" style={{ minWidth: 130 }}>{title}
-            <select className="in" value={b[key] || ""} onChange={e => set({ [key]: e.target.value } as Partial<Bill>)}>
-              <option value="">—</option>
-              {[...staff].sort((x, y) => Number(!!prefer && y.role === prefer) - Number(!!prefer && x.role === prefer)).map(s => <option key={s.id} value={s.name}>{s.name}{prefer && s.role === prefer ? ` (${prefer})` : ""}</option>)}</select></label>)}
-        {moreOpen && <div className="pos-box"><span className="xs mut">Box qty: {b.box_count} · Current box {box}</span>
-          <div className="row" style={{ gap: 4 }}>{boxes.map(x => <button key={x} className="chip" aria-pressed={x === box} onClick={() => setBox(x)}>{x}</button>)}
-            <button className="chip" onClick={() => setBox(Math.max(...boxes) + 1)}>+</button></div></div>}
+            <input className="in" list={"pos-staff-" + key} autoComplete="off" placeholder="Type or pick" value={b[key] || ""} onChange={e => set({ [key]: e.target.value } as Partial<Bill>)} onBlur={e => { const v = e.target.value.replace(/\s+/g, " ").trim(); if (v !== e.target.value) set({ [key]: v } as Partial<Bill>); }} />
+            <datalist id={"pos-staff-" + key}>
+              {[...staff].sort((x, y) => Number(!!prefer && y.role === prefer) - Number(!!prefer && x.role === prefer)).map(s => <option key={s.id} value={s.name}>{prefer && s.role === prefer ? prefer : undefined}</option>)}</datalist></label>)}
       </div>
             <div className="pos-scanhead stack" style={{ gap: 8 }}>
             <div className="row scanrow">
@@ -744,7 +742,15 @@ export default function Billing({ args }: { args: string[] }) {
 
         </div>
 
-          <div className="counter-actions">          <div className="pos-actions" aria-label="Print and save">
+          <div className="counter-actions">
+          {/* Owner, 26 Oct: boxes 1–4 fit in the header, box 5+ pushed it down — the box picker lives in the right
+              column, where it can grow and scroll; save / print / WhatsApp sit under it at the bottom. */}
+          <div className="counter-boxes" role="group" aria-label="Boxes">
+            <span className="xs mut">Box qty {b.box_count} · Current <b>{box}</b></span>
+            <div className="counter-box-grid">{boxes.map(x => <button key={x} className="chip" aria-pressed={x === box} aria-label={`Box ${x}`} onClick={() => setBox(x)}>{x}</button>)}
+              <button className="chip" aria-label="New box" title="New box" onClick={() => setBox(Math.max(...boxes) + 1)}>+</button></div>
+          </div>
+          <div className="pos-actions" aria-label="Print and save">
             <select className="in" aria-label="Print size" title="Roll printer: choose 58 mm or 80 mm thermal to match your paper. Enable auto-cut in the printer's preferences." value={fmt} onChange={e => { setFmt(e.target.value as PrintFormat); setSetting("print_fmt", e.target.value); }}>
               <option value="a5">A5 invoice</option><option value="a4">A4 invoice</option><option value="80mm">80 mm thermal</option><option value="58mm">58 mm thermal</option><option value="packing">Packing slip (no rates)</option></select>
             <button className="btn" disabled={saving} onClick={doHold}>Hold · F3</button>
