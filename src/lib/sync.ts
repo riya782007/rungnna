@@ -72,11 +72,12 @@ export async function signOut() { const c = await sb(); await setSetting("shop_d
 const SHOP_DEVICE = "shop_device";
 export const markShopDevice = () => setSetting(SHOP_DEVICE, true);
 let anonRefused = 0;   // the project has anonymous sign-ins switched off: don't ask again for 10 minutes
-export async function ensureSession(): Promise<boolean> {
+export async function ensureSession(opts: { retry?: boolean } = {}): Promise<boolean> {
   const c = await sb(); if (!c || !navigator.onLine) return false;
   if ((await c.auth.getSession()).data.session) return true;
   if (!await getSetting<boolean>(SHOP_DEVICE, false)) return false;   // only after this device passed the entry code
-  if (Date.now() - anonRefused < 600_000) return false;
+  // background ticks back off; a person pressing "Try again" on the sign-in screen is always tried
+  if (!opts.retry && Date.now() - anonRefused < 600_000) return false;
   try {
     const { data, error } = await c.auth.signInAnonymously();
     if (error || !data.session) { anonRefused = Date.now(); return false; }
@@ -305,21 +306,35 @@ async function pull(c: SupabaseClient) {
   }
 }
 
-let running = false;
-export async function syncNow() {
-  if (running) return;
-  running = true;
+/* Owner, 26 Oct: "Raj" made at home did not open at the shop; "Rajkaran" made at the shop did not open at
+   home until later. A person exists on another computer only after this one pushed and that one pulled, and
+   the sign-in screen could not wait for that: a second syncNow() while one was running returned at once.
+   Now every caller waits for the running sync and learns whether it reached the cloud (true = pushed and
+   pulled). `fresh` runs once more after a sync that had already started, so a person saved just now is
+   pushed, and a person made elsewhere just now is pulled, instead of on the next 20 s tick. */
+let running: Promise<boolean> | null = null;
+export async function syncNow(opts: { fresh?: boolean } = {}): Promise<boolean> {
+  if (running) {
+    const ok = await running;
+    if (!opts.fresh) return ok;
+    if (running) return running;   // another caller already started the run after it
+  }
+  const run = runSync();
+  running = run;
+  try { return await run; } finally { if (running === run) running = null; }
+}
+async function runSync(): Promise<boolean> {
   try {
     await pendingCount();
     const enabled = await cloudSyncEnabled();
     emit({ cloudEnabled: enabled });
-    if (!enabled) { emit({ status: "local", error: undefined }); return; }
-    if (!navigator.onLine) { emit({ status: "offline", error: undefined }); return; }
+    if (!enabled) { emit({ status: "local", error: undefined }); return false; }
+    if (!navigator.onLine) { emit({ status: "offline", error: undefined }); return false; }
     const c = await sb();
-    if (!c) { emit({ status: "local", error: undefined }); return; }
+    if (!c) { emit({ status: "local", error: undefined }); return false; }
     let { data } = await c.auth.getSession();
     if (!data.session && await ensureSession()) data = (await c.auth.getSession()).data;
-    if (!data.session) { emit({ status: "idle", error: "Sign in to sync", user: undefined }); return; }
+    if (!data.session) { emit({ status: "idle", error: "Sign in to sync", user: undefined }); return false; }
     emit({ status: "syncing", error: undefined, user: deviceLabel(data.session.user) });
     await assertCloudSyncEnabled();
     await uploadPhotos(c);
@@ -327,10 +342,12 @@ export async function syncNow() {
     await push(c);
     await pull(c);
     emit({ status: "idle", last: now() });
+    return true;
   } catch (e: any) {
     const enabled = await cloudSyncEnabled();
     emit(enabled ? { status: "error", error: e?.message || String(e) } : { status: "local", cloudEnabled: false, error: undefined });
-  } finally { running = false; await pendingCount(); }
+    return false;
+  } finally { await pendingCount(); }
 }
 
 let started = false;
