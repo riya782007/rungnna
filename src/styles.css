@@ -1484,20 +1484,3 @@ tr.act-estimate td { background: #fde8e8; }
   .billing-shell .pos-line-actions .x{height:26px}
   .billing-shell .pos-lines .pos-t th{padding-block:3px}
 }
-
-/* the round Kachha / Pakka company switch (owner, 26 Oct) */
-.company-toggle{display:flex;align-items:center;gap:10px;margin:0 0 10px;padding:6px 10px 6px 6px;border:1px solid var(--line);border-radius:999px;background:var(--bg);color:var(--ink);text-align:left;cursor:pointer;flex:none}
-.company-toggle:disabled{opacity:.6;cursor:progress}
-.company-toggle .ct-circle{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;font:800 17px/1 var(--display,inherit);color:#fff;flex:none;box-shadow:0 4px 12px -6px rgba(0,0,0,.5);transition:transform .2s}
-.company-toggle:hover .ct-circle{transform:rotate(-12deg) scale(1.05)}
-.company-toggle.pakka .ct-circle{background:#2F6FDB}
-.company-toggle.kachha .ct-circle{background:#D98A00}
-.company-toggle .ct-text{display:flex;flex-direction:column;line-height:1.15}
-.company-toggle .ct-text small{font-size:11px;color:var(--muted)}
-@media(min-width:861px){.compact-menu .company-toggle{padding:0;border:0;background:none;justify-content:center;margin:0 auto 10px}.compact-menu .company-toggle .ct-text{display:none}}
-@media(max-width:860px){.top .company-toggle{margin:0;padding:0;border:0;background:none}.top .company-toggle .ct-text{display:none}.top .company-toggle .ct-circle{width:36px;height:36px;font-size:15px}}
-.home-company{display:inline-flex;align-items:center;gap:6px;margin-left:8px;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:700;vertical-align:middle;color:#fff}
-.home-company.pakka{background:#2F6FDB}
-.home-company.kachha{background:#D98A00}
-a.kpi{color:inherit;text-decoration:none;display:block}
-a.kpi:hover{box-shadow:0 8px 22px -14px rgba(0,0,0,.35)}

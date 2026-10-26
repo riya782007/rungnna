@@ -29,7 +29,7 @@ function periodStart(p: Period): Date {
    who's selling, and the jobs that can't wait. Everything is real data from this
    device; panels that need features not built yet show an honest placeholder. */
 export default function Home() {
-  const { me, store } = useApp();
+  const { me } = useApp();
   const money = can(me, "sales");
   const locs = useLocations();
   const priv = usePrivate();
@@ -43,14 +43,6 @@ export default function Home() {
   const bills = useLiveQuery(() => db.bills.where("at").aboveOrEqual(start).filter(b => inStore(b) && !b.deleted && (priv || !isEstimate(b))).toArray(), [start, priv], []);
   const allFinal = useLiveQuery(() => db.bills.filter(b => inStore(b) && !b.deleted && b.status === "final" && (priv || !isEstimate(b))).toArray(), [priv], []);
   const held = useLiveQuery(() => db.bills.where("status").equals("hold").filter(b => inStore(b) && !b.deleted && !b.no && (priv || !isEstimate(b))).count(), [priv], 0);
-  /* Owner, 26 Oct (like Vyapar's home): this company's stock in, stock out and purchases for the period, and
-     which company this is — Kachha (estimates) or Pakka (GST) — so one look says where you are. */
-  const company = useLiveQuery(() => db.stores.get(store), [store]);
-  const moves = useLiveQuery(() => db.movements.where("at").aboveOrEqual(start).filter(m => inStore(m) && !m.deleted && (m.kind === "intake" || m.kind === "sale")).toArray(), [start], []);
-  const bought = useLiveQuery(() => db.purchases.where("at").aboveOrEqual(start).filter(p => inStore(p) && !p.deleted && p.status === "final").toArray(), [start], []);
-  const stockIn = moves.filter(m => m.kind === "intake").reduce((a, m) => a + m.qty, 0);
-  const stockOut = moves.filter(m => m.kind === "sale").reduce((a, m) => a + m.qty, 0);
-  const purchased = bought.reduce((a, p) => a + (p.invoice_total ?? p.total_cost ?? 0), 0);
 
   const d = useMemo(() => {
     const bucket = new Set(locs.filter(l => l.kind === "bucket").map(l => l.id));
@@ -74,7 +66,7 @@ export default function Home() {
     const sales = fin.reduce((a, b) => a + b.net, 0);
     const collected = fin.reduce((a, b) => a + b.payments.filter(p => p.mode !== "credit").reduce((x, p) => x + p.amount, 0) + b.advance, 0);
     const credit = fin.reduce((a, b) => a + Math.max(0, due(b)), 0);
-    const gst = fin.filter(b => b.bill_type === "gst").reduce((a, b) => a + (b.gst || 0), 0);   // GST collected on tax invoices
+    const gst = fin.filter(b => b.bill_type === "gst").reduce((a, b) => a + b.net, 0);
 
     // profit for the period = sold value − cost of goods sold (needs product cost)
     let cogs = 0, haveCost = false;
@@ -165,9 +157,7 @@ export default function Home() {
       <div className="head" style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <div>
           <div className="eyebrow">{new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}</div>
-          <h1 className="h1">{hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening"}, {me?.name}
-            {company?.kind === "estimate" ? <span className="home-company kachha">Kachha · Estimates</span>
-              : company?.kind === "gst" ? <span className="home-company pakka">Pakka · GST bills</span> : null}</h1>
+          <h1 className="h1">{hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening"}, {me?.name}</h1>
         </div>
         <div className="seg-switch" role="group" aria-label="Period">
           {PERIODS.map(([k, lbl]) => <button key={k} aria-pressed={period === k} onClick={() => setPeriod(k)}>{lbl}</button>)}
@@ -212,29 +202,6 @@ export default function Home() {
           </div>
         </div>
       )}
-      {/* stock in / out / purchase / stock value, for this company only (owner, 26 Oct — like Vyapar's home) */}
-      <div className="kpis">
-        <a className="kpi" href="#/stockin">
-          <div className="kpi-top"><span className="lbl">Stock in · {PERIODS.find(p => p[0] === period)![1]}</span><span className="kpi-ic"><Icon n="scan" size={16} /></span></div>
-          <div className="kpi-val"><AnimatedNumber value={stockIn} format={n => `${Math.round(n)} pcs`} /></div>
-          <div className="kpi-sub">{money ? `Purchases ${rupees(purchased)}` : "pieces put on racks"}</div>
-        </a>
-        <a className="kpi" href="#/activity">
-          <div className="kpi-top"><span className="lbl">Stock out · {PERIODS.find(p => p[0] === period)![1]}</span><span className="kpi-ic"><Icon n="sell" size={16} /></span></div>
-          <div className="kpi-val"><AnimatedNumber value={stockOut} format={n => `${Math.round(n)} pcs`} /></div>
-          <div className="kpi-sub">pieces sold</div>
-        </a>
-        {money && <div className="kpi">
-          <div className="kpi-top"><span className="lbl">Stock value now</span><span className="kpi-ic"><Icon n="stock" size={16} /></span></div>
-          <div className="kpi-val"><AnimatedNumber value={d.value} format={chanRupees} /></div>
-          <div className="kpi-sub">{d.pcs} pieces on racks</div>
-        </div>}
-        {money && company?.kind === "gst" && <div className="kpi">
-          <div className="kpi-top"><span className="lbl">GST collected · {PERIODS.find(p => p[0] === period)![1]}</span><span className="kpi-ic"><Icon n="print" size={16} /></span></div>
-          <div className="kpi-val"><AnimatedNumber value={d.gst} format={chanRupees} /></div>
-          <div className="kpi-sub">on tax invoices</div>
-        </div>}
-      </div>
 
       {/* quick actions */}
       <div className="quick">
