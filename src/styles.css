@@ -1328,13 +1328,21 @@ tr.act-estimate td { background: #fde8e8; }
 @media(min-width:1100px){
   .billing-shell .pos-main{display:grid;grid-template-columns:minmax(0,1fr) 124px;grid-template-rows:minmax(100px,1fr) auto;gap:6px 8px}
   .billing-shell .pos-workspace{grid-column:1;grid-row:1}
-  .billing-shell .counter-actions{grid-column:2;grid-row:1/3;align-self:stretch;background:var(--surface);border:1px solid var(--line);padding:6px;overflow:auto}
-  .billing-shell .pos-actions{display:flex;flex-direction:column;padding:0;border:0;gap:6px;overflow:visible}
-  .billing-shell .pos-actions .btn{width:100%;height:32px;white-space:normal;line-height:1.15}
-  .billing-shell .pos-actions select.in{width:100%;height:34px;min-height:34px;font-size:11px}
-  .billing-shell .pos-actions-bags{display:flex;flex-direction:column;align-items:stretch;gap:6px}
-  .billing-shell .pos-actions-bags label{justify-content:center}
-  .billing-shell .pos-sum{grid-column:1;grid-row:2;grid-template-columns:minmax(180px,1fr) minmax(170px,.8fr) minmax(240px,1.1fr);grid-template-areas:'boxes payments amounts';gap:8px;padding:6px 8px;max-height:210px;overflow:auto}
+  /* Karan, 26 Oct: the right column is the box summary, full height (box 5, 6, 7… without scrolling the page);
+     Save / Print / WhatsApp sit in the totals panel below, where the box summary was. */
+  .billing-shell .counter-boxes{grid-column:2;grid-row:1/3;align-self:stretch;min-height:0;display:flex;flex-direction:column;gap:6px;padding:6px;border:1px solid var(--line);overflow:hidden}
+  .billing-shell .counter-boxes>b{font-size:13px}
+  .billing-shell .counter-boxes .pos-box-totals{flex:1 1 auto;min-height:0;max-height:none;margin:0;display:flex;flex-direction:column;flex-wrap:nowrap;gap:4px;overflow:auto}
+  .billing-shell .counter-boxes .pos-box-totals .chip{flex:none;width:100%;justify-content:space-between;height:30px;padding:0 8px;font-size:13px}
+  .billing-shell .counter-boxes .counter-box-new{flex:none;width:100%;justify-content:center;height:30px;font-size:12px}
+  /* three across: print size / Hold Held Save / Print WhatsApp Bag stickers / + bags — four short rows */
+  .billing-shell .pos-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;padding:0 8px 0 0;border:0;border-right:1px solid var(--line);overflow:visible}
+  .billing-shell .pos-actions .btn{width:100%;height:32px;padding:0 3px;font-size:12px;white-space:normal;line-height:1.1}
+  .billing-shell .pos-actions select.in{grid-column:1/-1;width:100%;height:28px;min-height:28px;font-size:11px}
+  .billing-shell .pos-actions-bags{display:contents}
+  .billing-shell .pos-actions-bags label{order:1;justify-content:flex-start;font-size:12px}
+  .billing-shell .pos-actions .linkbtn{order:2;grid-column:span 2;text-align:left}
+  .billing-shell .pos-sum{grid-column:1;grid-row:2;grid-template-columns:minmax(150px,.9fr) minmax(220px,1fr) minmax(160px,.8fr) minmax(220px,1.1fr);grid-template-areas:'boxes actions payments amounts';gap:8px;padding:6px 8px;max-height:210px;overflow:auto}
   .billing-shell .counter-box-tools{gap:3px}
   .billing-shell .pos-sum .pos-box-summary{padding:2px 0}
   .billing-shell .pos-sum .pos-box-summary>b{font-size:12px}
@@ -1353,12 +1361,15 @@ tr.act-estimate td { background: #fde8e8; }
   .billing-shell .pos-lines .pos-t th:nth-child(11){width:82px}
   .billing-shell .pos-lines .pos-t th:nth-child(12){width:48px}
 }
+/* the box summary (right column on a laptop) is a plain panel, not the old sticky strip of the totals card */
+.billing-shell .counter-boxes{position:static;margin:0;padding:6px 8px;background:var(--surface);box-shadow:none;border:1px solid var(--line);border-radius:3px}
 @media(max-width:1099px){
-  .billing-shell .counter-actions{order:2;padding:8px;background:var(--surface);border:1px solid var(--line)}
-  .billing-shell .pos-sum{grid-template-areas:'boxes amounts' 'payments payments'}
+  .billing-shell .counter-boxes{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+  .billing-shell .counter-boxes .pos-box-totals{margin:0}
+  .billing-shell .pos-sum{grid-template-areas:'boxes amounts' 'actions payments'}
 }
 @media(max-width:860px){
-  .billing-shell .pos-sum{grid-template-areas:'boxes' 'amounts' 'payments'}
+  .billing-shell .pos-sum{grid-template-areas:'boxes' 'amounts' 'payments' 'actions'}
 }
 @media(min-width:1100px){
   .billing-shell.shell:not(.compact-menu){grid-template-columns:144px minmax(0,1fr)}
