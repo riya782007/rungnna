@@ -84,7 +84,7 @@ export function InvoiceSheet({ b, shop, format, copy, feed = 0 }: { b: Bill; sho
           {b.merged_from?.length ? <><br /><b>Covers:</b> {b.merged_from.length} earlier {b.merged_from.length > 1 ? "documents" : "document"}</> : null}</div>
         <div><b>Party:</b> {b.party_name || "Cash"}{b.party_phone ? " · " + b.party_phone : ""}{b.party_gstin ? <><br /><b>GSTIN:</b> {b.party_gstin}</> : null}{b.party_address ? <><br />{b.party_address}</> : null}{taxDoc && pos ? <><br /><b>Place of supply:</b> {pos}-{GST_STATES[pos]}</> : b.party_state ? <><br /><b>State:</b> {b.party_state}</> : null}</div>
       </div>
-      <table className="inv-t">
+      <table className={"inv-t" + (thermal && !b.items.some(l => l.pkts) ? " no-pkt" : "")}>
         {/* the slip (owner, 22 Oct): no "# / Item / Style / Colour" heading, only Pkt, Qty, Rate, Amount */}
         {/* the unit (PCS / PAIR / SET) has its own column before Qty, never a faint word under the item (owner, 22 Oct) */}
         <thead><tr><th>{thermal ? "" : "#"}</th><th>Box</th><th>{thermal ? "" : full ? "Item / Style / Colour" : "Item"}</th><th className="r">Pkt</th><th>Unit</th><th className="r">Qty</th>{prices && <><th className="r">Rate</th><th className="r">Amount</th></>}</tr></thead>

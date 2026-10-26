@@ -32,8 +32,8 @@ describe("thermal invoices", () => {
     expect(events).toEqual(["fonts", "image", "frame", "frame"]);
   });
   it("uses valid measured thermal dimensions instead of width plus auto", () => {
-    expect(thermalPage(80, 960)).toBe("@page rj-receipt{size:80mm 268mm;margin:2mm}");
-    expect(thermalPage(80, 6000)).toBe("@page rj-receipt{size:80mm 1602mm;margin:2mm}");
+    expect(thermalPage(80, 960)).toBe("@page rj-receipt{size:80mm 268mm;margin:2mm 1mm}");
+    expect(thermalPage(80, 6000)).toBe("@page rj-receipt{size:80mm 1602mm;margin:2mm 1mm}");
     expect(() => thermalPage(90, 100)).toThrow();
     expect(() => thermalPage(80, 0)).toThrow();
     expect(() => thermalPage(58, NaN)).toThrow();
