@@ -520,7 +520,7 @@ function ShopProfile() {
   return (
     <div className="card"><header><h3>Shop profile (printed on bills)</h3><span className="grow" /><SaveState dirty={dirty} /></header>
       <div className="pad stack">
-        <div className="set-intro">Bill details for the selected company. Separate GST and Estimates companies keep separate profiles, email, UPI and bank details. The cloud sign-in email is managed under Backup &amp; devices.</div>
+        <div className="set-intro">The shop's details printed on every bill.</div>
         <div className="grid g2">
           {f("name", "Shop name")}{f("tagline", "Tagline")}
           {f("phone", "Phone")}{f("whatsapp", "WhatsApp number")}

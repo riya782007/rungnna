@@ -8,7 +8,7 @@ import { toast } from "../lib/app";
 /* Owner, 23 Oct: "only the name in Add person, and tick the box to allow the permission". Every tick is saved
    at once and reaches every counter. The companies this person may open are ticked here too. */
 export function PersonPerms({ person }: { person: Staff }) {
-  const stores = useLiveQuery(() => db.stores.filter(s => !s.deleted && !!s.active).toArray(), [], []);
+  const stores = useLiveQuery(() => db.stores.filter(s => !s.deleted && !!s.active && s.kind !== "estimate").toArray(), [], []);   // one company again (owner, 26 Oct)
   // ticks show at once; the saved row catches up a moment later
   const [have, setHave] = useState(() => new Set(Array.isArray(person.perms) ? person.perms : [...permsOf(person)]));
   useEffect(() => { if (Array.isArray(person.perms)) setHave(new Set(person.perms)); }, [person.updated_at]);
@@ -17,13 +17,13 @@ export function PersonPerms({ person }: { person: Staff }) {
   const save = async (patch: Partial<Staff>, what: string) => { const cur = (await db.staff.get(person.id)) || person; await put("staff", { ...cur, ...patch }); toast(what); };
   const tick = (k: string, on: boolean) => { const next = new Set(have); on ? next.add(k) : next.delete(k); setHave(next); void save({ perms: [...next] }, `${person.name}: ${on ? "allowed" : "not allowed"}`); };
   return <div className="person-perms stack">
-    {stores.length > 1 && <fieldset className="note"><legend className="sm b">Companies {person.name} can open</legend>
+    {stores.length > 1 && <fieldset className="note"><legend className="sm b">Stores {person.name} can open</legend>
       <div className="row" style={{ flexWrap: "wrap", gap: 12 }}>{stores.map(s => <label key={s.id} className="row sm" style={{ gap: 6 }}>
         <input type="checkbox" checked={companies.has(s.id)} onChange={e => {
           const next = new Set(companies); e.target.checked ? next.add(s.id) : next.delete(s.id);
-          if (!next.size) return toast("Keep at least one company", true);
+          if (!next.size) return toast("Keep at least one store", true);
           setCompanies(next);
-          void save({ stores: [...next], store_id: next.has(person.store_id || "") ? person.store_id : [...next][0] }, "Companies saved");
+          void save({ stores: [...next], store_id: next.has(person.store_id || "") ? person.store_id : [...next][0] }, "Stores saved");
         }} />{s.name}</label>)}</div></fieldset>}
     <div className="perm-groups">{PERMISSION_GROUPS.map(g => <fieldset key={g.key} className="perm-group">
       <legend className="sm b">{g.label}</legend>

@@ -40,8 +40,9 @@ describe("two companies", () => {
     const est = await setUpTwoCompanies();
     expect((await db.stores.get(MAIN_STORE))?.kind).toBe("gst");
     expect((await db.stores.get(est.id))?.kind).toBe("estimate");
-    expect((await companiesFor({ role: "owner" } as any)).length).toBe(2);
-    expect((await companiesFor({ role: "salesman", stores: [est.id] } as any)).map(s => s.id)).toEqual([est.id]);
+    // one company again (owner, 26 Oct): the estimate company is never offered to open
+    expect((await companiesFor({ role: "owner" } as any)).map(s => s.id)).toEqual([MAIN_STORE]);
+    expect((await companiesFor({ role: "salesman", stores: [est.id] } as any))).toEqual([]);
     setCompanyKind("estimate"); expect(newBill("o", DEFAULT_SHOP, "gst").bill_type).toBe("estimate");
     setCompanyKind("gst"); expect(newBill("o", DEFAULT_SHOP, "estimate").bill_type).toBe("gst");
     expect(typeForCompany("challan")).toBe("challan");

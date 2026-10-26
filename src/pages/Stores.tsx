@@ -3,7 +3,7 @@ import { confirmDelete } from "../lib/confirm-delete";
 import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, type StoreTransfer } from "../lib/db";
-import { createStore, currentStore, inStore, dispatchTransfer, receiveTransfer, setUpTwoCompanies } from "../lib/stores";
+import { createStore, currentStore, inStore, dispatchTransfer, receiveTransfer } from "../lib/stores";
 import { findByScan } from "../lib/products";
 import { isRfidTag, normTag } from "../lib/rfid";
 import { useApp, toast } from "../lib/app";
@@ -11,7 +11,8 @@ import { Head, LocationSelect } from "../components/common";
 import { CameraScanner } from "../components/Scanner";
 export default function Stores() {
   const { me } = useApp(); const owner = me?.role === "owner";
-  const stores = useLiveQuery(() => db.stores.filter(s => !s.deleted && !!s.active).toArray(), [], []);
+  // one company again (owner, 26 Oct): the old estimate company is not offered for transfers or staff
+  const stores = useLiveQuery(() => db.stores.filter(s => !s.deleted && !!s.active && s.kind !== "estimate").toArray(), [], []);
   const staff = useLiveQuery(() => db.staff.filter(s => !s.deleted).toArray(), [], []);
   const transfers = useLiveQuery(() => db.store_transfers.filter(t => !t.deleted && (t.from_store === currentStore() || t.to_store === currentStore())).reverse().sortBy("at"), [], []);
   const [name, setName] = useState(""), [code, setCode] = useState(""), [dest, setDest] = useState(""), [rack, setRack] = useState(""), [items, setItems] = useState<StoreTransfer["items"]>([]), [scan, setScan] = useState(false), [raw, setRaw] = useState(""), [busy, setBusy] = useState(false), [racks, setRacks] = useState<Record<string, string>>({});
@@ -19,13 +20,6 @@ export default function Stores() {
   const add = async (raw: string) => { if (!rack) throw new Error("Choose source rack first"); const tag = isRfidTag(raw) ? normTag(raw) : "", p = await findByScan(raw); if (!p) throw new Error("Item not found"); setItems(rows => { if (tag && rows.some(r => r.tags?.includes(tag))) return rows; const old = rows.find(r => r.product_id === p.id && r.from_loc === rack); return old ? rows.map(r => r === old ? { ...r, qty: r.qty + 1, tags: tag ? [...(r.tags || []), tag] : r.tags } : r) : [...rows, { product_id: p.id, qty: 1, from_loc: rack, tags: tag ? [tag] : undefined }]; }); setRaw(""); };
   const products = useLiveQuery(() => db.products.toArray(), [], []);
   return <div className="stack"><Head title={owner ? "Stores & transfers" : "Stock transfers"} />
-    {owner && <section className="stack card pad"><h3>Two companies</h3>
-      {stores.some(x => x.kind === "estimate") ? <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>{stores.map(x => <span key={x.id} className="pill">{x.name} · {x.kind === "estimate" ? "estimates" : x.kind === "gst" ? "tax invoices" : "both"}</span>)}</div>
-        : <><div className="note sm">This creates a separate Estimates company and sets the main company to GST. Existing bills and stock stay in their current company; they are not moved by this setup.</div><button className="btn p" disabled={busy} onClick={() => run(async () => { await setUpTwoCompanies(); toast("Two companies ready — choose Estimates from the company selector for new estimate bills"); })}>Make the estimate company</button></>}
-      {stores.map(x => <label key={x.id} className="row sm" style={{ gap: 8 }}><span className="grow">{x.name}</span>
-        <select className="in" style={{ maxWidth: 220 }} value={x.kind || ""} onChange={e => run(async () => { await put("stores", { ...x, kind: (e.target.value || undefined) as any }); toast("Saved"); })}>
-          <option value="">Both (as before)</option><option value="gst">Tax invoices &amp; challans</option><option value="estimate">Estimates</option></select></label>)}
-    </section>}
     {owner && <section className="stack"><h3>Branches</h3><div className="grid g3"><input className="in" aria-label="Branch name" placeholder="Branch name" value={name} onChange={e => setName(e.target.value)} /><input className="in" aria-label="Branch code" placeholder="Code" maxLength={4} value={code} onChange={e => setCode(e.target.value.toUpperCase())} /><button className="btn p" disabled={busy} onClick={() => run(async () => { await createStore(name, code); setName(""); setCode(""); toast("Branch created"); })}>Add branch</button></div>
       {stores.map(s => <div className="row" key={s.id}><b>{s.code} · {s.name}</b><input className="in grow" aria-label={`${s.name} address`} defaultValue={s.address} onBlur={e => put("stores", { ...s, address: e.target.value })} /></div>)}
       <h3>Staff assignments</h3>{staff.map(s => <label className="row" key={s.id}><span className="grow">{s.name} · {s.role}</span><select className="in" value={s.store_id || stores.find(s => s.code === "MAIN")?.id || ""} onChange={e => put("staff", { ...s, store_id: e.target.value })}>{stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>)}

@@ -75,7 +75,11 @@ export async function receiveTransfer(id: string, racks: Record<string, string>,
 }
 
 /* ---------- the two companies (owner, 23 Oct) ---------- */
-export const companyKind = async (id = currentStore()) => (await db.stores.get(id))?.kind;
+/* Owner, 26 Oct: "undo the whole company feature". The shop is one company again: a store's kind no longer forces
+   estimates or GST (bills work as before the two companies, estimates through the private code), and the estimate
+   company is not offered anywhere. Its bills and stock are kept in the data, untouched. */
+export const companyKind = async (_id = currentStore()): Promise<"gst" | "estimate" | undefined> => undefined;
+export const isEstimateCompany = async (id: string) => (await db.stores.get(id))?.kind === "estimate";
 /** Turn the main store into the tax-invoice company and make the estimate company beside it (once). */
 export async function setUpTwoCompanies() {
   ownerOnly();
@@ -89,7 +93,7 @@ export async function setUpTwoCompanies() {
 }
 /** The companies this person may open after the PIN. */
 export async function companiesFor(me: Pick<Staff, "role" | "store_id" | "stores"> | null | undefined) {
-  const all = await db.stores.filter(s => !s.deleted && !!s.active).toArray();
+  const all = await db.stores.filter(s => !s.deleted && !!s.active && s.kind !== "estimate").toArray();
   if (!me) return [];
   if (me.role === "owner") return all;
   const ids = new Set(me.stores?.length ? me.stores : [me.store_id || MAIN_STORE]);

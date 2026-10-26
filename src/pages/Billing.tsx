@@ -674,7 +674,6 @@ export default function Billing({ args }: { args: string[] }) {
         {/* Owner, 25 Oct (voice): "after 3–4 scans the lines go below and I scroll up and down — at least 8–10 lines
             must be in front of me". The rarely-changed fields fold away under "More" so the lines get the screen. */}
         <button type="button" className="linkbtn sm" aria-expanded={moreOpen} onClick={() => { setMoreOpen(o => !o); void setSetting("bill_more_open", !moreOpen); }}>{moreOpen ? "Less ▴" : `More ▾${[b.helper, b.packed_by, b.checked_by].filter(Boolean).length ? " (" + [b.helper, b.packed_by, b.checked_by].filter(Boolean).length + ")" : ""}`}</button>
-        {moreOpen && me?.role === "owner" && !companyKindNow() && <a className="linkbtn sm" href="#/stores">Separate Estimates / GST companies →</a>}
         {/* who worked the bill, in counter order: salesman → helper → packed by → rechecked by */}
         {moreOpen && ([["Helper", "helper", "helper"], ["Packing done by", "packed_by", "packer"], ["Rechecked by", "checked_by", ""]] as const).map(([title, key, prefer]) =>
           <label key={key} className="f" style={{ minWidth: 130 }}>{title}
