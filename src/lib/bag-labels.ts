@@ -17,7 +17,9 @@ export function parseBagPayload(raw: string): { billId: string; number: number }
 export function bagLabelCfg(cfg: LabelCfg): LabelCfg {
   return { ...cfg, layout: "stack", show: { ...cfg.show, item: true, style: true, color: true, rate: false, qty: false, tk: false, code: false, cost_code: false, line: false } };
 }
-export function bagLabelJobs(bill: Bill, count = Math.max(1, bill.box_count || 1)): PurchaseLabelJob[] {
+/** Carry bags on the bill (owner, 26 Oct: bags are counted by hand, boxes are only how the lines were scanned). */
+export const carryBags = (bill: Pick<Bill, "carry_bags">) => Math.min(99, Math.max(1, Math.floor(Number(bill.carry_bags) || 1)));
+export function bagLabelJobs(bill: Bill, count = carryBags(bill)): PurchaseLabelJob[] {
   if (!bill.no || bill.status !== "final" || bill.deleted) throw new Error("Save the bill before printing customer bag labels");
   if (!bill.party_name.trim()) throw new Error("Enter the customer's name on the bill before printing bag labels");
   if (!Number.isSafeInteger(count) || count < 1 || count > 5000) throw new Error("Number of bags must be 1–5000");

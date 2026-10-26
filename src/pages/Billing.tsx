@@ -32,7 +32,7 @@ import { qrSvg } from "../lib/qr";
 import { createPortal } from "react-dom";
 import { MicButton } from "../components/Voice";
 import { Modal, PhotoButton, Thumb, MoneyInput } from "../components/common";
-import { PrintBill, type PrintFormat } from "../components/Invoice";
+import { PrintBill, type PrintFormat, type RollSlips } from "../components/Invoice";
 import { resolveBillingScan, withBillNames } from "../lib/billing-products";
 import { parseLabel } from "../lib/parse";
 import { BagLabels } from "../components/BagLabels";
@@ -256,8 +256,10 @@ export default function Billing({ args }: { args: string[] }) {
   const [cam, setCam] = useState(false);
   const [held, setHeld] = useState(false);
   const [custOpen, setCustOpen] = useState(false);
-  const [printing, setPrinting] = useState<{ bill: Bill; fmt: PrintFormat; bags?: boolean } | null>(null);
-  const [bagWithBill, setBagWithBill] = useState(false);
+  const [printing, setPrinting] = useState<{ bill: Bill; fmt: PrintFormat; bags?: boolean; slips?: RollSlips } | null>(null);
+  const [bagWithBill, setBagWithBill] = useState(false);   // A4 / A5: bag stickers on the label printer
+  const [tagWithRoll, setTagWithRoll] = useState(true);     // roll printer: a tag per carry bag after the bill
+  const [cashWithBill, setCashWithBill] = useState(true);   // roll printer: cash-counter slip
   const [fmt, setFmt] = useState<PrintFormat>("a5");
   const [aiBusy, setAiBusy] = useState(false);
   const [nextNo, setNextNo] = useState("");
@@ -289,6 +291,8 @@ export default function Billing({ args }: { args: string[] }) {
       const s = await getShop(); setShop(s);
       setFmt(await getSetting<PrintFormat>("print_fmt", "80mm"));
       setBagWithBill(await getSetting<boolean>("bag_labels_with_bill", false));
+      setTagWithRoll(await getSetting<boolean>("bag_tags_with_roll", true));
+      setCashWithBill(await getSetting<boolean>("cash_slip_with_bill", true));
       if (args[0]) { const x = await db.bills.get(args[0]); if (x && inStore(x) && (!isEstimate(x) || isOpen())) { setBox(selectedBox(x)); setB(x.status === "hold" ? { ...x, items: mergeBillLines(x.items) } : x); return; } }
       const d = await getSetting<BillingDraft | null>("draft_bill", null);
       // a draft from the other company (owner, 23 Oct: two companies) stays there, kept safe in Held
@@ -504,6 +508,12 @@ export default function Billing({ args }: { args: string[] }) {
     return products.filter(p => w.every(x => (p.style + " " + p.item + " " + p.color + " " + p.code).toUpperCase().includes(x))).slice(0, 8);
   }, [q, products]);
 
+  /* Owner, 26 Oct: on the roll printer the bill is followed by a tag per carry bag and a cash-counter slip,
+     each cut separately; sheets (A4 / A5) keep the bag stickers on the label printer. */
+  function printWithSlips(bill: Bill) {
+    const roll = fmt === "80mm" || fmt === "58mm";
+    setPrinting({ bill, fmt, bags: !roll && bagWithBill && !!bill.party_name.trim(), slips: roll ? { tags: tagWithRoll, cash: cashWithBill } : undefined });
+  }
   async function doSave(print = false, share = false, bags = false) {
     if (!b || !t) return;
     if (b.bill_type !== "challan" && b.payments.some(p => p.mode !== "credit" && p.amount <= 0)) {
@@ -517,7 +527,7 @@ export default function Billing({ args }: { args: string[] }) {
       beep("repeat"); toast("This bill is already saved");
       const saved = await db.bills.get(b.id);
       if (saved && bags) setBagBill(saved);
-      if (saved && print) setPrinting({ bill: saved, fmt, bags: bagWithBill && !!saved.party_name.trim() });
+      if (saved && print) printWithSlips(saved);
       if (saved && share) await shareBill(saved, shop);
       return;
     }
@@ -547,7 +557,7 @@ export default function Billing({ args }: { args: string[] }) {
     if (done.oversold?.length) toast("Saved with negative stock: " + done.oversold.map(o => `${o.item} (${o.qty} more than recorded)`).join(", "), true);
     await setSetting("draft_bill", null);
     if (bags) setBagBill(done);
-    if (print) setPrinting({ bill: done, fmt, bags: bagWithBill && !!done.party_name.trim() });
+    if (print) printWithSlips(done);
     if (share) await shareBill(done, shop);
     setB(newBill(me?.id || "", shop, b.bill_type)); setBox(1);
     setNextNo("");
@@ -766,7 +776,14 @@ export default function Billing({ args }: { args: string[] }) {
             <button className="btn dk" disabled={saving} onClick={() => doSave(true)}>Print {documentName}</button>
             <button className="btn g" disabled={saving} onClick={() => doSave(false, true)}>WhatsApp · F10</button>
             <span className="pos-actions-bags">
-              <label className="row sm" title="Also print customer bag stickers with the bill"><input type="checkbox" checked={bagWithBill} onChange={event => { setBagWithBill(event.target.checked); void setSetting("bag_labels_with_bill", event.target.checked); }} /> + bags</label>
+              {/* Owner, 26 Oct: bags are counted by hand — the bag tags say "BAG 1 OF 2" from this, not from the boxes */}
+              <label className="row sm pos-carry-bags" title="How many carry bags this customer's goods went into">Carry bags
+                <input className="in mono" inputMode="numeric" aria-label="Carry bags" placeholder="1" style={{ width: 40, height: 26, padding: "0 4px", textAlign: "center" }}
+                  value={b.carry_bags || ""} onChange={e => set({ carry_bags: Math.min(99, parseInt(e.target.value.replace(/\D/g, "")) || 0) })} /></label>
+              {fmt === "80mm" || fmt === "58mm" ? <>
+                <label className="row sm" title="Roll printer: a tag for each carry bag, cut after the bill"><input type="checkbox" checked={tagWithRoll} onChange={event => { setTagWithRoll(event.target.checked); void setSetting("bag_tags_with_roll", event.target.checked); }} /> + bag tags</label>
+                <label className="row sm" title="Roll printer: a slip with the customer's name, bill no. and amount for the cash counter"><input type="checkbox" checked={cashWithBill} onChange={event => { setCashWithBill(event.target.checked); void setSetting("cash_slip_with_bill", event.target.checked); }} /> + cash slip</label></>
+                : <label className="row sm" title="Also print customer bag stickers with the bill"><input type="checkbox" checked={bagWithBill} onChange={event => { setBagWithBill(event.target.checked); void setSetting("bag_labels_with_bill", event.target.checked); }} /> + bags</label>}
               <button className="btn" disabled={saving || !t.items.length} onClick={() => doSave(false, false, true)}>Bag stickers</button>
             </span>
             {lastSaved && (priv || !isEstimate(lastSaved)) && <button className="linkbtn sm" onClick={() => go("bills/" + lastSaved.id)}>View saved {lastSaved.bill_type === "estimate" ? "estimate" : lastSaved.bill_type === "gst" ? "tax invoice" : "challan"} {lastSaved.no}</button>}
@@ -831,7 +848,7 @@ export default function Billing({ args }: { args: string[] }) {
       {askCode && <CodePrompt onDone={ok => { setAskCode(false); if (ok) void openDocument("estimate"); }} />}
       {held && <HeldBills activeId={b.id} onPick={x => { setHeld(false); void openDocument(x.bill_type, x); }} onClose={() => setHeld(false)} />}
       {bagBill && <BagLabels bill={bagBill} onClose={() => setBagBill(null)} />}
-      {printing && <PrintBill b={printing.bill} shop={shop} format={printing.fmt} onDone={() => { setPrinting(null); if (printing.bags) setBagBill(printing.bill); }} />}
+      {printing && <PrintBill b={printing.bill} shop={shop} format={printing.fmt} slips={printing.slips} onDone={() => { setPrinting(null); if (printing.bags) setBagBill(printing.bill); }} />}
     </div>
   );
 }
