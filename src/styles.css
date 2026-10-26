@@ -327,7 +327,10 @@ tr.click{cursor:pointer}tr.click:hover td{background:var(--bg)}
 .inv-net td{font-weight:700;font-size:13px;border-top:1px solid #000}
 .inv-terms{display:flex;justify-content:space-between;gap:10px;margin-top:10px;font-size:9.5px;color:#333;border-top:1px dashed #999;padding-top:4px}
 .inv-terms span{font-weight:700;white-space:nowrap;padding-top:18px}
-.inv.thermal{width:72mm;font-size:10px}
+/* 68 mm, not 72: an 80 mm head prints only ~72 mm, and the 2 mm page margin pushed the right edge to 74 mm —
+   the Amount column came out cut ("Amour", "230.0", owner's photo 26 Oct). 2 mm + 68 mm stays inside it. */
+.inv.thermal{width:68mm;font-size:10px}
+.inv-feed{display:block;border:0;margin:0;padding:0}
 .inv.thermal .inv-head,.inv.thermal .inv-meta,.inv.thermal .inv-foot,.inv.thermal .inv-terms{flex-direction:column}
 .inv.thermal .inv-title{text-align:left}.inv.thermal .inv-sum{width:100%}
 .inv.thermal .inv-t{table-layout:fixed}

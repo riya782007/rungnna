@@ -12,7 +12,7 @@ import { rateMark } from "../lib/label-tspl";
 import { saveLabelPatch } from "./StickerQuickBar";
 import { printedCostCode } from "../lib/label-cost-code";
 import { byRollNo } from "./SupplierNo";
-import { RECEIPT_CUTS, receiptCut, receiptCutSetup, type ReceiptCut } from "../lib/printing";
+import { RECEIPT_CUTS, receiptCut, receiptCutSetup, type ReceiptCut, RECEIPT_FEEDS, DEFAULT_RECEIPT_FEED, receiptFeed } from "../lib/printing";
 import { gstRequest } from "../lib/compliance";
 import { getShop, saveShop } from "../lib/billing";
 
@@ -236,6 +236,7 @@ function TermsRow({ p }: { p: Party }) {
 export function PrintingCard() {
   const [width, setWidth] = useState("80mm");
   const [cut, setCut] = useState<ReceiptCut>("partial");
+  const [feed, setFeed] = useState<number>(DEFAULT_RECEIPT_FEED);
   const [copies, setCopies] = useState("1");
   const [ok, setOk] = useState("");
   const [lines, setLines] = useState<"item" | "full">("item");
@@ -244,6 +245,7 @@ export function PrintingCard() {
     getSetting("invoice_copies", 1).then(n => setCopies(String(n || 1)));
     getSetting("thermal_width", "80mm").then(setWidth);
     getSetting("receipt_cut", "partial").then(value => setCut(receiptCut(value)));
+    getSetting("receipt_feed", DEFAULT_RECEIPT_FEED).then(value => setFeed(receiptFeed(value)));
   }, []);
   const done = (what: string) => { setOk(what); toast(what); };
   return (
@@ -269,6 +271,11 @@ export function PrintingCard() {
             const value = receiptCut(e.target.value);
             try { await setSetting("receipt_cut", value); setCut(value); done("Cutter saved"); } catch { toast("Could not save cutter preference", true); }
           }}>{Object.entries(RECEIPT_CUTS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Help>
+        <Help label="Blank paper after the bill" help="Extra paper fed after the last line, so the totals have come out past the tear bar or cutter before the slip is torn. Increase it if the tear still goes through the last lines; lower it to save paper.">
+          <select className="in" value={feed} onChange={async e => {
+            const value = receiptFeed(e.target.value);
+            try { await setSetting("receipt_feed", value); setFeed(value); done("Paper after bill saved"); } catch { toast("Could not save paper after bill", true); }
+          }}>{RECEIPT_FEEDS.map(mm => <option key={mm} value={mm}>{mm ? mm + " mm" : "None"}</option>)}</select></Help>
         <div className="xs mut">These are kept on this computer. The receipt length always fits the bill.</div>
       </div></div>
   );
