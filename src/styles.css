@@ -1106,7 +1106,7 @@ html{scrollbar-gutter:stable}
    (owner's photos, 22 Oct: style/colour lines, notes and the "sale not executed" band "very faded"). Every word
    on the slip is pure black; the estimate watermark is black outline letters, which a thermal head can print. */
 .inv.thermal,.inv.thermal *{color:#000!important}
-.inv.thermal .inv-sub,.inv.thermal .inv-c{font-weight:600}
+.inv.thermal .inv-sub,.inv.thermal .inv-c{font-weight:700}
 .inv.thermal .inv-notexec{border-color:#000;font-weight:800}
 .inv.thermal .inv-wm span{font-size:24px;color:transparent!important;-webkit-text-stroke:.6px #000;opacity:.9}
 /* slip columns with Unit before Qty: # · (Box hidden) · Item · Pkt · Unit · Qty · Rate · Amount */
@@ -1118,6 +1118,37 @@ html{scrollbar-gutter:stable}
 .inv.thermal .inv-t th:nth-child(8){width:19%}
 .inv.thermal .inv-t td:nth-child(5){white-space:nowrap;overflow-wrap:normal}
 .inv.narrow .inv-t th:nth-child(3){width:36%}
+
+/* Owner's photo, 26 Oct (customer complaint): "the writing is far too small to read; line 23 comes out as 2 over 3".
+   Same layout, but readable like the old counter's slip: bigger, bolder text across the whole paper width; the
+   numbers (#, Pkt, Unit, Qty, Rate, Amount) never break inside — the table sizes them to fit, the item name takes
+   the rest and wraps between words only. 70 mm + 1 mm side margins stays inside the ~72 mm an 80 mm head prints. */
+.inv.thermal{width:70mm;font:500 13px/1.25 "Roboto Condensed","Arial Narrow","Liberation Sans Narrow",Arial,sans-serif;font-stretch:condensed}
+.inv.thermal .inv-shop{font-family:"Roboto Condensed","Arial Narrow",Arial,sans-serif;font-weight:700}
+.inv.thermal .inv-shop{font-size:20px}
+.inv.thermal :is(.inv-sub,.inv-c,.inv-meta,.inv-left,.inv-terms,.inv-approval){font-size:12.5px}
+.inv.thermal .inv-meta{padding:4px 0}
+.inv.thermal .inv-title{font-size:15px}
+.inv.thermal .inv-t{table-layout:auto;font-size:13px}
+.inv.thermal .inv-t th{font-size:11px;padding:2px 1px;white-space:nowrap;overflow-wrap:normal;width:auto!important}
+.inv.thermal .inv-t td{padding:2px 1px;font-weight:700;border-color:#000}
+.inv.thermal .inv-t td:not(:nth-child(3)){font-size:12px}
+.inv.thermal .inv-t td:nth-child(3){padding-inline:2px}
+/* no packets on this bill: the empty Pkt column gives its room to the item name */
+.inv.thermal .inv-t.no-pkt :is(th,td):nth-child(4){display:none}
+.inv.thermal .inv-t :is(th,td):not(:nth-child(3)){white-space:nowrap;overflow-wrap:normal;word-break:normal}
+.inv.thermal .inv-t :is(th,td):nth-child(3){width:100%!important;overflow-wrap:anywhere;word-break:normal}
+.inv.thermal .inv-t td:nth-child(3) b{font-weight:700}
+.inv.thermal .receipt-box>td{white-space:normal!important;font-size:13px;font-weight:800;padding:3px 2px}
+.inv.thermal .inv-sum{font-size:13.5px}.inv.thermal .inv-sum td{padding:2px 3px}
+.inv.thermal .inv-net td{font-size:16px;font-weight:800}
+.inv.thermal .inv-left b{font-weight:800}
+.inv.thermal .inv-notexec{font-size:12px}
+.inv.narrow{width:54mm;font-size:11.5px}
+.inv.narrow .inv-t{font-size:11.5px}
+.inv.narrow .inv-t td,.inv.narrow .inv-t th{padding:2px 2px;font-size:11px}
+.inv.narrow :is(.inv-sub,.inv-c,.inv-meta,.inv-left,.inv-terms){font-size:11px}
+.inv.narrow .inv-shop{font-size:16px}
 
 /* Home: the two jobs of the day (owner, 22 Oct) */
 .home-main-jobs { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin: 4px 0 12px; }
