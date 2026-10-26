@@ -298,40 +298,20 @@ export function WhoAreYou() {
   // the sign-in screen is a safe moment for the Windows app to switch to a waiting new version
   useEffect(() => { document.documentElement.dataset.locked = "1"; return () => { delete document.documentElement.dataset.locked; }; }, []);
   /* A new computer, browser or app: bring the shop's people (and stock) from the cloud BEFORE offering to
-     set up an owner, so the owner signs in with the PIN he already has instead of starting a new shop.
-     Owner, 26 Oct: "Raj" (home) and "Rajkaran" (shop) were two owners of two different shops, because when
-     the cloud was slow (25 s), offline or refused, this screen quietly fell through to "Set up the owner" and
-     a new owner was made on that computer only. Now it never falls through: it keeps trying, says so when the
-     cloud can't be reached, and a brand-new shop is set up only when someone presses that button. */
-  const [join, setJoin] = useState<"idle" | "joining" | "failed" | "new">("idle");
-  const joinShop = async (retry = false) => {
-    setJoin("joining");
-    if (!await sb()) { setJoin("new"); return; }   // this build has no cloud at all: every computer is its own shop
-    const ok = await ensureSession({ retry }) && await syncNow({ fresh: true });
-    setJoin(j => j === "joining" ? (ok ? "idle" : "failed") : j);
-  };
+     set up an owner, so the owner signs in with the PIN he already has instead of starting a new shop. */
+  const [joining, setJoining] = useState(false);
   useEffect(() => {
     if (!unlocked) return;
+    let live = true;
     (async () => {
       await markShopDevice();
-      if (needsName) await joinShop(true);
-      else void ensureSession().then(ok => { if (ok) void syncNow({ fresh: true }); });
+      if (!needsName || !navigator.onLine) { void ensureSession().then(ok => { if (ok) void syncNow(); }); return; }
+      setJoining(true);
+      const stop = setTimeout(() => live && setJoining(false), 25_000);
+      try { if (await ensureSession()) await syncNow(); } finally { clearTimeout(stop); if (live) setJoining(false); }
     })();
+    return () => { live = false; };
   }, [unlocked]);
-  // the shop's people arrived: nothing to set up
-  useEffect(() => { if (!needsName && (join === "failed" || join === "new")) setJoin("idle"); }, [needsName]);
-  /* The typed name is checked against this computer's own copy of the shop's people. A person just made on
-     another computer is not here until a sync, so before saying "not recognised" fetch the people once. */
-  const findPerson = async (want: string, pinTyped: string): Promise<{ fresh?: Staff; person?: Staff }> => {
-    const all = await db.staff.filter(s => !s.deleted && !!s.active && !isRoleLogin(s)).toArray();
-    const hasReal = all.some(s => s.role === "owner" && s.id !== SEED_OWNER);
-    const named = all.filter(s => !(hasReal && s.id === SEED_OWNER && !s.pin) && s.name.trim().toUpperCase().replace(/\s+/g, " ") === want);
-    // an owner with no PIN yet sets one now (one-time); anyone else without a PIN asks the owner
-    const fresh = named.find(s => s.role === "owner" && !s.pin);
-    if (fresh) return { fresh };
-    for (const s of named) { const person = s.pin ? await personForPin(s.id, pinTyped) : null; if (person) return { person }; }
-    return {};
-  };
   useEffect(() => { entryWait(stage).then(setWait); }, [stage]);
   useEffect(() => { if (wait <= 0) return; const timer = setTimeout(() => setWait(w => Math.max(0, w - 1000)), 1000); return () => clearTimeout(timer); }, [wait]);
 
@@ -351,11 +331,11 @@ export function WhoAreYou() {
       if (!unlocked) { if (!codeMatches(code, await getOpenCode())) return false; setUnlocked(true); return true; }
       if (roleMode) { const person = await staffForRolePasscode(code); if (!person) return false; setMe(person); return true; }
       const want = typed.trim().toUpperCase().replace(/\s+/g, " ");
-      let found = await findPerson(want, pin);
-      if (!found.fresh && !found.person && navigator.onLine && await ensureSession({ retry: true }) && await syncNow({ fresh: true }))
-        found = await findPerson(want, pin);
-      if (found.fresh) { setPick(found.fresh); return true; }
-      if (found.person) { setMe(found.person); return true; }
+      const named = persons.filter(s => s.name.trim().toUpperCase().replace(/\s+/g, " ") === want);
+      // an owner with no PIN yet sets one now (one-time); anyone else without a PIN asks the owner
+      const fresh = named.find(s => s.role === "owner" && !s.pin);
+      if (fresh) { setPick(fresh); return true; }
+      for (const s of named) { const person = s.pin ? await personForPin(s.id, pin) : null; if (person) { setMe(person); return true; } }
       return false;
     });
   };
@@ -371,7 +351,6 @@ export function WhoAreYou() {
       await put("staff", saved);
       if (current.id === SEED_OWNER) await db.staff.delete(SEED_OWNER);
       setMe(saved);
-      void syncNow({ fresh: true });   // to the cloud now, so the next computer knows this owner
     } catch (e: any) { setBad(e.message); } finally { setBusy(false); }
   };
 
@@ -382,21 +361,14 @@ export function WhoAreYou() {
       <div className="pad stack">
         {unlocked && reset ? <OwnerPinReset onDone={person => { setReset(false); if (person) setMe(person); }}
             onUseCloud={o => { setReset(false); setPick(null); setTyped(o.name); setRoleMode(false); setPin(""); setCode(""); setBad(""); }} />
-        : unlocked && needsName && (join === "joining" || join === "idle") ? <div className="stack" role="status">
+        : unlocked && joining ? <div className="stack" role="status">
           <div className="b sm">Getting the shop from the cloud…</div>
-          <div className="xs mut">Names, PINs, stock and bills are coming to this computer. Then sign in with your usual name and PIN — no new setup needed.</div>
-        </div>
-        : unlocked && needsName && join === "failed" ? <div className="stack" role="alert">
-          <div className="b sm">This computer could not reach the shop's cloud</div>
-          <div className="xs mut">{navigator.onLine ? "The cloud did not answer." : "This computer is offline."} The owner and staff made on other computers are not on this computer yet, so their names and PINs will not open here. Connect to the internet and try again.</div>
-          <button type="button" className="btn p" onClick={() => void joinShop(true)}>Try again</button>
-          <button type="button" className="linkbtn" onClick={() => setJoin("new")}>This is a brand-new shop — set it up here</button>
+          <div className="xs mut">Names, PINs, stock and bills are coming to this computer. Then sign in with your usual PIN — no new setup needed.</div>
+          <button type="button" className="linkbtn" onClick={() => setJoining(false)}>This is a new shop — set it up here</button>
         </div>
         : unlocked && (needsName || (pick?.role === "owner" && !pick.pin)) ? <form className="stack" onSubmit={e => { e.preventDefault(); void setupOwner(needsName ? persons[0] : pick!, needsName ? owner : pick!.name); }}>
           <div className="b sm">Set up the owner's personal PIN</div>
           <div className="xs mut">One-time setup for an owner who has no PIN yet. Keep this PIN private; staff use their own access.</div>
-          {needsName && <div className="note warn xs">This starts a <b>new shop</b> on this computer. If the shop already has an owner on another computer, do not set up here — go back, connect to the internet and let this computer get the shop.
-            <button type="button" className="linkbtn" onClick={() => void joinShop(true)}>Get the shop from the cloud instead</button></div>}
           {needsName && <label className="f">Owner's name<input className="in" autoFocus value={owner} onChange={e => setOwner(e.target.value)} placeholder="e.g. Karan" /></label>}
           <label className="f">New 4-digit personal PIN<input className="in mono" type="password" inputMode="numeric" maxLength={4} autoComplete="new-password" value={newPin} onChange={e => setNewPin(e.target.value.replace(/\D/g, ""))} /></label>
           <button className="btn p" disabled={busy || !/^\d{4}$/.test(newPin) || (needsName && !owner.trim())}>Save PIN &amp; open</button>
@@ -475,7 +447,7 @@ function OwnerPinReset({ onDone, onUseCloud }: { onDone: (person?: Staff) => voi
     if (pin !== again) return setErr("The two PINs are not the same.");
     if (!name.trim()) return setErr("Type the owner's name.");
     setBusy(true); setErr("");
-    try { const saved = { ...owner, name: name.trim(), pin }; await put("staff", saved); void syncNow({ fresh: true }); toast("Owner PIN saved on this computer"); onDone(saved); }
+    try { const saved = { ...owner, name: name.trim(), pin }; await put("staff", saved); toast("Owner PIN saved on this computer"); onDone(saved); }
     catch (x: any) { setErr(x.message || "Could not save"); } finally { setBusy(false); }
   };
   return <div className="stack">
