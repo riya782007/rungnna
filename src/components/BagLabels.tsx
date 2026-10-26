@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import type { Bill } from "../lib/db";
-import { bagLabelJobs } from "../lib/bag-labels";
+import { bagLabelJobs, carryBags } from "../lib/bag-labels";
 import { Modal } from "./common";
 import { DEFAULT_CFG, LabelView, loadLabelCfg, useLabelPrint } from "../pages/Labels";
 export function BagLabels({ bill, onClose }: { bill: Bill; onClose: () => void }) {
-  const [cfg, setCfg] = useState(DEFAULT_CFG), [count, setCount] = useState(String(Math.max(1, bill.box_count || 1))), [error, setError] = useState("");
+  const [cfg, setCfg] = useState(DEFAULT_CFG), [count, setCount] = useState(String(carryBags(bill))), [error, setError] = useState("");
   const printer = useLabelPrint(cfg, setCfg);
   useEffect(() => { void loadLabelCfg().then(setCfg).catch(e => setError(e.message)); }, []);
   let jobs: ReturnType<typeof bagLabelJobs> = [];

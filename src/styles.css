@@ -331,6 +331,20 @@ tr.click{cursor:pointer}tr.click:hover td{background:var(--bg)}
    the Amount column came out cut ("Amour", "230.0", owner's photo 26 Oct). 2 mm + 68 mm stays inside it. */
 .inv.thermal{width:68mm;font-size:10px}
 .inv-feed{display:block;border:0;margin:0;padding:0}
+/* roll slips after the bill (owner, 26 Oct): bag tag + cash counter slip, each cut on its own */
+.inv.slip{font-size:12px;line-height:1.3}
+.inv.slip>*+*{margin-top:3px}
+.inv.slip .slip-head{display:flex;justify-content:space-between;gap:6px;font-weight:800;border-bottom:1px dashed #000;padding-bottom:3px}
+.inv.slip .slip-big{font:800 26px/1.1 Arial,Helvetica,sans-serif;text-align:center;border:2px solid #000;padding:4px 2px;margin-top:6px}
+.inv.slip .slip-name{font:800 18px/1.2 Arial,Helvetica,sans-serif;text-align:center;overflow-wrap:anywhere;margin-top:6px}
+.inv.slip .slip-c{text-align:center;font-weight:600}
+.inv.slip .slip-row{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 8px}
+.inv.slip .slip-amt{display:flex;justify-content:space-between;gap:8px}
+.inv.slip .slip-collect{display:flex;justify-content:space-between;gap:8px;font:800 20px/1.2 Arial,Helvetica,sans-serif;border-block:2px solid #000;padding:4px 0;margin-top:5px}
+.inv.slip .slip-qr{display:block;width:24mm;height:24mm;margin:6px auto 0}.inv.slip .slip-qr svg{width:100%;height:100%;display:block}
+.inv.narrow.slip{font-size:11px}
+.inv.narrow.slip .slip-big{font-size:21px}
+.inv.narrow.slip :is(.slip-name,.slip-collect){font-size:16px}
 .inv.thermal .inv-head,.inv.thermal .inv-meta,.inv.thermal .inv-foot,.inv.thermal .inv-terms{flex-direction:column}
 .inv.thermal .inv-title{text-align:left}.inv.thermal .inv-sum{width:100%}
 .inv.thermal .inv-t{table-layout:fixed}

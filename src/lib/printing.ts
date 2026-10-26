@@ -20,7 +20,7 @@ export function receiptCutSetup(cut: ReceiptCut) {
    totals). The print head sits behind the tear bar / cutter, so without this the last lines are still inside the
    printer when the slip is torn off. */
 export const RECEIPT_FEEDS = [0, 10, 15, 20, 25, 30, 40] as const;
-export const DEFAULT_RECEIPT_FEED = 20;
+export const DEFAULT_RECEIPT_FEED = 25;
 export function receiptFeed(value: unknown): number {
   const n = Number(value);
   return value !== null && value !== "" && (RECEIPT_FEEDS as readonly number[]).includes(n) ? n : DEFAULT_RECEIPT_FEED;
@@ -123,7 +123,9 @@ export function thermalPage(width: number, heightPx: number) {
   if (![58, 80].includes(width) || !Number.isFinite(heightPx) || heightPx <= 0) throw new Error("Invalid receipt dimensions");
   // Capping at 1 metre makes longer estimates print another full metre page,
   // including blank paper after the final line. Let the content set the length.
-  const height = Math.max(30, Math.ceil(heightPx * 25.4 / 96 + 6));
+  // +4 mm for the 2 mm margins and +10 mm slack: the slip is measured with screen styles, and the print styles
+  // add a few mm (owner's photo, 26 Oct: the Balance line was still in the printer when the slip was torn).
+  const height = Math.max(30, Math.ceil(heightPx * 25.4 / 96 + 14));
   return `@page rj-receipt{size:${width}mm ${height}mm;margin:2mm}`;
 }
 

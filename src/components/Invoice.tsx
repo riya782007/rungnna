@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { bagPayload, carryBags } from "../lib/bag-labels";
 import { getSetting } from "../lib/db";
 import { usePrintJob, receiptFeed, DEFAULT_RECEIPT_FEED } from "../lib/printing";
 import { createPortal } from "react-dom";
@@ -98,7 +99,7 @@ export function InvoiceSheet({ b, shop, format, copy, feed = 0 }: { b: Bill; sho
       </table>
       <div className="inv-foot">
         <div className="inv-left">
-          <div><b>Total quantity:</b> {b.total_qty} · <b>Boxes:</b> {b.box_count}</div>
+          <div><b>Total quantity:</b> {b.total_qty} · <b>Boxes:</b> {b.box_count}{b.carry_bags ? <> · <b>Carry bags:</b> {b.carry_bags}</> : null}</div>
           {format === "packing" && <div className="inv-boxes">{boxes.map(x => <span key={x}>Box {x}: {b.items.filter(l => l.box_no === x).reduce((a, l) => a + l.qty, 0)} pcs</span>)}</div>}
           {estimate && <div className="inv-sub">Approval challan · Not a tax invoice.</div>}
           {b.bill_type === "challan" && <div className="inv-sub">Goods sent on approval / for delivery. Not a tax invoice — the invoice follows.</div>}
@@ -138,8 +139,24 @@ export function InvoiceSheet({ b, shop, format, copy, feed = 0 }: { b: Bill; sho
   );
 }
 
+/* Owner, 26 Oct (voice): on the roll printer every bill comes out as separate cut slips —
+     1. the bill, handed to the customer;
+     2. a small tag for each carry bag ("BAG 1 OF 2", name, bill no.), stuck outside the bag like a
+        Swiggy / Zomato ticket;
+     3. a cash-counter slip with the customer's name, bill no. and the amount, handed to the cashier.
+   Each slip is its own print job: the printer cuts at the end of every job (Settings › Printing › cutter). */
+export type RollSlips = { tags: boolean; cash: boolean };
+export type RollSlip = { kind: "tag"; n: number } | { kind: "cash" };
+export function rollSlips(b: Bill, format: PrintFormat, want?: RollSlips): RollSlip[] {
+  if (!want || (format !== "80mm" && format !== "58mm") || !b.no || b.status !== "final" || b.bill_type === "return") return [];
+  const out: RollSlip[] = [];
+  if (want.tags) for (let n = 1; n <= carryBags(b); n++) out.push({ kind: "tag", n });
+  if (want.cash && b.bill_type !== "challan") out.push({ kind: "cash" });
+  return out;
+}
+
 /* How many copies of a tax invoice (Settings › Printing), read before anything prints so the job starts once. */
-export function PrintBill(props: { b: Bill; shop: Shop; format: PrintFormat; onDone: () => void }) {
+export function PrintBill(props: { b: Bill; shop: Shop; format: PrintFormat; onDone: () => void; slips?: RollSlips }) {
   const [copies, setCopies] = useState<number | null>(null);
   const [feed, setFeed] = useState<number | null>(null);
   useEffect(() => {
@@ -149,13 +166,64 @@ export function PrintBill(props: { b: Bill; shop: Shop; format: PrintFormat; onD
   return copies === null || feed === null ? null : <PrintBillNow {...props} copies={copies} feed={feed} />;
 }
 
-function PrintBillNow({ b, shop, format, onDone, copies = 1, feed = 0 }: { b: Bill; shop: Shop; format: PrintFormat; onDone: () => void; copies?: number; feed?: number }) {
-  usePrintJob(true, onDone, b.id + format + copies, message => toast(message, true));
+function PrintBillNow({ b, shop, format, onDone, copies = 1, feed = 0, slips }: { b: Bill; shop: Shop; format: PrintFormat; onDone: () => void; copies?: number; feed?: number; slips?: RollSlips }) {
+  const [extra] = useState(() => rollSlips(b, format, slips));
+  const [step, setStep] = useState(0);   // 0 = the bill, then each extra slip in turn
+  usePrintJob(true, () => step < extra.length ? setStep(step + 1) : onDone(), b.id + format + copies + "#" + step, message => toast(message, true));
   // copies are for numbered tax invoices on sheets; a receipt, slip or estimate prints once
   const n = (format === "a4" || format === "a5") && b.bill_type === "gst" && b.no ? Math.max(1, Math.min(3, copies)) : 1;
-  const sheets = n === 1 ? <InvoiceSheet b={b} shop={shop} format={format} feed={feed} /> :
+  const width = format === "58mm" ? 58 : 80;
+  const slip = step > 0 ? extra[step - 1] : undefined;
+  const sheets = slip ? (slip.kind === "tag" ? <BagTag b={b} shop={shop} n={slip.n} width={width} feed={feed} /> : <CashSlip b={b} shop={shop} width={width} feed={feed} />) :
+    n === 1 ? <InvoiceSheet b={b} shop={shop} format={format} feed={feed} /> :
     <>{COPY_NAMES.slice(0, n).map((c, i) => <div key={c} className="inv-copy-page" style={{ breakAfter: i < n - 1 ? "page" : "auto", pageBreakAfter: i < n - 1 ? "always" : "auto" }}><InvoiceSheet b={b} shop={shop} format={format} copy={c} /></div>)}</>;
-  return <>{createPortal(sheets, document.getElementById("printroot")!)}<div className="print-notice" role="status">Print prepared · {b.no}<button className="btn sm" onClick={onDone}>Close print</button></div></>;
+  const what = !slip ? (extra.length ? `bill (1 of ${extra.length + 1})` : "") : slip.kind === "tag" ? `bag tag ${slip.n} of ${carryBags(b)} (${step + 1} of ${extra.length + 1})` : `cash counter slip (${step + 1} of ${extra.length + 1})`;
+  return <>{createPortal(<Fragment key={step}>{sheets}</Fragment>, document.getElementById("printroot")!)}<div className="print-notice" role="status">Print prepared · {b.no}{what ? " · " + what : ""}<button className="btn sm" onClick={onDone}>Close print</button></div></>;
+}
+
+/** One slip on the roll: measured to its own length, blank paper after it so it clears the cutter. */
+function RollSlipSheet({ width, feed, className, children }: { width: number; feed: number; className: string; children: ReactNode }) {
+  return <div style={{ page: "rj-receipt" }} className={"inv thermal slip " + (width === 58 ? "narrow " : "") + className}>
+    <style data-thermal-width={String(width)}>{"@page rj-receipt{size:auto;margin:2mm}"}</style>
+    {children}
+    {feed > 0 && <div className="inv-feed" aria-hidden="true" style={{ height: feed + "mm" }} />}
+  </div>;
+}
+const slipDate = (at: string) => new Date(at).toLocaleString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+const slipShop = (b: Bill, shop: Shop) => b.bill_type === "estimate" ? initials(shop.name) : shop.name;
+
+/** The tag stuck outside a carry bag: whose bag, which bill, bag n of N. Its QR scans back to the bill. */
+export function BagTag({ b, shop, n, width = 80, feed = 0 }: { b: Bill; shop: Shop; n: number; width?: number; feed?: number }) {
+  const total = carryBags(b);
+  const qr = qrSvg(bagPayload({ billId: b.id, number: n })).svg;
+  return <RollSlipSheet width={width} feed={feed} className="slip-tag">
+    <div className="slip-head"><span>{slipShop(b, shop)}</span><span>BAG TAG</span></div>
+    <div className="slip-big">BAG {n} OF {total}</div>
+    <div className="slip-name">{b.party_name || "Walk-in / cash"}</div>
+    {b.party_phone && <div className="slip-c">{b.party_phone}</div>}
+    <div className="slip-row"><span>{docName(b)} No: <b>{b.no}</b></span><span>{slipDate(b.at)}</span></div>
+    <div className="slip-row"><span>Items: <b>{b.items.length}</b> lines</span><span>Qty: <b>{b.total_qty}</b></span></div>
+    {(b.packed_by || b.checked_by) && <div className="slip-row">{b.packed_by && <span>Packed: {b.packed_by}</span>}{b.checked_by && <span>Checked: {b.checked_by}</span>}</div>}
+    <span className="slip-qr" dangerouslySetInnerHTML={{ __html: qr }} />
+  </RollSlipSheet>;
+}
+
+/** The slip the billing counter hands to the cash counter: who, which bill, how much to collect. */
+export function CashSlip({ b, shop, width = 80, feed = 0 }: { b: Bill; shop: Shop; width?: number; feed?: number }) {
+  const d = due(b);
+  return <RollSlipSheet width={width} feed={feed} className="slip-cash">
+    <div className="slip-head"><span>{slipShop(b, shop)}</span><span>CASH COUNTER</span></div>
+    <div className="slip-name">{b.party_name || "Walk-in / cash"}</div>
+    {b.party_phone && <div className="slip-c">{b.party_phone}</div>}
+    <div className="slip-row"><span>{docName(b)} No: <b>{b.no}</b></span><span>{slipDate(b.at)}</span></div>
+    {b.salesman && <div className="slip-row"><span>Salesman: {b.salesman}</span></div>}
+    <div className="slip-row"><span>Qty: <b>{b.total_qty}</b></span><span>Carry bags: <b>{carryBags(b)}</b></span></div>
+    <div className="slip-amt"><span>Bill amount</span><b>{billAmount(b.net)}</b></div>
+    {b.advance ? <div className="slip-amt"><span>Advance</span><span>-{billAmount(b.advance)}</span></div> : null}
+    {b.paid ? <div className="slip-amt"><span>Paid ({b.payments.filter(p => p.mode !== "credit").map(p => p.mode.toUpperCase()).join("+")})</span><span>-{billAmount(b.paid)}</span></div> : null}
+    <div className="slip-collect"><span>{d > 0 ? "TO COLLECT" : d < 0 ? "RETURN" : "PAID"}</span><span>{billAmount(Math.abs(d))}</span></div>
+    {b.prev_due ? <div className="slip-amt"><span>Previous balance</span><span>{billAmount(b.prev_due)}</span></div> : null}
+  </RollSlipSheet>;
 }
 
 function ReceiptBox({ b, box, prices, narrow, full }: { b: Bill; box: number; prices: boolean; narrow: boolean; full: boolean }) {

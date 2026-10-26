@@ -124,6 +124,7 @@ export interface Bill extends Row {
   party_address?: string;  // snapshot of the buyer address at billing time (printed on tax invoices)
   price_level?: "wholesale" | "retail" | "dealer";
   salesman: string; helper?: string; packed_by?: string; checked_by?: string; box_count: number; total_qty: number;
+  carry_bags?: number;  // carry bags the goods were packed into (owner, 26 Oct) — bag tags say "BAG 1 OF 2" from this, not from boxes
   gross: number; discount: number; discount_pct: number; packing: number; adjust: number;
   less_pct?: number;    // a second cut, after the discount (owner, 25 Oct): 50% then 3% less = 51.5% off, not 53%
   gst_mode: "exclusive" | "inclusive"; gst_rate: number; gst: number; cgst: number; sgst: number; igst: number;
