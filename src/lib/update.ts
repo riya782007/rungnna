@@ -72,9 +72,13 @@ export function startUpdates() {
     immediate: true,
     onNeedRefresh() {
       waiting = true; notify();
-      const idle = () => { if (document.hidden || location.hash === "" || location.hash === "#/home") apply?.(true); };
+      /* Owner, 26 Oct: a browser stayed on an old version showing "Which company?" — that screen and the sign-in
+         screen have no update bar, and it only updated by itself on Home. Now also on the sign-in screen (nobody
+         is typing a bill there), straight away and every minute, as the Windows app already does. */
+      const idle = () => { if (document.hidden || location.hash === "" || location.hash === "#/home" || document.documentElement.dataset.locked === "1") apply?.(true); };
       document.addEventListener("visibilitychange", idle);
-      setTimeout(idle, 60_000);
+      idle();
+      setInterval(idle, 60_000);
     },
     onRegisteredSW(_url, reg) { if (reg) setInterval(() => reg.update().catch(() => {}), 30 * 60_000); },
   });
