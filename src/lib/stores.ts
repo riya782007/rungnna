@@ -82,10 +82,19 @@ export async function setUpTwoCompanies() {
   const main = await db.stores.get(MAIN_STORE);
   if (main && main.kind !== "gst") await put("stores", { ...main, kind: "gst", name: main.name === "Main store" ? "Tax invoices" : main.name });
   const est = await db.stores.filter(s => !s.deleted && s.kind === "estimate").first();
-  if (est) return est;
+  if (est) { await ensureCounterRack(est); return est; }
   const made = await createStore("Estimates", "E");
   await put("stores", { ...(await db.stores.get(made.id))!, kind: "estimate" });
+  await ensureCounterRack(made);
   return made;
+}
+/* Owner, 26 Oct: the estimate company started with only DAMAGED/MISSING/REPAIR, so "Stock in" there had no rack
+   to put anything on. It gets one counter rack, ready to use; more can be added in Racks. */
+async function ensureCounterRack(s: { id: string; code: string }) {
+  if (await db.locations.filter(l => !l.deleted && l.store_id === s.id && l.kind !== "bucket").count()) return;
+  const code = s.code + "/COUNTER", old = await db.locations.where("code").equals(code).first();   // codes are unique
+  if (old) { if (old.store_id === s.id) await put("locations", { ...old, deleted: 0 }); return; }
+  await put("locations", { id: uid(), code, name: "Counter", floor: "", rack: "", box: "", kind: "counter", store_id: s.id, updated_at: now() });
 }
 /** The companies this person may open after the PIN. */
 export async function companiesFor(me: Pick<Staff, "role" | "store_id" | "stores"> | null | undefined) {
