@@ -20,7 +20,6 @@ export default function Stores() {
   const products = useLiveQuery(() => db.products.toArray(), [], []);
   return <div className="stack"><Head title={owner ? "Stores & transfers" : "Stock transfers"} />
     {owner && <section className="stack card pad"><h3>Two companies</h3>
-      <div className="sm">Use <b>Estimates</b> for your estimate / kachcha-bill work and <b>Tax invoices</b> for GST invoices and challans. Each company keeps its own stock, purchases, bill numbers and reports. After signing in, choose the company; switch later from the company selector in the menu.</div>
       {stores.some(x => x.kind === "estimate") ? <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>{stores.map(x => <span key={x.id} className="pill">{x.name} · {x.kind === "estimate" ? "estimates" : x.kind === "gst" ? "tax invoices" : "both"}</span>)}</div>
         : <><div className="note sm">This creates a separate Estimates company and sets the main company to GST. Existing bills and stock stay in their current company; they are not moved by this setup.</div><button className="btn p" disabled={busy} onClick={() => run(async () => { await setUpTwoCompanies(); toast("Two companies ready — choose Estimates from the company selector for new estimate bills"); })}>Make the estimate company</button></>}
       {stores.map(x => <label key={x.id} className="row sm" style={{ gap: 8 }}><span className="grow">{x.name}</span>
