@@ -30,8 +30,9 @@ import { PricingCard, StickerLookCard, SupplierTermsCard, PrintingCard, GstCard,
 
 /* Settings in five plain groups, one at a time (owner, 18 Oct: the long page left half the screen empty and
    things were hard to find). Each group is a tab; its cards flow into balanced columns. */
-type TabKey = "shop" | "prices" | "suppliers" | "people" | "backup";
+type TabKey = "me" | "shop" | "prices" | "suppliers" | "people" | "backup";
 const TABS: { key: TabKey; label: string; intro: string }[] = [
+  { key: "me", label: "My account", intro: "" },
   { key: "shop", label: "Shop & bills", intro: "Your shop's details on every bill, bill printing, GST and the financial year." },
   { key: "prices", label: "Prices & stickers", intro: "How a cost becomes a selling rate and a secret cost code, and what the stickers look like." },
   { key: "suppliers", label: "Suppliers", intro: "Each supplier's rate ÷ and less %, used when their bill is read." },
@@ -49,14 +50,19 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
   useEffect(() => onSync(setSync) as any, []);
   useEffect(() => { getSetting<Pattern[]>("patterns", []).then(setPats); }, []);
   const admin = can(me, "settings"), boss = can(me, "staff");
-  const tabs = TABS.filter(t => t.key === "people" || t.key === "backup" || t.key === "shop" || admin);
-  const tab: TabKey = (tabs.find(t => t.key === tabArg)?.key) || "shop";
+  /* Owner, 26 Oct: "a person sees only what their role is for — no email, backup & devices, people, passcodes or
+     private estimates unless that was given to them". Each tab shows only when this person's ticks allow it;
+     everyone keeps "My account" (their name, their own PIN, switch person). */
+  const owner = me?.role === "owner";
+  const shopTab = admin || boss || can(me, "printers.manage");
+  const tabs = TABS.filter(t => t.key === "me" ? !boss : t.key === "people" ? boss : t.key === "shop" ? shopTab : admin);
+  const tab: TabKey = (tabs.find(t => t.key === tabArg)?.key) || tabs[0].key;
   const cur = TABS.find(t => t.key === tab)!;
 
   const meCard = (
     <div className="card pad stack">
       <div className="row"><span className="avatar" style={{ width: 44, height: 44, fontSize: 17 }}>{me?.name.slice(0, 1)}</span>
-        <span className="grow"><b>{me?.name}</b><div className="xs mut">{roleName(me)}{me?.role_id ? "" : " · " + (me ? ROLE_NOTE[me.role] : "")}</div></span>
+        <span className="grow"><b>{me?.name}</b><div className="xs mut">{roleName(me)}{owner && !me?.role_id ? " · " + ROLE_NOTE[me!.role] : ""}</div></span>
         <button className="btn sm" onClick={() => setMe(null)}>Switch person</button></div>
       {me?.role === "owner" && <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
         <button className="btn sm bad" onClick={async () => {
@@ -64,7 +70,7 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
           await logoutEveryone(me.name); toast("Everyone else is logged out (computers that are offline log out as soon as they connect)");
         }}>Log out everyone</button>
         <span className="xs mut">For an emergency — from your phone too.</span></div>}
-      {me && isRoleLogin(me) && <div className="xs mut">Signed in with this role's passcode. The owner changes it on Roles &amp; Permissions.</div>}
+
       {me && !isRoleLogin(me) && <button className="btn sm" onClick={async () => {
         const p = await askText(me.pin ? "New 4-digit personal PIN" : "Set a 4-digit PIN so nobody else can use your name", "", { secret: true, numeric: true });
         if (p === null) return; if (!/^\d{4}$/.test(p)) return toast("PIN must be 4 digits", true);
@@ -79,17 +85,19 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
       <nav className="tabs set-tabs" aria-label="Settings sections">
         {tabs.map(t => <a key={t.key} href={"#/settings/" + t.key} className={t.key === tab ? "on" : ""} aria-current={t.key === tab ? "page" : undefined}>{t.label}</a>)}
       </nav>
-      <p className="set-tab-intro">{cur.intro}</p>
+      {owner && cur.intro && <p className="set-tab-intro">{cur.intro}</p>}
+
+      {tab === "me" && <div className="set-grid">{meCard}</div>}
 
       {tab === "shop" && <div className="set-grid">
         {admin && <ShopProfile />}
         {can(me, "printers.manage") && <PrintingCard />}
         {boss && <GstCard />}
-        {can(me, "lock") && <OperationsCard by={me?.id || ""} />}
-        <div className="card"><header><h3>Elsewhere</h3></header><div className="pad stack">
-          {boss && <a className="btn" href="#/bank">Bank reconciliation →</a>}
-          <a className="btn" href="#/stores">{boss ? "Store setup & transfers →" : "Stock transfers →"}</a>
-        </div></div>
+        {admin && <OperationsCard by={me?.id || ""} />}
+        {(can(me, "bank.reconcile") || can(me, "stores.transfer")) && <div className="card"><header><h3>Elsewhere</h3></header><div className="pad stack">
+          {can(me, "bank.reconcile") && <a className="btn" href="#/bank">Bank reconciliation →</a>}
+          {can(me, "stores.transfer") && <a className="btn" href="#/stores">{owner ? "Store setup & transfers →" : "Stock transfers →"}</a>}
+        </div></div>}
       </div>}
 
       {tab === "prices" && admin && <div className="set-grid">
@@ -104,7 +112,7 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
         <SupplierTermsCard />
       </div>}
 
-      {tab === "people" && <div className="set-grid">
+      {tab === "people" && boss && <div className="set-grid">
         {meCard}
         {boss && <div className="card"><header><h3>Shop passcode</h3></header>
           <div className="pad stack">
@@ -148,7 +156,7 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
         {boss && <SecuritySettings />}
       </div>}
 
-      {tab === "backup" && <div className="set-grid">
+      {tab === "backup" && admin && <div className="set-grid">
         <div className="card"><header><h3>Cloud backup</h3><span className="grow" />
           <span className={"pill " + (!sync?.cloudEnabled || !sync?.user ? "warn" : sync?.status === "idle" && !sync.pending ? "ok" : sync?.status === "error" ? "bad" : "warn")}>{!sync?.cloudEnabled ? "offline mode" : !sync?.user ? "not connected" : sync?.status === "idle" && !sync.pending ? "✓ all saved" : sync?.status}</span></header>
           <div className="pad stack">
