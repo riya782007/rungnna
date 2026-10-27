@@ -22,7 +22,14 @@ This brings back separate companies after #67 ("one company again"). It does **n
 - **Features per company.** The owner ticks which features a company has. Inside it, every person gets only what both their own role and the company allow: the menu, tabs, search and every guarded save follow it. Turning off *Search bar* removes search in that company.
 - **Auto-logout per company.** Set in minutes. With no tap or key for that long, or after the app has been away for more than a minute, the person goes back to the sign-in screen. Unsaved bills stay in Held.
 
+## Kept apart by the cloud too (migration `20261027120000_company_separation.sql`)
+
+- Every entry code typed on a counter is also checked by the cloud (`join_company`). The counter is then **tied to that company**: the cloud sends it only that company's people, racks, stock, bills, payments, purchases, returns, vouchers and bill details, and refuses anything it tries to save into another company. The design list and customers/suppliers stay shared.
+- **Full access** belongs to the master code, and to the owner's own email login (Settings › Cloud backup). A counter for one company must therefore be connected as *this shop device*, not with the owner's email.
+- Other companies' entry codes, features and bill details, and the master code, are not sent to a tied counter. That counter checks those codes with the cloud instead (it needs internet the first time).
+- After 10 wrong codes in 10 minutes the cloud stops checking codes from that device for a while.
+- A counter that is moved to another company keeps the records it already had on it. To keep one company's records fully off a counter, give that company its own counter or browser.
+
 ## Not built
 
-- Estimate amounts shown at a fraction of the real amount, and a company whose sales or stock are kept from the books or from inspection. Every amount is recorded as it really is.
-- Server-side separation per company. As today, every counter syncs the whole shop and the app enforces companies on the device (see README, *Things to know*). Real server separation needs a cloud login for each company.
+- Estimate amounts shown at a fraction of the real amount, and a company whose sales or stock are kept from the books or from inspection. Every amount is recorded as it really is, and the owner's master view always shows every company in full.
