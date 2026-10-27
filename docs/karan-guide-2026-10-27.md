@@ -46,6 +46,9 @@
 ## 7. Estimate trade code (owner only)
 **Settings › Prices › Estimate trade code:** switch it on and choose the number (e.g. 10).
 - On the counter screens (billing NET, Bills list, held bills), an estimate's total then shows in the code with its mark: a ₹10,000 estimate reads **1,000.00 ÷10**.
+- On the estimate billing screen the **item rates and amounts** show in the code too: a ₹680 bracelet reads **68**. The Rate and Amount columns carry a **÷10** mark, and a yellow note over the totals says "Trade code ÷10".
+- Staff **type rates in the code** as well (in the Rate column, Add item, the calculator, rupee line discounts, bill discount and packing): typing 68 saves ₹680. A "10%" discount stays 10%.
+- Payments, advance and balance on that screen stay in **real rupees**: that is the money taken from the customer.
 - **Only the screen changes.** The estimate is saved at ₹10,000, and prints, shares, reports, khata and payments all use ₹10,000. Staff still take payment of the real amount.
 - "I see real totals" (on by default): you see real totals on your own sign-in.
 

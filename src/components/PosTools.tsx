@@ -4,16 +4,21 @@ import { Modal } from "./common";
 import { type BillLine, type Product } from "../lib/db";
 import { manualLine, moneyInput } from "../lib/pos";
 import { calculate } from "../lib/calculator";
-import { priceFor } from "../lib/billing";
+import { priceFor, fixLine } from "../lib/billing";
+import { toCode, fromCode } from "../lib/tradeCode";
 import { fillFromItemCode, UNITS } from "../lib/products";
 import { billAmount } from "../lib/format";
 import { beep } from "../lib/app";
 
-export function ManualItems({ products, box, level, canRates, onProduct, onCustom, onClose, onAdded, inline = false, persistent = false, focusRequest = 0 }: {
+export function ManualItems({ products, box, level, canRates, onProduct, onCustom, onClose, onAdded, inline = false, persistent = false, focusRequest = 0, codeDiv = 0 }: {
   products: Product[]; box: number; level: "wholesale" | "retail" | "dealer"; canRates: boolean;
   onProduct: (p: Product, count: number, pieces: boolean, rate: number) => void;
   onCustom: (l: BillLine) => void; onClose: () => void; onAdded?: () => void; inline?: boolean; persistent?: boolean; focusRequest?: number;
+  /** estimate trade code (lib/tradeCode): rates are shown and typed ÷ this, stored real. 0 = real rupees */
+  codeDiv?: number;
 }) {
+  const shownRate = (paise: number) => toCode(paise, codeDiv);
+  const rateMark = codeDiv ? ` ÷${codeDiv}` : "";
   const [mode, setMode] = useState("custom"), [q, setQ] = useState(""), [chosen, setChosen] = useState<Product | null>(null);
   const [qty, setQty] = useState("1"), [pieces, setPieces] = useState(false), [rate, setRate] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false);
   const [item, setItem] = useState(""), [style, setStyle] = useState(""), [color, setColor] = useState(""), [unit, setUnit] = useState("PCS"), [hsn, setHsn] = useState("");
@@ -21,14 +26,14 @@ export function ManualItems({ products, box, level, canRates, onProduct, onCusto
   useEffect(() => { if (focusRequest) { setMode("custom"); setChosen(null); if (mode !== "custom") setRate(""); setError(""); } }, [focusRequest]);
   useEffect(() => { if (focusRequest && mode === "custom") search.current?.focus({ preventScroll: true }); }, [focusRequest, mode]);
   const hits = useMemo(() => { const words = q.trim().toUpperCase().split(/\s+/); return products.filter(p => words.every(w => [p.item, p.item_code, p.code, p.style, p.color].join(" ").toUpperCase().includes(w))).slice(0, 30); }, [q, products]);
-  const select = async (p: Product) => { setBusy(true); setError(""); try { const named = await fillFromItemCode(p); setChosen(named); setRate(String(priceFor(named, level) / 100)); setQty("1"); } catch (e: any) { setError(e.message); } finally { setBusy(false); } };
+  const select = async (p: Product) => { setBusy(true); setError(""); try { const named = await fillFromItemCode(p); setChosen(named); setRate(String(shownRate(priceFor(named, level)) / 100)); setQty("1"); } catch (e: any) { setError(e.message); } finally { setBusy(false); } };
   const submit = (next: boolean) => {
     try {
-      if (mode === "custom") onCustom(manualLine({ item, style, color, unit, hsn, qty, rate, box }));
+      if (mode === "custom") { const l = manualLine({ item, style, color, unit, hsn, qty, rate, box }); onCustom(codeDiv ? fixLine({ ...l, rate: fromCode(l.rate, codeDiv) }) : l); }
       else {
         if (!chosen) throw new Error("Select a product");
         const count = Number(qty); if (!Number.isSafeInteger(count) || count <= 0 || count > 1000000) throw new Error("Enter a positive whole quantity");
-        onProduct(chosen, count, pieces, canRates || !priceFor(chosen, level) ? moneyInput(rate) : priceFor(chosen, level));
+        onProduct(chosen, count, pieces, canRates || !priceFor(chosen, level) ? fromCode(moneyInput(rate), codeDiv) : priceFor(chosen, level));
       }
       if (!next && !persistent) return onClose();
       setChosen(null); setQ(""); setItem(""); setRate(""); setQty("1"); setStyle(""); setColor(""); setHsn(""); setPieces(false); setError("");
@@ -46,7 +51,7 @@ export function ManualItems({ products, box, level, canRates, onProduct, onCusto
       <input className="in" aria-label="Style" placeholder="Style" value={style} onChange={e => setStyle(e.target.value)} />
       <input className="in" aria-label="Colour" placeholder="Colour" value={color} onChange={e => setColor(e.target.value)} />
       <input className="in r" aria-label="Quantity" placeholder="Qty" type="number" min={1} step={1} value={qty} onChange={e => setQty(e.target.value)} />
-      <input className="in r" aria-label={"Rate per " + unit} placeholder="Rate" inputMode="decimal" value={rate} onChange={e => setRate(e.target.value)} />
+      <input className="in r" aria-label={"Rate per " + unit} placeholder={"Rate" + rateMark} title={codeDiv ? `Rate in the trade code (÷${codeDiv}) — saved as the real rate` : undefined} inputMode="decimal" value={rate} onChange={e => setRate(e.target.value)} />
       <button className="btn p" title="Tracked in stock when saved; zero stock can go negative"><Plus size={16} />Add</button>
     </form>
     {error && <div role="alert" className="note warn sm">{error}</div>}
@@ -54,12 +59,12 @@ export function ManualItems({ products, box, level, canRates, onProduct, onCusto
   const content = <div className="stack pos-tools">
     <div className="seg" role="group" aria-label="Item source"><button aria-pressed={mode === "catalog"} onClick={() => { setMode("catalog"); setError(""); }}>Stock item</button><button aria-pressed={mode === "custom"} onClick={() => { setMode("custom"); setChosen(null); setRate(""); setError(""); }}>Custom item</button></div>
     {mode === "catalog" && <><label className="f">Search products<input className="in" autoFocus={!persistent} ref={search} value={q} onChange={e => { setQ(e.target.value); setChosen(null); }} placeholder="Name, item number, style or colour" /></label>
-      {!chosen ? <div className="pos-picklist">{hits.map(p => <button className="pos-pick" key={p.id} disabled={busy} onClick={() => select(p)}><span><b>{p.item || "Item " + (p.item_code || p.code)}</b><span className="mut sm">{p.style} · {p.color}</span></span><b className="mono">{billAmount(priceFor(p, level))}</b></button>)}{!hits.length && <div className="mut">No matching products</div>}</div> : <div className="note"><b>{chosen.item || "Item " + chosen.item_code}</b><div>{chosen.style} · {chosen.color} · {chosen.type}</div></div>}
+      {!chosen ? <div className="pos-picklist">{hits.map(p => <button className="pos-pick" key={p.id} disabled={busy} onClick={() => select(p)}><span><b>{p.item || "Item " + (p.item_code || p.code)}</b><span className="mut sm">{p.style} · {p.color}</span></span><b className="mono">{billAmount(shownRate(priceFor(p, level)))}{rateMark}</b></button>)}{!hits.length && <div className="mut">No matching products</div>}</div> : <div className="note"><b>{chosen.item || "Item " + chosen.item_code}</b><div>{chosen.style} · {chosen.color} · {chosen.type}</div></div>}
     </>}
     {(chosen || mode === "custom") && <form onSubmit={e => { e.preventDefault(); submit(false); }} className="pos-entry-fields">
       {mode === "custom" && <><label className="f pos-entry-name">Product name<input ref={search} autoFocus={!persistent} className="in" value={item} onChange={e => setItem(e.target.value)} /></label><label className="f">Unit<select className="in" value={unit} onChange={e => setUnit(e.target.value)}>{UNITS.map(u => <option key={u}>{u}</option>)}</select></label><label className="f">Style<input className="in" value={style} onChange={e => setStyle(e.target.value)} /></label><label className="f">Colour<input className="in" value={color} onChange={e => setColor(e.target.value)} /></label><label className="f">HSN<input className="in" inputMode="numeric" value={hsn} onChange={e => setHsn(e.target.value)} /></label></>}
       {mode === "catalog" && chosen && (chosen.pack || 1) > 1 && <div className="seg pos-entry-wide" role="group" aria-label="Quantity mode"><button type="button" aria-pressed={!pieces} onClick={() => setPieces(false)}>Packets ×{chosen.pack}</button><button type="button" aria-pressed={pieces} onClick={() => setPieces(true)}>Loose {chosen.type}</button></div>}
-      <label className="f">Quantity<input className="in" type="number" min={1} step={1} value={qty} onChange={e => setQty(e.target.value)} /></label><label className="f">Rate / {mode === "catalog" ? chosen?.type : unit}<input className="in" inputMode="decimal" value={rate} disabled={mode === "catalog" && !!chosen && !canRates && !!priceFor(chosen, level)} onChange={e => setRate(e.target.value)} /></label>
+      <label className="f">Quantity<input className="in" type="number" min={1} step={1} value={qty} onChange={e => setQty(e.target.value)} /></label><label className="f">Rate / {mode === "catalog" ? chosen?.type : unit}{rateMark}<input className="in" inputMode="decimal" value={rate} disabled={mode === "catalog" && !!chosen && !canRates && !!priceFor(chosen, level)} onChange={e => setRate(e.target.value)} /></label>
       <div className="row pos-entry-actions"><button className="btn p" disabled={busy}><Plus size={16} />Add to bill</button>{!persistent && <button type="button" className="btn" disabled={busy} onClick={() => submit(true)}>Add & next</button>}{mode === "custom" && <span className="xs mut">Tracked in stock when saved; zero stock can go negative</span>}</div>
     </form>}
     {error && <div role="alert" className="note warn">{error}</div>}

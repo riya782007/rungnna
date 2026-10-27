@@ -33,6 +33,35 @@ export function codeFor(t: TradeCode | undefined, bill: Pick<Bill, "bill_type">,
   return t.divisor;
 }
 
+/* Owner, 27 Oct (2): the staff read the item RATES in the code too, not only the total — with ÷10 a ₹680 bracelet
+   reads 68 on the estimate screen, and they type rates in the code as well. Only the screen converts: what is typed
+   is multiplied back before it is stored, so the saved estimate, prints, WhatsApp, reports, khata, payments and the
+   balance keep the real rupees. Money taken from the customer (payments, advance, balance) stays real on screen. */
+
+/** The divisor for this bill on this sign-in's screens, or 0 for the real amounts. */
+export function useTradeDivisor(bill?: Pick<Bill, "bill_type">) {
+  const { me } = useApp();
+  const t = useLiveQuery(getTradeCode, [], DEFAULT_TRADE_CODE);
+  return bill ? codeFor(t, bill, me?.role === "owner") : 0;
+}
+/** Real paise → the figure shown in the code. d = 0 leaves it real. */
+export const toCode = (paise: number, d: number) => (d ? Math.round(paise / d) : paise);
+/** A figure typed in the code → the real paise that is stored. */
+export const fromCode = (paise: number, d: number) => (d ? Math.round(paise * d) : paise);
+const two = (n: number) => String(Math.round(n * 100) / 100);
+/** A line discount as shown: "10%" stays as it is (a percent is the same in the code); a rupee amount is coded. */
+export function discToCode(disc: string, d: number) {
+  const v = (disc || "").trim();
+  if (!d || !v || v.endsWith("%") || !/^\d+(\.\d+)?$/.test(v)) return disc || "";
+  return two(Number(v) / d);
+}
+/** A line discount typed in the code → stored real. Anything that isn't a plain rupee amount is kept as typed. */
+export function discFromCode(text: string, d: number) {
+  const v = text.trim();
+  if (!d || !v || v.endsWith("%") || !/^\d+(\.\d{1,2})?$/.test(v)) return text;
+  return two(Number(v) * d);
+}
+
 /** For screens: shows an estimate total in the trade code when it applies, with its ÷ mark; the real amount otherwise. */
 export function useEstimateAmount() {
   const { me } = useApp();

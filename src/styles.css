@@ -1518,3 +1518,6 @@ tr.act-estimate td { background: #fde8e8; }
   .label-manual-fields .lf-photo .thumb{width:34px!important;height:34px!important}
   .label-manual-fields .label-advanced{flex:1 0 100%}
 }
+/* Estimate trade code (lib/tradeCode): the ÷N mark on coded columns, and the note over the totals */
+.trade-mark{margin-left:3px;padding:0 4px;border-radius:4px;background:#241B2E;color:#fff;font-size:10px;font-weight:700;white-space:nowrap}
+.trade-note{padding:4px 8px;font-size:11px;line-height:1.3;background:#FFF3B0;border:1px solid #B77900;color:#422006}
