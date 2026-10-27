@@ -1484,3 +1484,26 @@ tr.act-estimate td { background: #fde8e8; }
   .billing-shell .pos-line-actions .x{height:26px}
   .billing-shell .pos-lines .pos-t th{padding-block:3px}
 }
+
+/* Owner, 27 Oct (photo of the Labels page): "pieces and vendor need only a tiny bit of space — one line, in order,
+   everything in front of me". On a laptop or desktop the sticker fields sit in one row, each only as wide as its
+   content: item and style get the room, the number boxes stay small. "More details" opens on its own line below.
+   Phones keep two columns. */
+@media(min-width:861px){
+  .label-manual-fields{display:flex;flex-wrap:wrap;align-items:flex-start;gap:6px}
+  .label-manual-fields>*{flex:0 0 auto;min-width:0}
+  .label-manual-fields .f{font-size:11px;gap:2px;white-space:nowrap}
+  .label-manual-fields .in{height:34px;padding:0 6px;font-size:14px}
+  .label-manual-fields .lf-item{flex:1.5 1 110px}
+  .label-manual-fields .lf-style{flex:1 1 92px}
+  .label-manual-fields .lf-type{width:66px}
+  .label-manual-fields .lf-color{width:72px}
+  .label-manual-fields .lf-tk{width:44px}
+  .label-manual-fields .lf-vendor{width:60px}
+  .label-manual-fields .lf-vendor .xs{white-space:normal;line-height:1.2;font-size:10px}
+  .label-manual-fields .lf-cost,.label-manual-fields .lf-rate{width:72px}
+  .label-manual-fields .lf-num{width:50px}
+  .label-manual-fields .lf-photo .btn{height:34px;padding:0 8px}
+  .label-manual-fields .lf-photo .thumb{width:34px!important;height:34px!important}
+  .label-manual-fields .label-advanced{flex:1 0 100%}
+}
