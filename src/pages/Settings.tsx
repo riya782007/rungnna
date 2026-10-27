@@ -9,7 +9,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, deviceId, uid, type Staff } from "../lib/db";
 import { Head } from "../components/common";
 import { useApp, toast, newStaff, SEED_OWNER, logoutEveryone } from "../lib/app";
-import { onSync, signIn, signOut, syncNow, exportAll, importAll, createShopLogin, sb, ensureSession, markShopDevice, type SyncState } from "../lib/sync";
+import { onSync, signIn, signOut, syncNow, exportAll, importAll, createShopLogin, sb, ensureSession, markShopDevice, refreshPeople, type SyncState } from "../lib/sync";
 import type { Pattern } from "../lib/parse";
 import { when } from "../lib/format";
 import { getShop, saveShop, counterCode, DEFAULT_SHOP, type Shop } from "../lib/billing";
@@ -279,6 +279,16 @@ export function ShopLogin({ onDone, emailOnly }: { onDone?: () => void; emailOnl
   );
 }
 
+const nameKey = (s: string) => s.trim().toUpperCase().replace(/\s+/g, " ");
+/** The people on this computer with this name (any capitals or spaces), read fresh, with the same rules as the
+ * sign-in list: no role logins, and the blank placeholder owner only until the shop's real owner has arrived. */
+async function peopleNamed(name: string): Promise<Staff[]> {
+  const want = nameKey(name);
+  const staff = (await db.staff.filter(s => !s.deleted && !!s.active).toArray()).filter(s => !isRoleLogin(s));
+  const realOwner = staff.some(s => s.role === "owner" && s.id !== SEED_OWNER);
+  return staff.filter(s => !(realOwner && s.id === SEED_OWNER && !s.pin) && nameKey(s.name) === want);
+}
+
 /* Every counter shares the entrance code; identity and permissions remain personal. */
 export function WhoAreYou() {
   const { setMe } = useApp();
@@ -323,28 +333,45 @@ export function WhoAreYou() {
   useEffect(() => { entryWait(stage).then(setWait); }, [stage]);
   useEffect(() => { if (wait <= 0) return; const timer = setTimeout(() => setWait(w => Math.max(0, w - 1000)), 1000); return () => clearTimeout(timer); }, [wait]);
 
+  const [checking, setChecking] = useState(false);
   const attempt = async (action: () => Promise<boolean>) => {
     if (busy) return;
     setBusy(true); setBad("");
     try {
       const remaining = await entryWait(stage); if (remaining > 0) { setWait(remaining); return; }
       if (await action()) { await recordEntryAttempt(true, stage); setCode(""); setPin(""); }
-      else { setWait(await recordEntryAttempt(false, stage)); setBad(unlocked ? "Name or PIN not recognised. Check the spelling of your name, or ask the owner." : "Entry code not recognised. Ask the owner."); setCode(""); setPin(""); }
+      else {
+        setWait(await recordEntryAttempt(false, stage));
+        setBad(!unlocked ? "Entry code not recognised. Ask the owner."
+          : !navigator.onLine ? "Name or PIN not recognised on this computer. It is offline: a person or PIN made on another computer opens here once it is online."
+          : "Name or PIN not recognised. Check the spelling of your name, or ask the owner.");
+        setCode(""); setPin("");
+      }
     } catch (e: any) { setBad(e.message || "Could not open. Try again."); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setChecking(false); }
+  };
+  /* Owner, 27 Oct: Raj, made on the home laptop, was "not recognised" on the shop laptop, and Rajkaran, made at the
+     shop, did not open at home until later. Each computer signs in from its own copy of the people, and a new
+     person reached the other computer only with a later sync. So when this computer doesn't know the name or PIN,
+     it first asks the cloud for the latest people, and only then calls it a wrong try (which starts the pause). */
+  const withFreshPeople = async (check: () => Promise<boolean>) => {
+    if (await check()) return true;
+    setChecking(true);
+    return await refreshPeople() && await check();
   };
   const open = (e: React.FormEvent) => {
     e.preventDefault();
     void attempt(async () => {
       if (!unlocked) { if (!codeMatches(code, await getOpenCode())) return false; setUnlocked(true); return true; }
-      if (roleMode) { const person = await staffForRolePasscode(code); if (!person) return false; setMe(person); return true; }
-      const want = typed.trim().toUpperCase().replace(/\s+/g, " ");
-      const named = persons.filter(s => s.name.trim().toUpperCase().replace(/\s+/g, " ") === want);
-      // an owner with no PIN yet sets one now (one-time); anyone else without a PIN asks the owner
-      const fresh = named.find(s => s.role === "owner" && !s.pin);
-      if (fresh) { setPick(fresh); return true; }
-      for (const s of named) { const person = s.pin ? await personForPin(s.id, pin) : null; if (person) { setMe(person); return true; } }
-      return false;
+      if (roleMode) return withFreshPeople(async () => { const person = await staffForRolePasscode(code); if (!person) return false; setMe(person); return true; });
+      return withFreshPeople(async () => {
+        const named = await peopleNamed(typed);   // read now, not the list from before the cloud answered
+        // an owner with no PIN yet sets one now (one-time); anyone else without a PIN asks the owner
+        const fresh = named.find(s => s.role === "owner" && !s.pin);
+        if (fresh) { setPick(fresh); return true; }
+        for (const s of named) { const person = s.pin ? await personForPin(s.id, pin) : null; if (person) { setMe(person); return true; } }
+        return false;
+      });
     });
   };
   const setupOwner = async (person: Staff, name = person.name) => {
@@ -388,7 +415,7 @@ export function WhoAreYou() {
             <input className="in" autoFocus={!unlocked || roleMode} key={stage + (roleMode ? "r" : "p")} type="password" autoComplete="current-password" inputMode={unlocked && !roleMode ? "numeric" : "text"} maxLength={unlocked && !roleMode ? 4 : undefined}
               placeholder={!unlocked ? "Same entry code for everyone" : roleMode ? "Type your own role passcode" : "Your 4-digit PIN"} value={unlocked && !roleMode ? pin : code}
               onChange={e => { unlocked && !roleMode ? setPin(e.target.value.replace(/\D/g, "")) : setCode(e.target.value); setBad(""); }} /></label>
-          <button className="btn p" disabled={busy || wait > 0 || (unlocked && !roleMode ? !typed.trim() || (pin.length !== 4 && !persons.some(s => s.role === "owner" && !s.pin)) : !code.trim())}>{busy ? "Checking…" : unlocked ? "Sign in" : "Continue"}</button>
+          <button className="btn p" disabled={busy || wait > 0 || (unlocked && !roleMode ? !typed.trim() || (pin.length !== 4 && !persons.some(s => s.role === "owner" && !s.pin)) : !code.trim())}>{checking ? "Checking with the cloud…" : busy ? "Checking…" : unlocked ? "Sign in" : "Continue"}</button>
           {unlocked && <>
             <button type="button" className="linkbtn" onClick={() => { setRoleMode(m => !m); setPin(""); setCode(""); setBad(""); }}>{roleMode ? "Sign in with your name and PIN" : "Use a role passcode"}</button>
             <button type="button" className="linkbtn" onClick={() => { setReset(true); setBad(""); setPick(null); setPin(""); }}>Forgot the owner PIN? Set a new one with the shop's cloud login</button>
