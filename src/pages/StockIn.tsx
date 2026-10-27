@@ -15,11 +15,12 @@ import { rupees, toPaise, when } from "../lib/format";
 import { CameraScanner, useScannerGun } from "../components/Scanner";
 import { LinkRfid } from "../components/LinkRfid";
 import { isRfidTag, normTag, TagSet, Recent } from "../lib/rfid";
-import { Head, LocationSelect, PhotoButton, Modal, LOC_PREFIX, useLocations , MoneyInput } from "../components/common";
+import { Head, LocationSelect, PhotoButton, Modal, LOC_PREFIX, useLocations , MoneyInput, Thumb } from "../components/common";
 import { parseRackScan } from "../lib/rackLabel";
 import { Icon } from "../components/Icon";
 import { NameItemCodes, unnamedCodes } from "../components/NameItemCodes";
 const PurchasePhoto = lazy(() => import("../components/PurchasePhoto"));
+const CustomerCamera = lazy(() => import("../components/CustomerCamera"));
 
 /* Stock in: stand at a rack, scan packet after packet, save once.
    Every scan is +1 packet. Labels the system hasn't seen become products on the spot.
@@ -54,12 +55,13 @@ function StockInSession() {
   const [supOpen, setSupOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [rfid, setRfid] = useState(false);
+  const [snap, setSnap] = useState(false);
   const box = useRef<HTMLInputElement>(null);
   /* RFID: one tag counts once per stock-in */
   const tagsRef = useRef(new TagSet());
   const unlinked = useRef(new Recent());
   useEffect(() => { tagsRef.current = new TagSet(p?.rfid_tags || []); }, [p?.id]);
-  useScannerGun(c => onCode(c), { enabled: !rfid && !supOpen });
+  useScannerGun(c => onCode(c), { enabled: !rfid && !supOpen && !snap });   // a scan while the photo is taken would move the photo to another packet
   const products = useLiveQuery(() => db.products.filter(x => !x.deleted).toArray(), [], []);
   const recent = useLiveQuery(() => db.purchases.where("status").equals("final").filter(inStore).reverse().sortBy("at"), [], []);
 
@@ -112,6 +114,16 @@ function StockInSession() {
     beep(true); add(product, created); setQ("");
     if (created) toast("New product: " + [product.item, product.style, product.color].filter(Boolean).join(" · "));
   }
+  /* Owner, 27 Oct: "while barcoding a camera icon should be there, so when stock flows in we can take a picture of
+     that very moment". The photo goes with the packet scanned last (top of the list); on saving it is kept on that
+     stock's intake movement, and becomes the product's picture if the product has none. */
+  const photoNow = (photo_id: string) => {
+    const top = p?.items[0];
+    if (!top) return;
+    setP(x => x && { ...x, items: x.items.map(l => (l.id === top.id ? { ...l, photo_id } : l)) });
+    toast("Photo saved with " + ([top.item, top.style].filter(Boolean).join(" · ") || "this packet"));
+    box.current?.focus();
+  };
   const setLine = (id: string, patch: Partial<PurchaseLine>) => setP(x => x && { ...x, items: x.items.map(l => (l.id === id ? { ...l, ...patch } : l)) });
   async function save() {
     if (!p || !t) return;
@@ -144,10 +156,15 @@ function StockInSession() {
                 <input ref={box} autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Scan packet label (gun or camera)"
                   onKeyDown={e => { if (e.key === "Enter" || (e.key === "Tab" && isRfidTag(q))) { e.preventDefault(); onCode(q); } }} />
               </div>
-              <button className={"btn " + (cam ? "p" : "")} onClick={() => { setCam(!cam); setSetting("stockin_cam", !cam); }}><Icon n="camera" size={18} />{cam ? "Camera on" : "Camera"}</button>
+              <button className={"btn " + (cam ? "p" : "")} onClick={() => { setCam(!cam); setSetting("stockin_cam", !cam); }}><Icon n="scan" size={18} />{cam ? "Camera scan on" : "Camera scan"}</button>
+              <button className="btn" disabled={!t.items.length} onClick={() => setSnap(true)} aria-label="Take a photo of this stock now"
+                title={t.items.length ? "Photo of the packet scanned last, as it comes in" : "Scan a packet first"}><Icon n="camera" size={18} />Photo</button>
               <button className="btn" onClick={() => setRfid(true)}>Link RFID tag</button>
             </div>
             {cam && <CameraScanner onCode={c => onCode(c)} gap={1200} />}
+            {snap && <Suspense fallback={<div role="status">Opening camera…</div>}>
+              <CustomerCamera title="Photo of this stock coming in" facing="environment" settingKey="stockin_photo_camera"
+                onPhoto={id => { setSnap(false); photoNow(id); }} onClose={() => setSnap(false)} /></Suspense>}
             {!p.loc_id && <div className="note warn sm">Pick the rack first — every packet you scan goes there.</div>}
           </div>
 
@@ -157,6 +174,7 @@ function StockInSession() {
           <div className="list">
             {t.items.map(l => (
               <div key={l.id} className="li" style={{ background: flash === l.product_id ? "var(--gold-l)" : undefined, transition: "background .4s" }}><input type="checkbox" aria-label={"Select stock-in line " + l.item + " " + l.style} checked={selection.has(l.id)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(l.id) : next.delete(l.id); return next; })} />
+                {l.photo_id && <Thumb photo_id={l.photo_id} size={36} />}
                 <span className="grow" style={{ minWidth: 0 }}>
                   <b className="sm">{hasProductName(l.item) ? l.item : "Name needed"}</b> <span className="mono sm">{l.style}</span> <span className="mut sm">{l.color}</span>
                   {l.isNew && <span className="pill gold" style={{ marginLeft: 6 }}>new</span>}
