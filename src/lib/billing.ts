@@ -20,6 +20,9 @@ export interface Shop {
   state: string; upi: string; bank: string; terms: string; hsn: string; gst_rate: number; gst_mode: "exclusive" | "inclusive"; max_disc: number;
   /** what a bill line shows: just the item name (default, owner 22 Oct: bills of 100–150 lines stay short) or item + style + colour */
   bill_lines?: "item" | "full";
+  /** Owner, 27 Oct: every new estimate starts with the shop's usual discount (e.g. 50%) and less (e.g. 3%), as the
+      old software did, so the counter never forgets it. 0 / blank = none. Changeable on each bill. */
+  est_disc_pct?: number; est_less_pct?: number;
 }
 export const DEFAULT_SHOP: Shop = {
   name: "RUNGNNA JEWELLERY & CO", tagline: "Fashion & Imitation Jewellery", address: "", phone: "", whatsapp: "", gstin: "",
@@ -213,6 +216,14 @@ export function taxSummary(b: Bill, by: "rate" | "hsn", shopHsn = "7117"): TaxRo
 }
 export const due = (b: Pick<Bill, "net" | "advance" | "paid"> & { bill_type?: BillType }) =>
   b.bill_type === "challan" ? 0 : b.net - b.advance - b.paid;   // a challan asks for no money
+
+/** A new estimate with the shop's usual discount and less already on it; any other document is left as it is. */
+export function withEstimateDiscount(b: Bill, shop: Pick<Shop, "est_disc_pct" | "est_less_pct">): Bill {
+  if (b.bill_type !== "estimate") return b;
+  const ok = (n: unknown) => { const v = Number(n); return Number.isFinite(v) && v > 0 && v <= 100 ? v : 0; };
+  const pct = ok(shop.est_disc_pct), less = ok(shop.est_less_pct);
+  return pct || less ? { ...b, discount_pct: pct, discount: 0, ...(less ? { less_pct: less } : {}) } : b;
+}
 
 /* ---------------- building bills ---------------- */
 export function newBill(by: string, shop: Shop, t0: BillType = "estimate"): Bill {

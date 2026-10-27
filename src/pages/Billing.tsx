@@ -19,7 +19,7 @@ import { noteMiss, clearMiss, learnFromPick } from "../lib/scan-learn";
 import { ShopDetailsAsk, shopNeedsTaxDetails } from "../components/ShopDetailsAsk";
 import { NameItemCodes, unnamedCodes } from "../components/NameItemCodes";
 import { isRfidTag, normTag, soldBill, TagSet, Recent } from "../lib/rfid";
-import { discError, newBill, lineFrom, priceFor, totals, gstLabel, fixLine, finalize, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
+import { discError, newBill, withEstimateDiscount, lineFrom, priceFor, totals, gstLabel, fixLine, finalize, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
 import { voiceBill } from "../lib/ai";
 import { useApp, toast, beep, go } from "../lib/app";
 import { can } from "../lib/roles";
@@ -309,7 +309,7 @@ export default function Billing({ args }: { args: string[] }) {
       const restored = d && fits(d) && d.status === "hold" && !d.no && (d.bill_type !== "estimate" || isOpen()) ? d : await resumeBillingDraft(want);
       setBox(restored ? selectedBox(restored) : 1);
       if (restored) delete (restored as BillingDraft).selected_box;   // draft-only field: never saved onto the bill
-      setB(restored ? { ...restored, items: mergeBillLines(restored.items) } : newBill(me?.id || "", s, want));
+      setB(restored ? { ...restored, items: mergeBillLines(restored.items) } : withEstimateDiscount(newBill(me?.id || "", s, want), s));
     })();
   }, [args[0]]);
   useEffect(() => { if (b && !b.no) setSetting("draft_bill", { ...b, selected_box: box }); }, [b, box]);
@@ -339,7 +339,7 @@ export default function Billing({ args }: { args: string[] }) {
       const draft = held || await resumeBillingDraft(type);
       if ((type === "estimate" || (draft && isEstimate(draft))) && !isOpen()) throw new Error("Unlock estimates before resuming");
       if (billRef.current?.id !== current?.id) throw new Error("Bill changed — choose the document again");
-      const next = draft || newBill(me?.id || "", shop, type);
+      const next = draft || withEstimateDiscount(newBill(me?.id || "", shop, type), shop);
       setBox(selectedBox(next));
       const clean = { ...next }; delete (clean as BillingDraft).selected_box;
       setB({ ...clean, items: mergeBillLines(clean.items) });
@@ -553,8 +553,12 @@ export default function Billing({ args }: { args: string[] }) {
     /* discount above the shop's limit needs an owner/manager PIN */
     const list = t.items.reduce((a, l) => a + l.qty * l.rate, 0);
     const offPct = list ? ((list - t.gross + t.discount) / list) * 100 : 0;
-    if (offPct > (shop.max_disc ?? 10) + 0.01 && !can(me, "discount")) {
-      const pin = await askText(`Discount is ${offPct.toFixed(1)}% — above the ${shop.max_disc ?? 10}% limit. Owner or manager PIN:`);
+    // the shop's own usual estimate discount (Settings: e.g. 50% + 3% less = 51.5% off) is the owner's decision,
+    // so on an estimate the PIN is asked only above it (or above the plain limit, whichever is higher)
+    const usualPct = b.bill_type === "estimate" ? (() => { const d = Math.min(100, shop.est_disc_pct || 0), l = Math.min(100, shop.est_less_pct || 0); return 100 - (100 - d) * (100 - l) / 100; })() : 0;
+    const limit = Math.max(shop.max_disc ?? 10, usualPct);
+    if (offPct > limit + 0.01 && !can(me, "discount")) {
+      const pin = await askText(`Discount is ${offPct.toFixed(1)}% — above the ${+limit.toFixed(1)}% limit. Owner or manager PIN:`);
       const ok = pin && (await db.staff.filter(x => !!x.active && !x.deleted && x.login !== "role" && !!x.pin && x.pin === pin && can(x, "billing.discount_over")).count());
       if (!ok) return toast("Discount not approved", true);
     }
@@ -571,7 +575,7 @@ export default function Billing({ args }: { args: string[] }) {
     if (bags) setBagBill(done);
     if (print) printWithSlips(done);
     if (share) await shareBill(done, shop);
-    setB(newBill(me?.id || "", shop, b.bill_type)); setBox(1);
+    setB(withEstimateDiscount(newBill(me?.id || "", shop, b.bill_type), shop)); setBox(1);
     setNextNo("");
     } catch (e: any) { toast(e.message || "Could not save bill", true); }
     finally { savingRef.current = false; setSaving(false); }
@@ -581,7 +585,7 @@ export default function Billing({ args }: { args: string[] }) {
     if (!b?.items.length) return toast("Nothing to hold", true);
     if (!b.remarks?.trim()) { toast("Write a remark before Hold — customer, reason or what is pending.", true); remarksRef.current?.focus(); return; }
     await parkBillingDraft(b, box, shop); await setSetting("draft_bill", null);
-    toast("Bill on hold — F4 to bring it back"); setB(newBill(me?.id || "", shop, b.bill_type)); setBox(1);
+    toast("Bill on hold — F4 to bring it back"); setB(withEstimateDiscount(newBill(me?.id || "", shop, b.bill_type), shop)); setBox(1);
   }
   async function doVoice(audio?: Blob, text?: string) {
     setAiBusy(true);
@@ -610,7 +614,7 @@ export default function Billing({ args }: { args: string[] }) {
       if (!/^F\d+$/.test(k)) return;
       e.preventDefault();
       if (calculator || savingRef.current || switchingRef.current || document.querySelector('.modal,dialog[open]')) return;
-      if (k === "F2") { const snapshot = billRef.current; void (async () => { if (snapshot?.items.length && !await confirmDelete("Clear the current bill and start a new one? Use Hold to keep it.")) return; if (billRef.current?.id !== snapshot?.id) return; setB(newBill(me?.id || "", shop, priv ? snapshot?.bill_type || "gst" : "gst")); setBox(1); })(); }
+      if (k === "F2") { const snapshot = billRef.current; void (async () => { if (snapshot?.items.length && !await confirmDelete("Clear the current bill and start a new one? Use Hold to keep it.")) return; if (billRef.current?.id !== snapshot?.id) return; setB(withEstimateDiscount(newBill(me?.id || "", shop, priv ? snapshot?.bill_type || "gst" : "gst"), shop)); setBox(1); })(); }
       if (k === "F3") doHold();
       if (k === "F4") setHeld(true);
       if (k === "F5") setCalculator(true);

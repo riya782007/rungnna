@@ -589,6 +589,11 @@ function ShopProfile() {
           {f("upi", "UPI ID (for pay-QR on bills)", "rungnna@okaxis")}{f("hsn", "HSN code", "7117")}
           {f("gst_rate", "GST %", "3")}
           <label className="f">Max discount without PIN (%)<input className="in" inputMode="decimal" value={s.max_disc ?? 10} onChange={e => setS({ ...s, max_disc: Number(e.target.value) || 0 })} /></label>
+          {/* Owner, 27 Oct: "the discount didn't come by itself like we were used to, so the boy didn't give it" */}
+          <label className="f">Usual estimate discount (%)<input className="in" inputMode="decimal" placeholder="e.g. 50" value={s.est_disc_pct || ""} onChange={e => setS({ ...s, est_disc_pct: Math.min(100, Number(e.target.value.replace(/[^\d.]/g, "")) || 0) })} />
+            <span className="xs mut">Every new estimate starts with it; change it on the bill when needed. No PIN for it.</span></label>
+          <label className="f">Usual less after it (%)<input className="in" inputMode="decimal" placeholder="e.g. 3" value={s.est_less_pct || ""} onChange={e => setS({ ...s, est_less_pct: Math.min(100, Number(e.target.value.replace(/[^\d.]/g, "")) || 0) })} />
+            <span className="xs mut">Cut on what is left after the discount (50% then 3% = 51.5% off). Blank = none.</span></label>
           <label className="f">GST on rates<select className="in" value={s.gst_mode} onChange={e => setS({ ...s, gst_mode: e.target.value as any })}><option value="exclusive">Added on top of rate</option><option value="inclusive">Already included in rate</option></select></label>
         </div>
         {f("address", "Address")}{f("bank", "Bank details", "HDFC · A/c 123… · IFSC …")}{f("terms", "Terms (bottom of bill)")}
