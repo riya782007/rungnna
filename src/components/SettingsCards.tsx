@@ -330,15 +330,15 @@ export function TradeCodeCard() {
   const [draft, setDraft] = useState<TradeCode | null>(null);
   const t = draft || row;
   const save = async () => {
-    try { await saveTradeCode(t); setDraft(null); toast(t.on ? `Estimate totals show ÷${t.divisor} on the counter screens` : "Estimate totals show the real amount"); }
+    try { await saveTradeCode(t); setDraft(null); toast(t.on ? `Estimate rates and totals show ÷${t.divisor} on the counter screens` : "Estimates show the real amounts"); }
     catch (e: any) { toast(e.message, true); }
   };
   return <div className="card"><header><h3>Estimate trade code</h3></header>
     <div className="pad stack">
-      <div className="xs mut">Only the counter screens show an estimate's total in the shop's code: with ÷10, a ₹10,000 estimate reads "1,000.00 ÷10". Every amount is still saved as it really is, and every printed or shared bill, report, khata and GST figure shows the real amount.</div>
-      <label className="row sm" style={{ gap: 6 }}><input type="checkbox" checked={t.on} onChange={e => setDraft({ ...t, on: e.target.checked })} />Show estimate totals in the trade code</label>
+      <div className="xs mut">Only the counter screens show an estimate in the shop's code: with ÷10, a ₹680 item rate reads 68 and a ₹10,000 estimate reads "1,000.00 ÷10". Staff also type rates in the code; they are saved ×10. Every amount is still saved as it really is, and every printed or shared bill, report, khata, payment, balance and GST figure shows the real amount.</div>
+      <label className="row sm" style={{ gap: 6 }}><input type="checkbox" checked={t.on} onChange={e => setDraft({ ...t, on: e.target.checked })} />Show estimate rates and totals in the trade code</label>
       <label className="f">Divide by<input className="in mono" inputMode="decimal" value={String(t.divisor)} onChange={e => setDraft({ ...t, divisor: Number(e.target.value.replace(/[^\d.]/g, "")) || 0 })} /></label>
-      <label className="row sm" style={{ gap: 6 }}><input type="checkbox" checked={t.owner_real} onChange={e => setDraft({ ...t, owner_real: e.target.checked })} />I (the owner) see real totals</label>
+      <label className="row sm" style={{ gap: 6 }}><input type="checkbox" checked={t.owner_real} onChange={e => setDraft({ ...t, owner_real: e.target.checked })} />I (the owner) see real rates and totals</label>
       <div className="row"><button className="btn p sm" disabled={!draft} onClick={() => void save()}>Save</button></div>
     </div></div>;
 }

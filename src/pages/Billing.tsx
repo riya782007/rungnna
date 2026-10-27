@@ -26,7 +26,7 @@ import { can } from "../lib/roles";
 import { usePrivate, unlock, lockNow, getPrivate, isOpen, isEstimate } from "../lib/privacy";
 import { Icon } from "../components/Icon";
 import { billAmount, toPaise } from "../lib/format";
-import { useEstimateAmount } from "../lib/tradeCode";
+import { useEstimateAmount, useTradeDivisor, toCode, fromCode, discToCode, discFromCode } from "../lib/tradeCode";
 import { CameraScanner, useScanOnlyIn } from "../components/Scanner";
 import { hostRemote } from "../lib/remote";
 import { qrSvg } from "../lib/qr";
@@ -282,6 +282,11 @@ export default function Billing({ args }: { args: string[] }) {
   /* private estimates: hidden until the owner's code is entered */
   const priv = usePrivate();
   const shownNet = useEstimateAmount();   // an estimate's total in the shop's trade code, on this screen only (lib/tradeCode)
+  /* owner, 27 Oct: on an estimate the staff read and type every rate and amount in the trade code too (÷10: ₹680 reads
+     68). cd = 0 means real rupees. Typed figures are multiplied back (fromCode) before they are stored. */
+  const cd = useTradeDivisor(b ?? undefined);
+  const mark = cd ? ` ÷${cd}` : "";
+  const coded = (paise: number) => billAmount(toCode(paise, cd)) + mark;
   const products = useLiveQuery(() => db.products.filter(p => !p.deleted).toArray(), [], []);
   const pmap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
   const itemNames = useLiveQuery(() => db.config.get("item_codes"), []);
@@ -628,7 +633,7 @@ export default function Billing({ args }: { args: string[] }) {
   const boxLines = (n: number) => boxLineRange(t.items.map((l, i) => l.box_no === n ? i + 1 : 0).filter(Boolean));
   const balance = due(t);
   const lastScan = t.items.find(l => l.id === lastScanId);
-  const itemEditor = <Suspense fallback={<div className="pos-entry-loading" role="status">Loading items…</div>}><ManualItems key={b.id} inline persistent focusRequest={entryFocus} products={products} box={box} level={b.price_level || "wholesale"} canRates={can(me, "billing.rates")} onClose={() => {}} onAdded={() => scanRef.current?.focus({ preventScroll: true })}
+  const itemEditor = <Suspense fallback={<div className="pos-entry-loading" role="status">Loading items…</div>}><ManualItems key={b.id} inline persistent focusRequest={entryFocus} products={products} box={box} level={b.price_level || "wholesale"} canRates={can(me, "billing.rates")} codeDiv={cd} onClose={() => {}} onAdded={() => scanRef.current?.focus({ preventScroll: true })}
     onProduct={(p, count, pieces, rate) => {
       void learnFromPick(p).then(ok => ok && toast(`Learnt: this sticker now scans as ${label(p)}`));
       const line = fixLine({ ...lineFrom(p, box, pieces ? 0 : count, b.price_level || "wholesale"), ...(pieces ? { qty: count, pkts: 0 } : {}), rate });
@@ -702,7 +707,7 @@ export default function Billing({ args }: { args: string[] }) {
                     <button key={p.id} onClick={() => { addProduct(p); setQ(""); scanRef.current?.focus(); void learnFromPick(p).then(ok => ok && toast(`Learnt: this sticker now scans as ${label(p)}`)); }}>
                       <Thumb photo_id={p.photo_id} url={p.photo_url} text={p.item} size={34} />
                       <span className="grow"><b>{p.style || p.code}</b> <span className="mut">{p.item} · {p.color}</span></span>
-                      <span className="mono">{p.rate ? billAmount(p.rate) : ""}{p.pack ? " ×" + p.pack : ""}</span></button>))}</div>)}
+                      <span className="mono">{p.rate ? coded(p.rate) : ""}{p.pack ? " ×" + p.pack : ""}</span></button>))}</div>)}
               </div>
               <button className={"btn " + (cam || sheet ? "p" : "g")} onClick={() => (small ? setSheet(true) : setCam(!cam))} title="Scan with the camera"><Icon n="scan" size={20} />Scan</button>
               {!small && <button className={"btn " + (peers ? "p" : "")} onClick={() => setPairOpen(true)} title="Use a phone as the scanner"><Icon n="sell" size={18} />{peers ? "Phone linked" : "Phone as scanner"}</button>}
@@ -711,7 +716,7 @@ export default function Billing({ args }: { args: string[] }) {
               <button className="btn" disabled={saving} title="POS calculator" aria-label="POS calculator" onClick={() => setCalculator(true)}><Calculator size={20} /></button>
             </div>
             <div className={"lastscan" + (lastScan ? " has-item" : "")} role="status" aria-live="polite" aria-atomic="true">
-              <span>{lastScan ? <><b>Added: {lastScan.item || lastScan.style || lastScan.code}</b><span className="xs">{[lastScan.style, lastScan.color, `Box ${lastScan.box_no}`, `${lastScan.qty} ${lastScan.type || "PCS"} × ${billAmount(lastScan.rate)}`, billAmount(lastScan.amount)].filter(Boolean).join(" · ")}</span>{lastRead && <span className="xs mono qr-read">{lastRead}</span>}</> : <span className="mut">{t.items.length} bill lines · {t.total_qty} units</span>}</span>
+              <span>{lastScan ? <><b>Added: {lastScan.item || lastScan.style || lastScan.code}</b><span className="xs">{[lastScan.style, lastScan.color, `Box ${lastScan.box_no}`, `${lastScan.qty} ${lastScan.type || "PCS"} × ${coded(lastScan.rate)}`, coded(lastScan.amount)].filter(Boolean).join(" · ")}</span>{lastRead && <span className="xs mono qr-read">{lastRead}</span>}</> : <span className="mut">{t.items.length} bill lines · {t.total_qty} units</span>}</span>
               {lastScan && <button className="btn sm" onClick={() => showLine(lastScan.id)}>Show line</button>}
             </div>
             </div>
@@ -738,7 +743,7 @@ export default function Billing({ args }: { args: string[] }) {
             </div>) : null; })()}
           <div className="tw pos-lines" ref={linesPane} role="region" aria-label="Bill items" tabIndex={0} onKeyDown={onGridKey}>
             <table className="pos-t" aria-label="Bill items">
-              <thead><tr><th>#</th><th>Box</th><th>Item</th><th>Type</th><th>Style</th><th>Colour / Art no.</th><th className="r">Pkt</th><th className="r">Qty</th><th className="r">Rate</th><th className="r">Disc</th><th className="r">Amount</th><th>{!small && <SelectAll compact ids={t.items.map(l => l.id)} selected={selectedLines} onChange={setSelectedLines} label="Select all bill lines" />}</th></tr></thead>
+              <thead><tr><th>#</th><th>Box</th><th>Item</th><th>Type</th><th>Style</th><th>Colour / Art no.</th><th className="r">Pkt</th><th className="r">Qty</th><th className="r">Rate{cd ? <span className="trade-mark">{mark}</span> : null}</th><th className="r">Disc</th><th className="r">Amount{cd ? <span className="trade-mark">{mark}</span> : null}</th><th>{!small && <SelectAll compact ids={t.items.map(l => l.id)} selected={selectedLines} onChange={setSelectedLines} label="Select all bill lines" />}</th></tr></thead>
               <tbody>
                 {displayOrder(t.items).map(l => [l, t.items.indexOf(l)] as const).map(([l, i]) => (
                   <tr key={l.id} className={"ln" + (lastScanId === l.id ? " scanned" : "") + (flashId === l.id ? " flash" : "") + (noQty(l) ? (qtyProblem.includes(l.id) ? " noqty stop" : " noqty") : "")} aria-current={lastScanId === l.id ? "true" : undefined} ref={row => { if (row) rowRefs.current.set(l.id, row); else rowRefs.current.delete(l.id); }}>
@@ -751,9 +756,9 @@ export default function Billing({ args }: { args: string[] }) {
                       <input className="cell r" style={{ width: 44 }} inputMode="numeric" value={l.pkts || ""} onChange={e => setLine(l.id, { pkts: parseInt(e.target.value) || 0 })} /><span className="xs mut">×{l.pack}</span></span> : <span className="mut">—</span>}</td>
                     <td className="r" data-l={l.type || "Quantity"}><input className="cell r" style={{ width: 56 }} inputMode="numeric" value={l.qty || ""} disabled={l.pack > 1 && l.pkts > 0}
                       onChange={e => setLine(l.id, { qty: parseInt(e.target.value) || 0, pkts: 0 })} /></td>
-                    <td className="r" data-l="Rate"><MoneyInput className="cell r" style={{ width: 70 }} disabled={!can(me, "billing.rates") && !!(l.product_id && pmap.get(l.product_id)?.rate)} paise={l.rate} onPaise={v => setLine(l.id, { rate: v })} /></td>
-                    <td className="r" data-l="Disc"><input className={"cell r" + (discError(l.disc) ? " bad" : "")} style={{ width: 54 }} placeholder="—" title={discError(l.disc) || "10% or amount"} value={l.disc} onChange={e => setLine(l.id, { disc: e.target.value })} /></td>
-                    <td className="r mono b" data-l="Amount">{(l.amount / 100).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+                    <td className="r" data-l="Rate"><MoneyInput className="cell r" style={{ width: 70 }} disabled={!can(me, "billing.rates") && !!(l.product_id && pmap.get(l.product_id)?.rate)} title={cd ? `Rate in the trade code (÷${cd}). Saved as the real rate ${billAmount(l.rate)}` : undefined} paise={toCode(l.rate, cd)} onPaise={v => setLine(l.id, { rate: fromCode(v, cd) })} /></td>
+                    <td className="r" data-l="Disc"><CodedDisc className={"cell r" + (discError(l.disc) ? " bad" : "")} style={{ width: 54 }} placeholder="—" title={discError(l.disc) || (cd ? `10% or amount ÷${cd}` : "10% or amount")} disc={l.disc} div={cd} onDisc={disc => setLine(l.id, { disc })} /></td>
+                    <td className="r mono b" data-l="Amount">{(toCode(l.amount, cd) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
                     <td data-l="Select" className="pos-line-actions"><input type="checkbox" aria-label={"Select bill line " + (i + 1)} checked={selectedLines.has(l.id)} onChange={event => setSelectedLines(old => { const next = new Set(old); event.target.checked ? next.add(l.id) : next.delete(l.id); return next; })} /><DeleteButton className="x" aria-label="Remove line" onDelete={() => dropLines([l.id])}>✕</DeleteButton></td>
                   </tr>))}
                 {!t.items.length && <tr><td colSpan={12} className="mut" style={{ padding: 28, textAlign: "center" }}>No items yet</td></tr>}
@@ -805,7 +810,8 @@ export default function Billing({ args }: { args: string[] }) {
           {b.rfid_tags?.length ? <div className="sumrow"><span>RFID tags</span><b className="mono">{b.rfid_tags.length}</b></div> : null}
           </div>
           <div className="counter-amounts stack">
-          <div className="sumrow"><span>Total amount</span><b className="mono">{billAmount(t.gross)}</b></div>
+          {cd ? <div className="note sm trade-note" role="note"><b>Trade code ÷{cd}</b> — rates and amounts down to NET. Payments and balance are real ₹.</div> : null}
+          <div className="sumrow"><span>Total amount</span><b className="mono">{coded(t.gross)}</b></div>
           {/* Owner, 23 Oct: he typed 50 for a 50% discount (his old software's discount box is a percentage; half
               the sticker rate is the wholesale rate) and it took off ₹50 from the small "Amount" box. Percent is
               now the main box, first and labelled; a rupee amount is the smaller "or ₹" box. */}
@@ -813,18 +819,18 @@ export default function Billing({ args }: { args: string[] }) {
             <span className="row" style={{ gap: 4, flexWrap: "nowrap", alignItems: "center" }}>
               <MoneyInput className={"cell r disc-pct" + (b.discount_pct > 100 ? " bad" : "")} style={{ width: 64 }} placeholder="%" aria-label="Discount percent" paise={Math.round((b.discount_pct || 0) * 100)} onPaise={v => set({ discount_pct: v / 100, ...(v ? { discount: 0 } : {}) })} />
               <b className="sm">%</b>
-              {b.discount_pct ? <span className="mono sm mut" title="Discount in rupees">= {billAmount(t.discount)}</span>
-                : <MoneyInput className="cell r" style={{ width: 64 }} placeholder="or ₹" aria-label="Discount in rupees" paise={b.discount} onPaise={v => set({ discount: v })} />}</span></div>
+              {b.discount_pct ? <span className="mono sm mut" title="Discount in rupees">= {coded(t.discount)}</span>
+                : <MoneyInput className="cell r" style={{ width: 64 }} placeholder={cd ? "or ÷" + cd : "or ₹"} aria-label="Discount in rupees" paise={toCode(b.discount, cd)} onPaise={v => set({ discount: fromCode(v, cd) })} />}</span></div>
           {/* Owner, 25 Oct: the extra 2–3% for good customers, cut on what is left after the discount */}
           <div className="sumrow"><span title="Cut after the discount, on what is left. Items set as 'no extra less' (Settings › Prices) are left out.">Less % <span className="xs mut">after discount</span></span>
             <span className="row" style={{ gap: 4, flexWrap: "nowrap", alignItems: "center" }}>
               <MoneyInput className="cell r" style={{ width: 64 }} placeholder="%" aria-label="Less percent after discount" paise={Math.round((b.less_pct || 0) * 100)} onPaise={v => set({ less_pct: v / 100 })} />
               <b className="sm">%</b></span></div>
-          {(moneyMore || !!b.packing) && <div className="sumrow"><span>Packing</span><MoneyInput className="cell r" style={{ width: 80 }} paise={b.packing} onPaise={v => set({ packing: v })} /></div>}
+          {(moneyMore || !!b.packing) && <div className="sumrow"><span>Packing{mark}</span><MoneyInput className="cell r" style={{ width: 80 }} paise={toCode(b.packing, cd)} onPaise={v => set({ packing: fromCode(v, cd) })} /></div>}
           {b.bill_type === "gst" && <div className="sumrow"><span>GST{gstLabel(t)} <button className="linkbtn" onClick={() => set({ gst_mode: b.gst_mode === "exclusive" ? "inclusive" : "exclusive" })}>{b.gst_mode === "exclusive" ? "added" : "included"}</button></span><b className="mono">{billAmount(t.gst)}</b></div>}
           {b.bill_type === "gst" && b.party_state && !placeCode(b.party_gstin, b.party_state) && <div className="xs" style={{ textAlign: "right", color: "var(--bad)" }}>Check buyer state “{b.party_state}” — not recognised, GST type may be wrong</div>}
           {t.igst ? <div className="xs mut" style={{ textAlign: "right" }}>IGST (other state)</div> : t.gst ? <div className="xs mut" style={{ textAlign: "right" }}>CGST {billAmount(t.cgst)} + SGST {billAmount(t.sgst)}</div> : null}
-          {t.adjust ? <div className="sumrow"><span>Round off</span><span className="mono">{billAmount(t.adjust)}</span></div> : null}
+          {t.adjust ? <div className="sumrow"><span>Round off</span><span className="mono">{coded(t.adjust)}</span></div> : null}
           <div className="net"><span>{b.bill_type === "challan" ? "VALUE" : "NET"}</span><b>{shownNet(t.net, b)}</b></div>
           </div><div className="counter-payments stack">
           {b.bill_type === "challan" ? <div className="note sm">A challan sends the goods out with no money taken. Convert it to an invoice from Bills when the customer is billed.</div> : <>
@@ -842,14 +848,14 @@ export default function Billing({ args }: { args: string[] }) {
       <Suspense fallback={<div className="toast" role="status">Loading billing tool…</div>}>
         {calculator && <PosCalculator lines={t.items} onClose={() => setCalculator(false)} onApply={(value, target: CalcTarget, id) => {
           if (value < 0) throw new Error("Billing amounts cannot be negative");
-          if (target === "rate") { const l = t.items.find(l => l.id === id); if (!l) throw new Error("Select an item"); if (!can(me, "billing.rates") && l.product_id && pmap.get(l.product_id)?.rate) throw new Error("Owner approval is required to change this price"); setLine(id, { rate: value }); }
-          if (target === "packing") set({ packing: value });
-          if (target === "discount") set({ discount: value, discount_pct: 0 });
+          if (target === "rate") { const l = t.items.find(l => l.id === id); if (!l) throw new Error("Select an item"); if (!can(me, "billing.rates") && l.product_id && pmap.get(l.product_id)?.rate) throw new Error("Owner approval is required to change this price"); setLine(id, { rate: fromCode(value, cd) }); }
+          if (target === "packing") set({ packing: fromCode(value, cd) });
+          if (target === "discount") set({ discount: fromCode(value, cd), discount_pct: 0 });
         }} />}
       </Suspense>
 
       {custOpen && <CustomerPicker bill={b} onPick={p => { set(p); setCustOpen(false); scanRef.current?.focus(); }} onClose={() => setCustOpen(false)} />}
-      {sheet && <ScanSheet onCode={onCode} onClose={() => setSheet(false)} lines={t.items.length} pcs={t.total_qty} net={t.net} last={t.items[t.items.length - 1]} />}
+      {sheet && <ScanSheet onCode={onCode} onClose={() => setSheet(false)} lines={t.items.length} pcs={t.total_qty} net={shownNet(t.net, b)} last={t.items[t.items.length - 1]} />}
       {pairOpen && <PairPhone id={pairId} peers={peers} onNew={async () => { const id = Math.random().toString(36).slice(2, 10); await setSetting("remote_id", id); setPairId(id); }} onClose={() => setPairOpen(false)} />}
       {askCode && <CodePrompt onDone={ok => { setAskCode(false); if (ok) void openDocument("estimate"); }} />}
       {held && <HeldBills activeId={b.id} onPick={x => { setHeld(false); void openDocument(x.bill_type, x); }} onClose={() => setHeld(false)} />}
@@ -930,6 +936,12 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
   );
 }
 
+/* A line discount box that shows and takes a rupee discount in the trade code (lib/tradeCode); "10%" is unchanged. */
+function CodedDisc({ disc, div, onDisc, ...rest }: { disc: string; div: number; onDisc: (disc: string) => void } & Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange">) {
+  const [text, setText] = useState<string | null>(null);
+  return <input {...rest} value={text ?? discToCode(disc, div)} onChange={e => { setText(e.target.value); onDisc(discFromCode(e.target.value, div)); }} onBlur={() => setText(null)} />;
+}
+
 function HeldBills({ activeId, onPick, onClose }: { activeId: string; onPick: (b: Bill) => void; onClose: () => void }) {
   const open = usePrivate();
   const shownNet = useEstimateAmount();
@@ -969,7 +981,7 @@ function CodePrompt({ onDone }: { onDone: (ok: boolean) => void }) {
 }
 
 /* Phones: the whole screen becomes the scanner; the bill keeps count underneath. */
-function ScanSheet({ onCode, onClose, lines, pcs, net }: { onCode: (t: string) => Promise<string>; onClose: () => void; lines: number; pcs: number; net: number; last?: BillLine }) {
+function ScanSheet({ onCode, onClose, lines, pcs, net }: { onCode: (t: string) => Promise<string>; onClose: () => void; lines: number; pcs: number; net: string; last?: BillLine }) {
   const [msg, setMsg] = useState("");
   const bad = /not found/i.test(msg);
   return createPortal(
@@ -979,7 +991,7 @@ function ScanSheet({ onCode, onClose, lines, pcs, net }: { onCode: (t: string) =
       <div className="card pad stack" style={{ gap: 6 }}>
         {msg && <div className="sm b" style={{ color: bad ? "var(--bad)" : "var(--ok)" }}>{msg}</div>}
         {!msg && <div className="xs mut">Point at one sticker at a time. The same sticker counts again after it leaves the picture.</div>}
-        <div className="row between"><span className="sm">{lines} lines · {pcs} pcs</span><b style={{ fontSize: 24 }}>{billAmount(net)}</b></div>
+        <div className="row between"><span className="sm">{lines} lines · {pcs} pcs</span><b style={{ fontSize: 24 }}>{net}</b></div>
         <button className="btn p big" onClick={onClose}>Done — go to bill</button>
       </div>
     </div>, document.body);
