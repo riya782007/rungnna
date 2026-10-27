@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { bagPayload, carryBags } from "../lib/bag-labels";
 import { getSetting } from "../lib/db";
-import { usePrintJob, receiptFeed, DEFAULT_RECEIPT_FEED } from "../lib/printing";
+import { usePrintJob, receiptFeed, receiptCut, slipFeed, DEFAULT_RECEIPT_FEED } from "../lib/printing";
 import { createPortal } from "react-dom";
 import type { Bill } from "../lib/db";
 import { due, docName, taxSummary, type Shop } from "../lib/billing";
@@ -162,7 +162,8 @@ export function PrintBill(props: { b: Bill; shop: Shop; format: PrintFormat; onD
   const [feed, setFeed] = useState<number | null>(null);
   useEffect(() => {
     getSetting<number>("invoice_copies", 1).then(n => setCopies(Number(n) || 1)).catch(() => setCopies(1));
-    getSetting<number>("receipt_feed", DEFAULT_RECEIPT_FEED).then(n => setFeed(receiptFeed(n))).catch(() => setFeed(DEFAULT_RECEIPT_FEED));
+    Promise.all([getSetting<number>("receipt_feed", DEFAULT_RECEIPT_FEED), getSetting("receipt_cut", "partial")])
+      .then(([n, cut]) => setFeed(slipFeed(receiptFeed(n), receiptCut(cut)))).catch(() => setFeed(0));
   }, []);
   return copies === null || feed === null ? null : <PrintBillNow {...props} copies={copies} feed={feed} />;
 }

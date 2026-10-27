@@ -269,7 +269,7 @@ export function PrintingCard() {
             const value = receiptCut(e.target.value);
             try { await setSetting("receipt_cut", value); setCut(value); done("Cutter saved"); } catch { toast("Could not save cutter preference", true); }
           }}>{Object.entries(RECEIPT_CUTS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Help>
-        <Help label="Blank paper after the bill" help="Extra paper fed after the last line, so the totals have come out past the tear bar or cutter before the slip is torn. Increase it if the tear still goes through the last lines; lower it to save paper.">
+        <Help label="Blank paper after the bill" help="Only for Manual tear-off: extra paper after the last line, so the totals are past the tear bar before the slip is torn. With an automatic cutter none is added (the printer feeds to its blade). If the printer does not cut by itself, choose Manual tear-off above, or turn on cutting in the Windows printer preferences.">
           <select className="in" value={feed} onChange={async e => {
             const value = receiptFeed(e.target.value);
             try { await setSetting("receipt_feed", value); setFeed(value); done("Paper after bill saved"); } catch { toast("Could not save paper after bill", true); }
