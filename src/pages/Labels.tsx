@@ -15,7 +15,7 @@ import { Head, DeadToggle, MoneyInput, PhotoButton } from "../components/common"
 import { RackPicker } from "../components/RackPicker";
 import { SupplierNo } from "../components/SupplierNo";
 import { WedgeInput } from "../components/Scanner";
-import { useApp, toast } from "../lib/app";
+import { useApp, toast, go as navigate } from "../lib/app";
 import { can, roleName } from "../lib/roles";
 import { inStore } from "../lib/scope";
 import { purchaseLabelJobs, productForLabel } from "../lib/purchase-labels";
@@ -314,7 +314,7 @@ export default function Labels({ args }: { args: string[] }) {
           {can(me, "purchases.photo") ? <details className="card purchase-import" open={args[0] === "bill"}>
             <summary className="pad b">From a purchase bill — upload the photo, get the labels</summary>
             <div style={{ borderTop: "1px solid var(--line-2)" }} className="pad">
-              <Suspense fallback={<div role="status">Loading bill reader…</div>}><PurchasePhoto by={me?.id || ""} /></Suspense>
+              <Suspense fallback={<div role="status">Loading bill reader…</div>}><PurchasePhoto by={me?.id || ""} typed={args[0] === "bill" && args[1] === "type"} /></Suspense>
             </div>
           </details>
           /* shown even when not allowed, so the owner can see it exists and how to reach it */
@@ -342,7 +342,7 @@ export default function Labels({ args }: { args: string[] }) {
       <div className="label-workspace">
         <div className="stack">
           <div className="card label-manual">
-            <header><h3 className="grow">Barcode print</h3><div className="row"><button className="btn p" disabled={queueBusy || printer.busy || photoBusy} onClick={() => addJob(true)}>Print barcode</button><button className="btn" disabled={queueBusy || printer.busy || photoBusy} onClick={() => addJob()}>Add to queue</button></div></header>
+            <header><h3 className="grow">Barcode print</h3><div className="row"><button className="btn p" disabled={queueBusy || printer.busy || photoBusy} onClick={() => addJob(true)}>Print barcode</button><button className="btn" disabled={queueBusy || printer.busy || photoBusy} onClick={() => addJob()}>Add to queue</button>{can(me, "purchases.photo") && <button className="btn" title="A whole supplier slip at once: each Enter on the last line adds the next line already filled in from the one above, then one button (Ctrl+Enter) prints every sticker" onClick={() => navigate("labels/bill/type")}>Many lines: type the bill</button>}</div></header>
             <div className="pad stack">
               <WedgeInput autoFocus={false} placeholder="Scan an old label to pre-fill (optional)" onCode={async raw => {
                 const parsed = parseLabel(raw);
