@@ -929,6 +929,10 @@ html{scrollbar-gutter:stable}
 @media(min-width:861px){
   .purchase-photo .purchase-lines td[data-l="Cost ₹"],.purchase-photo .purchase-lines td[data-l="Rate ₹"]{min-width:112px}
   .purchase-photo .purchase-lines td[data-l="Cost code"]{min-width:96px}
+  /* same photo: "KAMAR PATTA" / "CHIN PENDAL…" and codes like "SET1791TO1…" were cut too */
+  .purchase-photo .purchase-lines td[data-l="Item"]{min-width:190px}
+  .purchase-photo .purchase-lines td[data-l="Style/article"]{min-width:175px}
+  .purchase-photo .purchase-lines td[data-l="Item"] .in,.purchase-photo .purchase-lines td[data-l="Style/article"] .in{width:100%;text-overflow:ellipsis}
   .purchase-photo .purchase-lines td[data-l="Cost ₹"] .in,.purchase-photo .purchase-lines td[data-l="Rate ₹"] .in{width:100%;text-align:right;font-variant-numeric:tabular-nums}
 }
 
