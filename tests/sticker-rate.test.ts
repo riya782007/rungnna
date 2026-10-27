@@ -29,3 +29,20 @@ describe("the bill charges the sticker's rate", () => {
     expect((await db.products.get(saved.id))?.wholesale_rate).toBe(306000);
   });
 });
+
+import { ownPayload, parseLabel } from "../src/lib/parse";
+import { productForLabel } from "../src/lib/purchase-labels";
+import { toPaise } from "../src/lib/format";
+
+describe("the shop's short QR carries the rate printed on the sticker", () => {
+  it("printed rate = QR rate = billed rate, for whole and odd rates", () => {
+    for (const rate of [306000, 124800, 39600, 306050]) {
+      const p = { ...stale(), code: "RLYI848MOV2", rate, wholesale_rate: 100 };
+      const printed = productForLabel(p, 1);            // what the sticker text and its QR are made from
+      const qr = parseLabel(ownPayload(printed, "shop"));
+      expect(qr.how).toBe("rungnna");
+      expect(toPaise(qr.rate || "0")).toBe(printed.rate);
+      expect(priceFor(printed, "wholesale")).toBe(printed.rate);
+    }
+  });
+});
