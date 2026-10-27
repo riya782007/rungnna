@@ -26,9 +26,13 @@ export const DEFAULT_SHOP: Shop = {
   state: "Delhi", upi: "", bank: "", terms: "Goods once sold will not be taken back. Subject to local jurisdiction.",
   hsn: "7117", gst_rate: 3, gst_mode: "exclusive", max_disc: 10,
 };
-async function shopConfigKey(store: string) {
-  const company = await db.stores.get(store);
-  return store !== MAIN_STORE && company?.kind ? `shop_${store}` : "shop";
+/* Companies (owner, 27 Oct): every company other than the main one has its own details and GSTIN on its bills
+   (config "shop_<id>", started from the main company's when it is made). A branch saved before that has none yet
+   and keeps showing the main details until its own are saved. */
+async function shopConfigKey(store: string, forSave = false) {
+  if (store === MAIN_STORE) return "shop";
+  // a company of its own kind (the old estimate company) never borrows the main GSTIN, even before its details are saved
+  return forSave || (await db.stores.get(store))?.kind || await db.config.get(`shop_${store}`) ? `shop_${store}` : "shop";
 }
 export async function getShop(store = currentStore()): Promise<Shop> {
   const c = await db.config.get(await shopConfigKey(store));
@@ -40,7 +44,7 @@ export async function getShop(store = currentStore()): Promise<Shop> {
 export async function saveShop(v: Shop) {
   requirePerm("settings.manage", "changing shop settings");
   const store = currentStore();
-  await put("config", { id: await shopConfigKey(store), value: v, updated_at: now() } as Config);
+  await put("config", { id: await shopConfigKey(store, true), value: v, updated_at: now() } as Config);
 }
 
 /* ---------------- numbering: each counter owns its own series, so offline numbers never clash ---------------- */
