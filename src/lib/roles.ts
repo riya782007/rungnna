@@ -70,6 +70,11 @@ export const PERMISSION_GROUPS: PermGroup[] = [
     { key: "money.vouchers", label: "Expenses & vouchers" },
     { key: "bank.reconcile", label: "Bank reconciliation" },
   ]},
+  /* Owner, 27 Oct: "search bar option to be allowed or not". Search only ever finds what the person may
+     already open, but without this tick there is no search box at all. */
+  { key: "search", label: "Search", perms: [
+    { key: "search.use", label: "Search bar (Ctrl K)", desc: "finds only the screens, products, customers and bills this person may open" },
+  ]},
   { key: "control", label: "Control (sensitive)", perms: [
     { key: "settings.manage", label: "Shop settings", desc: "bills, prices, GST, people's PINs" },
     { key: "printers.manage", label: "Printer & sticker settings", desc: "label size, position, what prints — kept apart from shop settings (owner, 22 Oct)" },
@@ -88,14 +93,16 @@ export const permLabel = (k: string) => LABELS[k] || k;
 /* Built-in roles: the app's original rules, written as permissions. Stock work was open to everyone, so it still is. */
 const STOCK = ["stock.view", "stock.in", "stock.move", "stock.count", "racks.manage", "stores.transfer", "products.edit", "labels.print", "printers.manage", "catalogue.share"];
 const COUNTER = ["billing.sell", "billing.returns", "billing.merge", "customers.manage", "receipts.take", "money.vouchers"];
+// the built-in roles always had search; a custom role or a person's own ticks get it only when the owner ticks it
+const SEARCH = "search.use";
 export const BUILTIN_DEFAULT: Record<Staff["role"], string[]> = {
   owner: ALL_PERMS,
   // a manager already runs suppliers and purchases, so reading a supplier's bill photo belongs here
-  manager: [...STOCK, ...COUNTER, "sales.today", "billing.rates", "billing.discount_over", "billing.void", "estimates.delete", "settings.manage", "rates.view", "suppliers.manage", "purchases.photo", "dealers.manage", "ai.use"],
-  cashier: [...STOCK, ...COUNTER, "sales.today"],
-  salesman: [...STOCK, ...COUNTER],
-  helper: [...STOCK],
-  packer: [...STOCK],
+  manager: [...STOCK, ...COUNTER, SEARCH, "sales.today", "billing.rates", "billing.discount_over", "billing.void", "estimates.delete", "settings.manage", "rates.view", "suppliers.manage", "purchases.photo", "dealers.manage", "ai.use"],
+  cashier: [...STOCK, ...COUNTER, SEARCH, "sales.today"],
+  salesman: [...STOCK, ...COUNTER, SEARCH],
+  helper: [...STOCK, SEARCH],
+  packer: [...STOCK, SEARCH],
 };
 export const ROLE_NOTE: Record<Staff["role"], string> = {
   owner: "All permissions", manager: "Stock, billing, suppliers & settings; no staff or reports",

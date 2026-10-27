@@ -44,11 +44,18 @@ export async function finalizePurchase(p0: Purchase): Promise<Purchase> {
       if (!l.qty) continue;
       const m: Movement = { id: uid(), product_id: l.product_id, kind: "intake", qty: l.qty, from_loc: null, to_loc: done.loc_id,
         person_type: done.supplier_name ? "supplier" : "employee", person_name: done.supplier_name, by_staff: done.by_staff,
-        note: done.no + (done.supplier_bill ? " · bill " + done.supplier_bill : ""), device: deviceId(), ref_bill: done.id, at: done.at, updated_at: now() };
+        note: done.no + (done.supplier_bill ? " · bill " + done.supplier_bill : ""), device: deviceId(), ref_bill: done.id, at: done.at, updated_at: now(),
+        ...(l.photo_id ? { photo_id: l.photo_id } : {}) };
       await put("movements", m);
       const k = l.product_id + "|" + done.loc_id; const c = await db.stock.get(k);
       await db.stock.put({ key: k, product_id: l.product_id, loc_id: done.loc_id, qty: (c?.qty || 0) + l.qty });
-      if (l.cost) { const pr = await db.products.get(l.product_id); if (pr && pr.cost !== l.cost) await put("products", { ...pr, cost: l.cost }); }
+      if (l.cost || l.photo_id) {
+        const pr = await db.products.get(l.product_id);
+        const patch: Partial<Product> = {};
+        if (pr && l.cost && pr.cost !== l.cost) patch.cost = l.cost;
+        if (pr && l.photo_id && !pr.photo_id) patch.photo_id = l.photo_id;   // a product with no picture yet takes this one
+        if (pr && Object.keys(patch).length) await put("products", { ...pr, ...patch });
+      }
     }
   });
   return done;

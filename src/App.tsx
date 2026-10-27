@@ -23,6 +23,7 @@ const estimatesOnlyFor = (me: { role: string; perms?: string[]; role_id?: string
 import type { Store } from "./lib/db";
 import { VIEW_ROUTES, setViewOpen, useViewOpen } from "./lib/viewCode";
 import { can, roleName } from "./lib/roles";
+import { routeOk } from "./lib/routes";
 import { t, initLang, onLang } from "./lib/i18n";
 import Home from "./pages/Home";
 import { WhoAreYou } from "./pages/Settings";
@@ -77,14 +78,6 @@ const SECTIONS: Sec[] = [
 ];
 const sectionOf = (r: string) => (["bill", "bills", "customers", "suppliers", "dealers", "vouchers"].includes(r) ? "sell" : ["products", "product", "add", "stockin", "scan", "recheck", "rfid", "labels", "photos", "catalogue", "racks", "move", "activity", "import"].includes(r) ? "stock" : r === "ask" || r === "settings" || r === "reports" || r === "purchase" ? r : r === "roles" ? "settings" : "home");
 const lastTab: Record<string, string> = { sell: "bill", stock: "products" };
-/* What each screen needs (lib/roles). A tab you can't use is not shown. */
-const ROUTE_PERM: Record<string, string> = {
-  bill: "billing.sell", bills: "billing.sell", customers: "customers.manage", suppliers: "suppliers.manage", vouchers: "money.vouchers",
-  reports: "reports.view", ask: "ai.use", scan: "stock.in", stockin: "stock.in", recheck: "stock.count", rfid: "stock.count",
-  labels: "labels.print", catalogue: "catalogue.share", photos: "catalogue.share", racks: "racks.manage", move: "stock.move", products: "stock.view", product: "stock.view",
-  activity: "stock.view", add: "products.edit", dealers: "dealers.manage", import: "import.data", bank: "bank.reconcile", stores: "stores.transfer", roles: "staff.manage",
-  settings: "settings.manage", purchase: "purchases.photo",
-};
 
 function useSync() {
   const [s, setS] = useState<SyncState>();
@@ -140,12 +133,12 @@ function Shell() {
   useEffect(() => { const f = () => setScrolled(scrollY > 4); addEventListener("scroll", f, { passive: true }); return () => removeEventListener("scroll", f); }, []);
   useEffect(() => {
     const f = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPal(true); }
-      if (e.key === "F2" && route !== "bill") { e.preventDefault(); go("bill"); }
-      if (e.key === "F1" && route !== "purchase") { e.preventDefault(); go("purchase"); }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); if (can(me, "search.use")) setPal(true); }
+      if (e.key === "F2" && route !== "bill" && routeOk(me, "bill")) { e.preventDefault(); go("bill"); }
+      if (e.key === "F1" && route !== "purchase" && routeOk(me, "purchase")) { e.preventDefault(); go("purchase"); }
     };
     addEventListener("keydown", f); return () => removeEventListener("keydown", f);
-  }, [route]);
+  }, [route, me?.id, me?.updated_at]);
   /* A dealer's order used to wait until somebody happened to open Sell › Trade orders.
      Count the orders and sign-ups that need a person, and badge the section.
      Must stay ABOVE the early returns below — every hook runs on every render. */
@@ -161,7 +154,9 @@ function Shell() {
   if (!ready) return null;
   if (!me) return <WhoAreYou />;
 
-  const ok = (r: string) => r === "settings" || !ROUTE_PERM[r] || can(me, ROUTE_PERM[r]);
+  const ok = (r: string) => routeOk(me, r);
+  /* Owner, 27 Oct: "search bar option to be allowed or not" — search shows only for people given it (Roles / person ticks). */
+  const canSearch = can(me, "search.use");
   const visible = SECTIONS.filter(s => s.tabs ? s.tabs.some(([k]) => ok(k)) : ok(s.key));
   const cur = SECTIONS.find(s => s.key === sec)!;
   const hrefOf = (s: Sec) => "#/" + (s.tabs ? (ok(lastTab[s.key]) && lastTab[s.key]) || s.tabs.find(([k]) => ok(k))?.[0] || s.tabs[0][0] : s.key);
@@ -211,7 +206,7 @@ function Shell() {
         <div className="brand"><button type="button" className="mark markbtn" onClick={() => { setCompact(!compact); setSetting("compact_menu", !compact); }}
           title={compact ? "Show menu" : "Hide menu"} aria-label={compact ? "Show menu" : "Hide menu"} aria-expanded={!compact}>R</button><div><b>Rungnna</b><span>Jewellery &amp; Co</span></div></div>
         {can(me, "bill") && <a href="#/bill" className="newbill"><Icon n="plus" size={18} /><span className="t">{t("New bill")}</span><kbd style={{ background: "rgba(255,255,255,.15)", color: "#fff" }}>F2</kbd></a>}
-        <button className="railsearch" onClick={() => setPal(true)}><Icon n="search" size={17} /><span className="grow">Search</span><kbd>Ctrl K</kbd></button>
+        {canSearch && <button className="railsearch" onClick={() => setPal(true)}><Icon n="search" size={17} /><span className="grow">Search</span><kbd>Ctrl K</kbd></button>}
         {visible.map(s => <a key={s.key} href={hrefOf(s)} title={t(s.label)} aria-label={t(s.label) + (s.key === "sell" && waiting ? ` · ${waiting} waiting` : "")} className={"nav" + (sec === s.key ? " on" : "")}><Icon n={s.icon} /><span className="grow">{t(s.label)}</span>{s.key === "sell" && waiting > 0 && <span className="navbadge" title={`${waiting} trade order${waiting > 1 ? "s" : ""} / dealer sign-up${waiting > 1 ? "s" : ""} waiting`}>{waiting > 9 ? "9+" : waiting}</span>}</a>)}
         {companies.length > 1 && <label className="f store-switch">Store<select className="in" value={store} onChange={e => void switchStore(e.target.value)}>{companies.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>}
         {can(me, "stores.transfer") && <a className="nav" href="#/stores" title="Transfers and stores" aria-label="Transfers and stores"><Icon n="stock" /><span>Transfers{me.role === "owner" ? " & stores" : ""}</span></a>}
@@ -230,7 +225,7 @@ function Shell() {
           <span className="brandm"><span className="mark">R</span>{cur.label === "Home" ? "Rungnna" : t(cur.label)}</span>
           <span className="grow" />
           {companies.length > 1 && <select aria-label="Store" className="in mobile-store" value={store} onChange={e => void switchStore(e.target.value)}>{companies.map(s => <option key={s.id} value={s.id}>{s.code}</option>)}</select>}
-          <button className="iconbtn" aria-label="Search" onClick={() => setPal(true)}><Icon n="search" size={18} /></button>
+          {canSearch && <button className="iconbtn" aria-label="Search" onClick={() => setPal(true)}><Icon n="search" size={18} /></button>}
           <button className="avatar" onClick={() => go("settings")} aria-label="Me">{me.name.slice(0, 1).toUpperCase()}</button>
         </div>
         {tabs && tabs.length > 1 && (
@@ -251,7 +246,7 @@ function Shell() {
         <a href={ok("stockin") ? "#/stockin" : "#/"} className="fab"><span className="c"><Icon n="scan" size={24} sw={2} /></span></a>
         {[visible.find(s => s.key === "stock"), visible.find(s => s.key === "reports") || visible.find(s => s.key === "ask") || visible.find(s => s.key === "settings")].filter(Boolean).map(s => <a key={s!.key} href={hrefOf(s!)} className={sec === s!.key ? "on" : ""}><Icon n={s!.icon} size={22} />{t(s!.label)}</a>)}
       </nav>
-      {pal && <SearchPalette onClose={() => setPal(false)} />}
+      {pal && canSearch && <SearchPalette onClose={() => setPal(false)} />}
       <UpdateBar />
     </div>
   );
