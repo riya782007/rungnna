@@ -471,11 +471,16 @@ export default function Billing({ args }: { args: string[] }) {
       return "Not found";
     }
     clearMiss();
-    if (!addProduct(p, 1, 0, 0, destination)) { beep(false); toast("Bill changed or saving — scan this label again", true); return "Bill changed or saving — scan again"; }
-    // The sticker's printed rate is the operator's check: say so when the bill differs.
+    // Owner, 27 Oct: the sticker on the goods is the price. When its QR carries a rate (old-software / long
+    // Rungnna QR) a wholesale or dealer bill charges exactly that, and says so if the product's own rate differs.
+    // Retail bills keep the retail rate.
     const printed = parsed.rate && ["shop label", "rungnna"].includes(parsed.how) ? toPaise(parsed.rate) : 0;
-    const billed = priceFor(p, billRef.current?.price_level || "wholesale");
-    if (printed && billed && printed !== billed) toast(`Check rate: sticker says ${billAmount(printed)}, bill uses ${billAmount(billed)} for ${label(p)}`, true);
+    const level = billRef.current?.price_level || "wholesale";
+    const billed = priceFor(p, level);
+    const useSticker = printed > 0 && level !== "retail" && printed !== billed;
+    if (!addProduct(p, 1, 0, useSticker ? printed / 100 : 0, destination)) { beep(false); toast("Bill changed or saving — scan this label again", true); return "Bill changed or saving — scan again"; }
+    if (useSticker) toast(`Billed at the sticker's rate ${billAmount(printed)} — the product list says ${billed ? billAmount(billed) : "no rate"} for ${label(p)}. Correct it in Products if the sticker is old.`, true);
+    else if (printed && billed && printed !== billed) toast(`Check rate: sticker says ${billAmount(printed)}, bill uses ${billAmount(billed)} for ${label(p)}`, true);
     // show exactly what the QR carried, so a mislabelled sticker is visible at the counter
     if (["shop label", "rungnna"].includes(parsed.how)) {
       const means = parsed.icode ? codeInfo(parsed.icode, readItemMap(itemNames?.value))?.name : parsed.item?.toUpperCase();
