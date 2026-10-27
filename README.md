@@ -29,6 +29,7 @@ The current [Karan requirement audit and counter checklist](docs/karan-readiness
 ## Things to know
 
 - Roles in the app (`src/lib/roles.ts`) are enforced in the client; the server only separates users who have their own Supabase accounts with `app_metadata.role` (see `docs/phase3-setup.md`). Legacy shared logins are unrestricted.
+- Companies (`docs/companies.md`): each company has its own entry code. A counter connected as a shop device is tied by the cloud to the company whose code it typed (`join_company`, migration `20261027120000`) and receives only that company's records. The owner's email login and the master code have full access.
 - Selling more than the recorded stock is allowed (the shop must be able to bill), but the bill is flagged `oversold` and a warning shows at save.
 - Add a unique index on `bills(no)` per store in Supabase if you want the database itself to refuse duplicate document numbers.
 - More notes: `docs/`.

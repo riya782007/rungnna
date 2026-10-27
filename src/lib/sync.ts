@@ -327,7 +327,7 @@ export async function refreshPeople(ms = 8000): Promise<boolean> {
   const work = (async () => {
     const c = await sb(); if (!c) return false;
     if (!(await c.auth.getSession()).data.session && !await ensureSession()) return false;
-    await pull(c, ["config", "staff"]);
+    await pull(c, ["stores", "config", "staff"]);
     return true;
   })().catch(() => false);
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -335,7 +335,52 @@ export async function refreshPeople(ms = 8000): Promise<boolean> {
   try { return await Promise.race([work, late]); } finally { clearTimeout(timer); }
 }
 
+/* ---------- companies kept apart by the cloud (migration 20261027120000) ----------
+   The entry code typed on this counter is also checked by the cloud (join_company), which then sends this device
+   only that company's records. When the company changes, the records that belong to a company are pulled again
+   from the start, so the new company's older bills and stock arrive too. Offline: the code is kept in memory
+   (never saved) and sent with the next sync. */
+export type CloudEntry = { store: string; master: boolean };
+const COMPANY_TABLES: T[] = ["stores", "config", "staff", "locations", "movements", "bills", "receipts", "purchases", "purchase_returns", "vouchers", "store_transfers", "bank_lines", "import_batches"];
+let pendingCode = "";
+let refetch = false;   // the company changed while a sync may have been running: start its tables again before the next run
+async function restartCompanyTables() { for (const t of COMPANY_TABLES) await setSetting("cursor_" + t, "1970-01-01T00:00:00Z"); }
+/** null: the cloud says the code is wrong. undefined: the cloud could not be asked (offline, no cloud, not set up yet). */
+export async function joinCompany(code: string, ms = 8000): Promise<CloudEntry | null | undefined> {
+  pendingCode = code;
+  if (!navigator.onLine || !await cloudSyncEnabled()) return undefined;
+  const work = (async (): Promise<CloudEntry | null | undefined> => {
+    const c = await sb(); if (!c) return undefined;
+    if (!(await c.auth.getSession()).data.session) {
+      // the cloud itself checks the code, so a new counter may ask before it has passed the code here
+      await markShopDevice();
+      if (!await ensureSession()) return undefined;
+    }
+    const { data, error } = await c.rpc("join_company", { code });
+    if (error) {
+      if (/join_company|PGRST202|could not find the function/i.test((error.code || "") + " " + error.message)) pendingCode = "";   // cloud migration not run yet
+      if (/too many wrong/i.test(error.message)) throw new Error("Too many wrong entry codes on this device. Try again in a few minutes.");
+      return undefined;
+    }
+    pendingCode = "";
+    if (!data) return null;
+    const e: CloudEntry = { store: String((data as any).store_id), master: !!(data as any).master };
+    const was = await getSetting<CloudEntry | null>("company_binding", null);
+    if (!was || was.store !== e.store || was.master !== e.master) {
+      await restartCompanyTables();
+      await setSetting("company_binding", e);
+      refetch = true; if (running) again = true; void syncNow();
+    }
+    return e;
+  })();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<undefined>(res => { timer = setTimeout(() => res(undefined), ms); });
+  try { return await Promise.race([work, late]); } finally { clearTimeout(timer); }
+}
+
 async function runSync() {
+  if (pendingCode) await joinCompany(pendingCode).catch(() => undefined);
+  if (refetch) { refetch = false; await restartCompanyTables(); }
   try {
     await pendingCount();
     const enabled = await cloudSyncEnabled();

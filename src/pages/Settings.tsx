@@ -9,7 +9,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, deviceId, uid, type Staff } from "../lib/db";
 import { Head } from "../components/common";
 import { useApp, toast, newStaff, SEED_OWNER, logoutEveryone } from "../lib/app";
-import { onSync, signIn, signOut, syncNow, exportAll, importAll, createShopLogin, sb, ensureSession, markShopDevice, refreshPeople, type SyncState } from "../lib/sync";
+import { onSync, signIn, signOut, syncNow, exportAll, importAll, createShopLogin, sb, ensureSession, markShopDevice, refreshPeople, joinCompany, type SyncState } from "../lib/sync";
 import type { Pattern } from "../lib/parse";
 import { when } from "../lib/format";
 import { getShop, saveShop, counterCode, DEFAULT_SHOP, type Shop } from "../lib/billing";
@@ -376,7 +376,17 @@ export function WhoAreYou() {
   const open = (e: React.FormEvent) => {
     e.preventDefault();
     void attempt(async () => {
-      if (!unlocked) { const e = await entryFor(code); if (!e) return false; setEntry(e); setUnlocked(true); return true; }
+      if (!unlocked) {
+        /* This counter checks the code itself (works offline), and the cloud checks it too: the cloud's answer wins,
+           and it is what lets this device receive that company's records (another company's code, or the master
+           code, may not even be on this device). */
+        const local = await entryFor(code);
+        const cloud = await joinCompany(code);
+        // before a master code exists, the owner through the main code is still the master (as on this device)
+        const e = cloud ? { ...cloud, master: cloud.master || (!!local?.master && local.store === cloud.store) } : cloud === null && !local ? null : local;
+        if (!e) return false;
+        setEntry(e); setUnlocked(true); return true;
+      }
       if (roleMode) return withFreshPeople(async () => { const person = await staffForRolePasscode(code); if (!person) return false; return enter(person); });
       return withFreshPeople(async () => {
         const named = await peopleNamed(typed);   // read now, not the list from before the cloud answered
@@ -532,9 +542,9 @@ function OwnerPinReset({ onDone, onUseCloud }: { onDone: (person?: Staff) => voi
 /* The phrase that opens the app on a counter (lib/openCode). */
 /* In another company the code here is that company's own entry code (owner only; kept as a hash, so it is set, never shown). */
 function OpenCodeSetting() {
-  const { store, me } = useApp();
+  const { store, me, master } = useApp();
   if (store === MAIN_STORE) return <MainOpenCode />;
-  if (me?.role !== "owner") return <div className="xs mut">The owner sets this company's entry code.</div>;
+  if (me?.role !== "owner" || !master) return <div className="xs mut">This company's entry code is set by the owner in the master view.</div>;
   return <CompanyCodeSetting id={store} />;
 }
 function MainOpenCode() {
