@@ -46,11 +46,32 @@ export function Thumb({ photo_id, url, text, size = 48 }: { photo_id?: string; u
   return <span className="thumb" style={{ width: size, height: size }}>{src ? <img src={src} alt="" loading="lazy" /> : (text || "RJ").slice(0, 2)}</span>;
 }
 
-/* Opens the phone's back camera directly; compresses to <100 KB before saving. */
+/* Opens the phone's back camera directly; compresses to <100 KB before saving.
+   Owner, 27 Oct: on the shop laptop "Photo" opened the Windows file box. On a computer (mouse, no touch screen)
+   it now opens the live camera: the USB camera plugged in for jewellery photos is picked by itself and, once
+   chosen in the Camera list, remembered for every product photo. A small folder button still uploads a file. */
+const onComputer = () => typeof matchMedia !== "undefined" && matchMedia("(pointer: fine)").matches && !matchMedia("(any-pointer: coarse)").matches;
 export function PhotoButton({ value, onChange, label = "Photo", webcam = false, disabled = false, onBusyChange }: { value?: string; onChange: (photo_id: string | undefined) => void; label?: string; webcam?: boolean; disabled?: boolean; onBusyChange?: (busy: boolean) => void }) {
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [camera, setCamera] = useState(false);
+  const [live] = useState(() => !webcam && onComputer());
+  if (live) return (
+    <div className="row" style={{ gap: 4, flexWrap: "nowrap" }}>
+      {value && <Thumb photo_id={value} size={56} />}
+      <input ref={ref} type="file" accept="image/*" hidden
+        onChange={async e => {
+          const f = e.target.files?.[0]; if (!f) return;
+          setBusy(true); onBusyChange?.(true); try { onChange(await savePhoto(f)); } finally { setBusy(false); onBusyChange?.(false); e.target.value = ""; }
+        }} />
+      <button type="button" className="btn sm" onClick={() => setCamera(true)} disabled={busy || disabled} title="Take a photo with the camera (choose the USB camera once in the Camera list)">
+        <Icon n="camera" size={17} />{busy ? "Saving…" : value ? "Retake" : label}</button>
+      <button type="button" className="btn sm" onClick={() => ref.current?.click()} disabled={busy || disabled} title="Upload a photo file instead" aria-label="Upload a photo file">📁</button>
+      {camera && <Suspense fallback={<div role="status">Opening camera…</div>}><CustomerCamera title={label} facing="environment" settingKey="photo_camera" preferExternal
+        onPhoto={id => { onBusyChange?.(false); onChange(id); }} onClose={() => setCamera(false)} /></Suspense>}
+      {value && <DeleteButton className="btn sm bad" onDelete={async () => { if (await confirmDelete("Remove this photo?")) onChange(undefined); }}>✕</DeleteButton>}
+    </div>
+  );
   return (
     <div className="row">
       {value && <Thumb photo_id={value} size={56} />}

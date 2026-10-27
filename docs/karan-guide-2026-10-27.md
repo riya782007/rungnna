@@ -37,6 +37,12 @@
 - The first time a counter uses a new company's code it needs internet. After that it works offline as usual.
 - A counter used by two companies keeps what it already has from both. For full separation, give each company its own laptop or browser.
 
+## 6b. USB camera for jewellery photos
+1. Plug the USB camera in. On a laptop or computer, **Photo** (Labels, Stock in, Scan, Add inventory, purchase lines) now opens the live camera, not the file box.
+2. The first time, the browser asks to use the camera: press **Allow**.
+3. A USB camera is chosen by itself. If the wrong one shows, pick it in the **Camera** list once; it is remembered for every product photo.
+4. **Take photo**. 📁 next to Photo still uploads a picture file.
+
 ## 7. Estimate trade code (owner only)
 **Settings › Prices › Estimate trade code:** switch it on and choose the number (e.g. 10).
 - On the counter screens (billing NET, Bills list, held bills), an estimate's total then shows in the code with its mark: a ₹10,000 estimate reads **1,000.00 ÷10**.
