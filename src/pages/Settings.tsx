@@ -17,7 +17,10 @@ import { health, type Health } from "../lib/ai";
 import { can, ROLE_NOTE, roleName, isRoleLogin } from "../lib/roles";
 import { RoleSelect } from "./Roles";
 import { entryWait, recordEntryAttempt, personForPin, staffForRolePasscode } from "../lib/entryAuth";
-import { codeMatches, getOpenCode, setOpenCode, DEFAULT_OPEN_CODE } from "../lib/openCode";
+import { getOpenCode, setOpenCode, DEFAULT_OPEN_CODE } from "../lib/openCode";
+import { entryFor, mayOpen, worksIn, applyCompany, assertMainCodeFree, type Entry } from "../lib/companies";
+import { CompanyCodeSetting } from "../components/CompaniesAdmin";
+import { MAIN_STORE } from "../lib/scope";
 import { getPrivate, setCode, lockNow, usePrivate } from "../lib/privacy";
 import { DeleteEstimates } from "../components/DeleteEstimates";
 import { getTaxonomy, addTo, removeFrom, addColour, removeColour, colourCodeFor, type Taxonomy } from "../lib/taxonomy";
@@ -41,8 +44,9 @@ const TABS: { key: TabKey; label: string; intro: string }[] = [
 ];
 
 export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
-  const { me, setMe } = useApp();
-  const staff = useLiveQuery(() => db.staff.toArray(), [], []);
+  const { me, setMe, store, master } = useApp();
+  const allStaff = useLiveQuery(() => db.staff.toArray(), [], []);
+  const staff = master ? allStaff : allStaff.filter(s => worksIn(s, store));
   const [sync, setSync] = useState<SyncState>();
   const [nm, setNm] = useState(""); const [pin, setPin] = useState(""); const [open, setOpen] = useState("");
   const [pats, setPats] = useState<Pattern[]>([]);
@@ -298,6 +302,8 @@ export function WhoAreYou() {
   const realOwner = staff.some(s => s.role === "owner" && s.id !== SEED_OWNER && !isRoleLogin(s));
   const persons = staff.filter(s => !isRoleLogin(s) && !(realOwner && s.id === SEED_OWNER && !s.pin));
   const [unlocked, setUnlocked] = useState(false);
+  // the company (or master view) the entry code opened (docs/companies.md)
+  const [entry, setEntry] = useState<Entry | null>(null);
   const [code, setCode] = useState("");
   const [bad, setBad] = useState("");
   const [pick, setPick] = useState<Staff | null>(null);
@@ -359,17 +365,25 @@ export function WhoAreYou() {
     setChecking(true);
     return await refreshPeople() && await check();
   };
+  /* Into the company the entry code opened. Someone not given that company gets the same answer as a wrong PIN,
+     so nobody learns that another company exists. Its features are loaded before the person is. */
+  const here = (): Entry => entry || { store: MAIN_STORE, master: false };
+  const enter = async (person: Staff) => {
+    if (!mayOpen(person, here())) return false;
+    await applyCompany(here().store);
+    setMe(person, here()); return true;
+  };
   const open = (e: React.FormEvent) => {
     e.preventDefault();
     void attempt(async () => {
-      if (!unlocked) { if (!codeMatches(code, await getOpenCode())) return false; setUnlocked(true); return true; }
-      if (roleMode) return withFreshPeople(async () => { const person = await staffForRolePasscode(code); if (!person) return false; setMe(person); return true; });
+      if (!unlocked) { const e = await entryFor(code); if (!e) return false; setEntry(e); setUnlocked(true); return true; }
+      if (roleMode) return withFreshPeople(async () => { const person = await staffForRolePasscode(code); if (!person) return false; return enter(person); });
       return withFreshPeople(async () => {
         const named = await peopleNamed(typed);   // read now, not the list from before the cloud answered
         // an owner with no PIN yet sets one now (one-time); anyone else without a PIN asks the owner
         const fresh = named.find(s => s.role === "owner" && !s.pin);
         if (fresh) { setPick(fresh); return true; }
-        for (const s of named) { const person = s.pin ? await personForPin(s.id, pin) : null; if (person) { setMe(person); return true; } }
+        for (const s of named) { const person = s.pin ? await personForPin(s.id, pin) : null; if (person && await enter(person)) return true; }
         return false;
       });
     });
@@ -385,7 +399,8 @@ export function WhoAreYou() {
       const saved = current.id === SEED_OWNER ? { ...current, id: uid(), name: name.trim(), pin: newPin } : { ...current, name: name.trim(), pin: newPin };
       await put("staff", saved);
       if (current.id === SEED_OWNER) await db.staff.delete(SEED_OWNER);
-      setMe(saved);
+      await applyCompany(here().store);
+      setMe(saved, here());
     } catch (e: any) { setBad(e.message); } finally { setBusy(false); }
   };
 
@@ -394,7 +409,7 @@ export function WhoAreYou() {
       <header style={{ background: "linear-gradient(140deg,var(--emerald-dk),var(--emerald))", color: "#fff", borderRadius: "14px 14px 0 0" }}>
         <span className="mark">R</span><div><b style={{ font: "700 26px/1 var(--display)", color: "var(--gold-l)" }}>Rungnna</b><div className="xs" style={{ opacity: .7 }}>Jewellery &amp; Co · Shop OS</div></div></header>
       <div className="pad stack">
-        {unlocked && reset ? <OwnerPinReset onDone={person => { setReset(false); if (person) setMe(person); }}
+        {unlocked && reset ? <OwnerPinReset onDone={person => { setReset(false); if (person) void enter(person); }}
             onUseCloud={o => { setReset(false); setPick(null); setTyped(o.name); setRoleMode(false); setPin(""); setCode(""); setBad(""); }} />
         : unlocked && joining ? <div className="stack" role="status">
           <div className="b sm">Getting the shop from the cloud…</div>
@@ -423,7 +438,7 @@ export function WhoAreYou() {
         </form>}
         {bad && <div className="note warn" role="alert">{bad}</div>}
         {wait > 0 && <div className="note bad sm" role="status">Too many wrong attempts — try again in {Math.ceil(wait / 1000)}s.</div>}
-        {unlocked && <button type="button" className="linkbtn" onClick={() => { setUnlocked(false); setPick(null); setTyped(""); setRoleMode(false); setPin(""); setCode(""); setBad(""); }}>Lock shop</button>}
+        {unlocked && <button type="button" className="linkbtn" onClick={() => { setUnlocked(false); setEntry(null); setPick(null); setTyped(""); setRoleMode(false); setPin(""); setCode(""); setBad(""); }}>Lock shop</button>}
         <div className="xs mut">Works offline after this counter has loaded the app and received its staff and stock. Role and PIN changes reach other counters when sync is allowed and connected.</div>
       </div>
     </div>
@@ -515,7 +530,14 @@ function OwnerPinReset({ onDone, onUseCloud }: { onDone: (person?: Staff) => voi
 }
 
 /* The phrase that opens the app on a counter (lib/openCode). */
+/* In another company the code here is that company's own entry code (owner only; kept as a hash, so it is set, never shown). */
 function OpenCodeSetting() {
+  const { store, me } = useApp();
+  if (store === MAIN_STORE) return <MainOpenCode />;
+  if (me?.role !== "owner") return <div className="xs mut">The owner sets this company's entry code.</div>;
+  return <CompanyCodeSetting id={store} />;
+}
+function MainOpenCode() {
   const [code, setCode] = useState("");
   const [show, setShow] = useState(false);
   useEffect(() => { getOpenCode().then(setCode); }, []);
@@ -525,7 +547,7 @@ function OpenCodeSetting() {
         <input className="in" type={show ? "text" : "password"} value={code} onChange={e => setCode(e.target.value)} placeholder={DEFAULT_OPEN_CODE} /></label>
       <div className="row">
         <button className="btn" onClick={() => setShow(!show)}>{show ? "Hide" : "Show"}</button>
-        <button className="btn p" onClick={async () => { const saved = await setOpenCode(code); setCode(saved); toast("Entry code saved — other counters receive it when cloud sync is allowed"); }}>Save passcode</button>
+        <button className="btn p" onClick={async () => { try { await assertMainCodeFree(code || DEFAULT_OPEN_CODE); const saved = await setOpenCode(code); setCode(saved); toast("Entry code saved — other counters receive it when cloud sync is allowed"); } catch (x: any) { toast(x.message, true); } }}>Save passcode</button>
         <span className="grow" />
         <button className="btn sm" onClick={async () => { const saved = await setOpenCode(DEFAULT_OPEN_CODE); setCode(saved); toast("Back to " + DEFAULT_OPEN_CODE); }}>Reset</button>
       </div>

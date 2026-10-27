@@ -171,8 +171,22 @@ export const BUILTIN: Record<Staff["role"], string[]> = new Proxy(BUILTIN_DEFAUL
 });
 export const customRoles = () => ROLES;
 
+/* Owner, 27 Oct: "whenever a company is created, which features are enabled for that company will come to me".
+   The company that is open sets this (lib/companies); inside it, a person gets only what both their role and the
+   company allow. null = the company has every feature. The owner always keeps everything. */
+let COMPANY_FEATURES: Set<string> | null = null;
+export function setCompanyFeatures(f: string[] | null) { COMPANY_FEATURES = f ? new Set(f) : null; }
+export const companyHas = (k: string) => !COMPANY_FEATURES || COMPANY_FEATURES.has(k);
+
 export function permsOf(me: Pick<Staff, "role"> & { role_id?: string; perms?: string[] } | null | undefined): Set<string> {
   if (!me) return new Set();
+  if (me.role === "owner") return new Set(ALL_PERMS);
+  const out = rolePerms(me);
+  if (COMPANY_FEATURES) for (const k of [...out]) if (!COMPANY_FEATURES.has(k)) out.delete(k);
+  return out;
+}
+/** What the person's own ticks or role give, before the open company's features (for editing a person). */
+export function rolePerms(me: Pick<Staff, "role"> & { role_id?: string; perms?: string[] }): Set<string> {
   if (me.role === "owner") return new Set(ALL_PERMS);
   // the person's own ticks (owner, 23 Oct) come before any role
   if (Array.isArray(me.perms)) return new Set(me.perms.filter(p => ALL_PERMS.includes(p)));

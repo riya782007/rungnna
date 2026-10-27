@@ -5,6 +5,7 @@ import { initStores, isEstimateCompany } from "./stores";
 import { setScope, setScopePerms, currentStore, MAIN_STORE } from "./scope";
 import { resetCounterAccess } from "./entryAuth";
 import { setRolesCache, setBuiltinCache, permsOf, sessionAllowed } from "./roles";
+import { applyCompany, mayOpen, watchIdle, type Entry } from "./companies";
 import { useLiveQuery } from "dexie-react-hooks";
 
 /* ---------- tiny hash router (works offline, no server rewrites needed) ---------- */
@@ -76,8 +77,10 @@ function flashScreen() {
 }
 
 /* ---------- who is using this device ---------- */
-type Ctx = { me: Staff | null; setMe: (s: Staff | null) => void; ready: boolean; store: string; switchStore: (id: string) => Promise<void> };
-const AppCtx = createContext<Ctx>({ me: null, setMe: () => {}, ready: false, store: currentStore(), switchStore: async () => {} });
+/* `master`: the owner came in with the master code (docs/companies.md) — the only session that sees other companies.
+   setMe(person, entry): the company the entry code opened; without it the same person keeps their company. */
+type Ctx = { me: Staff | null; setMe: (s: Staff | null, entry?: Entry) => void; ready: boolean; store: string; master: boolean; switchStore: (id: string) => Promise<void> };
+const AppCtx = createContext<Ctx>({ me: null, setMe: () => {}, ready: false, store: currentStore(), master: false, switchStore: async () => {} });
 export const useApp = () => useContext(AppCtx);
 
 export const BUCKETS: Omit<Location, "id" | "updated_at">[] = [
@@ -112,8 +115,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [me, setMeS] = useState<Staff | null>(null);
   const [ready, setReady] = useState(false);
   const [store, setStore] = useState(currentStore());
+  const [master, setMaster] = useState(false);
   const staffRow = useLiveQuery(() => me ? db.staff.get(me.id) : undefined, [me?.id]);
-  useEffect(() => { if (!staffRow || !me || staffRow.updated_at === me.updated_at) return; if (!sessionAllowed(staffRow)) { setMe(null); return; } setMeS(staffRow); const id = staffRow.role === "owner" || staffRow.stores?.includes(store) ? store : staffRow.store_id || MAIN_STORE; setScope(id, staffRow.role, permsOf(staffRow)); setStore(id); }, [staffRow?.updated_at]);
+  // a person whose access to this company is taken away (or who is switched off) is signed out, never moved to another company
+  useEffect(() => { if (!staffRow || !me || staffRow.updated_at === me.updated_at) return; if (!sessionAllowed(staffRow) || !mayOpen(staffRow, { store, master })) { setMe(null); return; } setMeS(staffRow); setScope(store, staffRow.role, permsOf(staffRow)); }, [staffRow?.updated_at]);
   useEffect(() => {
     (async () => {
       await firstRun();
@@ -137,12 +142,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setScope(MAIN_STORE, me?.role || "", me ? permsOf(me) : undefined); setStore(MAIN_STORE);
     if (me?.role === "owner" || !me) void setSetting("active_store", MAIN_STORE);
   }); }, [store, me?.id]);
-  const setMe = (s: Staff | null) => { const id = s?.role === "owner" ? store : s?.store_id || MAIN_STORE; setScope(id, s?.role || ""); setScopePerms(permsOf(s)); setStore(id); setMeS(s); setSetting("me", s?.id || ""); };
-  // the owner opens any company; anyone else the companies ticked for them (owner, 23 Oct)
+  const setMe = (s: Staff | null, entry?: Entry) => {
+    const e: Entry = entry || (s && me && s.id === me.id ? { store, master } : { store: s?.store_id || MAIN_STORE, master: false });
+    setScope(e.store, s?.role || ""); setScopePerms(permsOf(s)); setStore(e.store);
+    setMaster(!!s && s.role === "owner" && e.master);
+    setMeS(s); setSetting("me", s?.id || "");
+  };
+  // only the master view moves between companies (owner, 27 Oct: "nowhere will it show that there are different companies")
   const switchStore = async (id: string) => {
-    if (me?.role !== "owner" && !(me?.stores || []).includes(id)) throw new Error("This company is not open for you");
-    if (me?.role === "owner") await setSetting("active_store", id);
-    setScope(id, me!.role, permsOf(me)); setStore(id);
+    if (!master || me?.role !== "owner") throw new Error("This company is not open for you");
+    await setSetting("active_store", id);
+    await applyCompany(id);
+    setScope(id, me.role, permsOf(me)); setStore(id);
   };
   // custom roles sync like any setting; every check (lib/roles) and every guarded save (scope.requirePerm) follows them
   const rolesRow = useLiveQuery(() => db.config.get("roles"), []);
@@ -153,6 +164,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (me && !sessionAllowed(me)) { setMe(null); return; }
     setScopePerms(permsOf(me)); bump(n => n + 1);
   }, [rolesRow?.updated_at, me?.id, me?.role, me?.role_id]);
+  /* The open company's features and auto-logout (Settings › Companies) follow its config row as soon as it syncs in. */
+  const companyRow = useLiveQuery(() => db.config.get("company_" + store), [store]);
+  const [idle, setIdle] = useState(0);
+  useEffect(() => { let live = true; void applyCompany(store).then(m => { if (!live) return; setIdle(m); setScopePerms(permsOf(me)); bump(n => n + 1); }); return () => { live = false; }; }, [store, companyRow?.updated_at, me?.id]);
+  useEffect(() => {
+    if (!me || !idle) return;
+    return watchIdle(idle, () => { lockNow(); setOwnerOpen(false); setMe(null); toast(`Signed out after ${idle} idle minute${idle > 1 ? "s" : ""}. Sign in again.`); });
+  }, [me?.id, idle, store]);
   /* Owner, 23 Oct (voice): "a lockout: if, God forbid, it is ever needed, I log out from my phone and everyone is
      logged out — no company can open estimates". The owner's "Log out everyone" stamps config "logout_all"; every
      counter that signed in before that stamp goes back to the sign-in screen (as soon as it is online). */
@@ -165,7 +184,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     lockNow(); setOwnerOpen(false); setMe(null);
     toast("The owner logged everyone out. Sign in again.", true);
   }, [logoutRow?.updated_at, me?.id]);
-  return <AppCtx.Provider value={{ me, setMe, ready, store, switchStore }}>{children}</AppCtx.Provider>;
+  return <AppCtx.Provider value={{ me, setMe, ready, store, master, switchStore }}>{children}</AppCtx.Provider>;
 }
 
 export const LOGOUT_ALL = "logout_all";

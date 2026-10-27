@@ -2,8 +2,9 @@ import { DeleteButton } from "../components/DeleteButton";
 import { confirmDelete } from "../lib/confirm-delete";
 import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db, put, type StoreTransfer } from "../lib/db";
-import { createStore, currentStore, inStore, dispatchTransfer, receiveTransfer } from "../lib/stores";
+import { db, type StoreTransfer } from "../lib/db";
+import { currentStore, dispatchTransfer, receiveTransfer } from "../lib/stores";
+import { CompaniesAdmin } from "../components/CompaniesAdmin";
 import { findByScan } from "../lib/products";
 import { isRfidTag, normTag } from "../lib/rfid";
 import { useApp, toast } from "../lib/app";
@@ -13,18 +14,14 @@ export default function Stores() {
   const { me } = useApp(); const owner = me?.role === "owner";
   // one company again (owner, 26 Oct): the old estimate company is not offered for transfers or staff
   const stores = useLiveQuery(() => db.stores.filter(s => !s.deleted && !!s.active && s.kind !== "estimate").toArray(), [], []);
-  const staff = useLiveQuery(() => db.staff.filter(s => !s.deleted).toArray(), [], []);
   const transfers = useLiveQuery(() => db.store_transfers.filter(t => !t.deleted && (t.from_store === currentStore() || t.to_store === currentStore())).reverse().sortBy("at"), [], []);
-  const [name, setName] = useState(""), [code, setCode] = useState(""), [dest, setDest] = useState(""), [rack, setRack] = useState(""), [items, setItems] = useState<StoreTransfer["items"]>([]), [scan, setScan] = useState(false), [raw, setRaw] = useState(""), [busy, setBusy] = useState(false), [racks, setRacks] = useState<Record<string, string>>({});
+  const [dest, setDest] = useState(""), [rack, setRack] = useState(""), [items, setItems] = useState<StoreTransfer["items"]>([]), [scan, setScan] = useState(false), [raw, setRaw] = useState(""), [busy, setBusy] = useState(false), [racks, setRacks] = useState<Record<string, string>>({});
   const run = async (f: () => Promise<void>) => { setBusy(true); try { await f(); } catch (e: any) { toast(e.message, true); } finally { setBusy(false); } };
   const add = async (raw: string) => { if (!rack) throw new Error("Choose source rack first"); const tag = isRfidTag(raw) ? normTag(raw) : "", p = await findByScan(raw); if (!p) throw new Error("Item not found"); setItems(rows => { if (tag && rows.some(r => r.tags?.includes(tag))) return rows; const old = rows.find(r => r.product_id === p.id && r.from_loc === rack); return old ? rows.map(r => r === old ? { ...r, qty: r.qty + 1, tags: tag ? [...(r.tags || []), tag] : r.tags } : r) : [...rows, { product_id: p.id, qty: 1, from_loc: rack, tags: tag ? [tag] : undefined }]; }); setRaw(""); };
   const products = useLiveQuery(() => db.products.toArray(), [], []);
-  return <div className="stack"><Head title={owner ? "Stores & transfers" : "Stock transfers"} />
-    {owner && <section className="stack"><h3>Branches</h3><div className="grid g3"><input className="in" aria-label="Branch name" placeholder="Branch name" value={name} onChange={e => setName(e.target.value)} /><input className="in" aria-label="Branch code" placeholder="Code" maxLength={4} value={code} onChange={e => setCode(e.target.value.toUpperCase())} /><button className="btn p" disabled={busy} onClick={() => run(async () => { await createStore(name, code); setName(""); setCode(""); toast("Branch created"); })}>Add branch</button></div>
-      {stores.map(s => <div className="row" key={s.id}><b>{s.code} · {s.name}</b><input className="in grow" aria-label={`${s.name} address`} defaultValue={s.address} onBlur={e => put("stores", { ...s, address: e.target.value })} /></div>)}
-      <h3>Staff assignments</h3>{staff.map(s => <label className="row" key={s.id}><span className="grow">{s.name} · {s.role}</span><select className="in" value={s.store_id || stores.find(s => s.code === "MAIN")?.id || ""} onChange={e => put("staff", { ...s, store_id: e.target.value })}>{stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>)}
-    </section>}
-    <section className="stack"><h3>Transfer out</h3><label className="f">Destination store<select className="in" value={dest} onChange={e => setDest(e.target.value)}><option value="">Choose branch</option>{stores.filter(s => s.id !== currentStore()).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+  return <div className="stack"><Head title="Companies & transfers" sub="Master view: only you see this. Moving goods between companies is a transfer; between two GSTINs, ask your CA how to bill it." />
+    {owner && <CompaniesAdmin />}
+    <section className="stack"><h3>Transfer out</h3><label className="f">To company<select className="in" value={dest} onChange={e => setDest(e.target.value)}><option value="">Choose company</option>{stores.filter(s => s.id !== currentStore()).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
       <LocationSelect value={rack} onChange={setRack} buckets={false} label="Source rack" />
       <form className="row" onSubmit={e => { e.preventDefault(); run(() => add(raw)); }}><input className="in grow" value={raw} onChange={e => setRaw(e.target.value)} placeholder="Item barcode / RFID" /><button className="btn" disabled={busy || !raw}>Add</button><button type="button" className="btn" onClick={() => setScan(true)}>Scan</button></form>
       {items.map((item, i) => <div className="row" key={i}><span className="grow">{products.find(p => p.id === item.product_id)?.item} · {products.find(p => p.id === item.product_id)?.code}</span><input aria-label="Pieces" className="in" style={{ width: 90 }} type="number" min={1} disabled={!!item.tags?.length} value={item.qty} onChange={e => setItems(items.map((x, j) => j === i ? { ...x, qty: Number(e.target.value) } : x))} /><DeleteButton className="btn" onDelete={async () => { if (await confirmDelete("Remove this transfer line?")) setItems(old => old.filter(x => x !== item)); }}>Remove</DeleteButton></div>)}

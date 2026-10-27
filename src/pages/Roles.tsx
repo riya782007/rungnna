@@ -5,6 +5,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { Eye, EyeOff, Copy, RefreshCw } from "lucide-react";
 import { db, uid, type Staff } from "../lib/db";
 import { Head } from "../components/common";
+import { worksIn } from "../lib/companies";
 import { useApp, toast } from "../lib/app";
 import { PERMISSION_GROUPS, BUILTIN, BUILTIN_DEFAULT, ROLE_NOTE, permLabel, customRoles, isSensitive, isRoleLogin, can, builtinEdited, PRINTERS_OFF, type CustomRole } from "../lib/roles";
 import { saveRoles, regenerated, saveBuiltinRole } from "../lib/roleLogins";
@@ -28,11 +29,11 @@ const BASES: Staff["role"][] = ["manager", "cashier", "salesman", "helper", "pac
 const fresh = (base: Staff["role"] = "salesman", perms: string[] = []): CustomRole => ({ id: uid(), name: "", perms, base });
 
 export default function Roles() {
-  const { me } = useApp();
+  const { me, store, master } = useApp();
   const row = useLiveQuery(() => db.config.get("roles"), []);
   const roles: CustomRole[] = ((row?.value as any)?.roles as CustomRole[]) || customRoles();
   const staff = useLiveQuery(() => db.staff.filter(s => !s.deleted).toArray(), [], [] as Staff[]);
-  const people = staff.filter(s => !isRoleLogin(s));
+  const people = staff.filter(s => !isRoleLogin(s) && (master || worksIn(s, store)));   // another company's people stay out of sight
   const users = (id: string) => people.filter(s => s.role_id === id);
   const [draft, setDraft] = useState<CustomRole>(() => fresh());
   const createRef = useRef<HTMLDivElement>(null);
