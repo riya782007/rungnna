@@ -10,8 +10,14 @@ describe("label decoder", () => {
   });
   it("shop stickers carry a short QR: the code and the pieces on that sticker (owner, 22 Oct)", () => {
     const raw = ownPayload({ code: "RLYI848MOV2", item: "BANGLES", type: "PCS", style: "25061", color: "MIX", tk: "", rate: 39600, pack: 6 });
-    expect(raw).toBe("RJ2-RLYI848MOV2-6");
-    for (const typed of [raw, raw.toLowerCase(), "RJ2/RLYI848MOV2/6", "RJ2ßRLYI848MOV2ß6"]) expect(parseLabel(typed)).toMatchObject({ how: "rungnna", code: "RLYI848MOV2", qty: "6" });
+    expect(raw).toBe("RJ2-RLYI848MOV2-6-39600");
+    for (const typed of [raw, raw.toLowerCase(), "RJ2/RLYI848MOV2/6/39600", "RJ2ßRLYI848MOV2ß6ß39600"]) expect(parseLabel(typed)).toMatchObject({ how: "rungnna", code: "RLYI848MOV2", qty: "6", rate: "396" });
+  });
+  it("older short stickers without a rate still scan (owner, 27 Oct: the rate was added to the short QR)", () => {
+    expect(parseLabel("RJ2-RLYI848MOV2-6")).toMatchObject({ how: "rungnna", code: "RLYI848MOV2", qty: "6" });
+    expect(parseLabel("RJ2-RLYI848MOV2-6").rate).toBeFalsy();
+    expect(parseLabel("RJ2-RLYI848MOV2-1-306050")).toMatchObject({ rate: "3060.5" });
+    expect(ownPayload({ code: "RLYI848MOV2", item: "X", type: "PCS", style: "", color: "", tk: "", rate: 0, pack: 1 })).toBe("RJ2-RLYI848MOV2-1");
   });
   it("reads key:value labels", () => {
     const p = parseLabel("ITEM:CHAIN TYPE:PCS STYLE:K5209/59SH COLOR:K/GBN RATE:96");

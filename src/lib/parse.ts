@@ -78,8 +78,14 @@ export function parseLabel(rawIn: string, patterns: Pattern[] = []): Parsed {
   //    shop's counter the old labels' "~" already arrives as "-", "`" or "^" (see 1c). Stickers printed from
   //    purchase bills carry this QR and were refused at billing for that reason (owner's video, 21 Oct).
   //    So whatever single symbol follows RJ1 is the separator, and the case doesn't matter.
-  const short = /^RJ2[^A-Za-z0-9]?([A-Za-z0-9]{4,24})(?:[^A-Za-z0-9](\d{1,5}))?$/i.exec(raw);
-  if (short) return { raw, how: "rungnna", tokens: [SHORT_PREFIX, short[1].toUpperCase(), short[2] || ""], code: short[1].toUpperCase(), qty: short[2] ? num(short[2]) : undefined };
+  // RJ2-<code>-<pieces>-<rate in paise>: since 27 Oct the short QR also carries the rate printed on that sticker
+  // (₹3060 sticker billed ₹1,248), so the bill charges what the sticker says. Older RJ2 stickers have no rate.
+  const short = /^RJ2[^A-Za-z0-9]?([A-Za-z0-9]{4,24})(?:[^A-Za-z0-9](\d{1,5})(?:[^A-Za-z0-9](\d{1,9}))?)?$/i.exec(raw);
+  if (short) {
+    const paise = short[3] ? Number(short[3]) : 0;
+    return { raw, how: "rungnna", tokens: [SHORT_PREFIX, short[1].toUpperCase(), short[2] || "", short[3] || ""], code: short[1].toUpperCase(), qty: short[2] ? num(short[2]) : undefined,
+      ...(paise > 0 ? { rate: String(paise / 100) } : {}) };
+  }
   const own = /^RJ1([^A-Za-z0-9\s])/i.exec(raw);
   if (own) {
     const sep = own[1], t = raw.split(sep);
@@ -195,7 +201,11 @@ export function ownPayload(p: { code: string; item: string; type: string; style:
   // packet: ~45 letters) needs a dense QR whose squares a thermal printer can barely make. The product's own code
   // is all billing needs, so the shop's stickers carry just that. "Rungnna only" format keeps the long one.
   // the pieces on THIS sticker go too (X6 packet or X1 loose piece): billing adds exactly that many
-  if (format !== "rungnna" && /^[A-Z0-9]{4,24}$/.test(p.code || "")) return `${SHORT_PREFIX}-${p.code}-${Math.max(1, Math.round(p.pack || 1))}`;
+  // …and the rate printed beside it (paise, digits only, so no keyboard layout can change it): the bill uses it
+  if (format !== "rungnna" && /^[A-Z0-9]{4,24}$/.test(p.code || "")) {
+    const paise = Math.round(p.rate || 0);
+    return `${SHORT_PREFIX}-${p.code}-${Math.max(1, Math.round(p.pack || 1))}${paise > 0 ? "-" + paise : ""}`;
+  }
   const s = (v: string) => (v || "").replace(/\|/g, "/").trim();
   return [OWN_PREFIX, s(p.code), s(p.item), s(p.type), s(p.style), s(p.color), s(p.tk), p.rate ? String(Math.round(p.rate) / 100) : "", String(p.pack || 1)].join("|");
 }
