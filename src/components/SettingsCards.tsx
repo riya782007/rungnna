@@ -14,6 +14,7 @@ import { byRollNo } from "./SupplierNo";
 import { RECEIPT_CUTS, receiptCut, receiptCutSetup, type ReceiptCut, RECEIPT_FEEDS, DEFAULT_RECEIPT_FEED, receiptFeed } from "../lib/printing";
 import { gstRequest } from "../lib/compliance";
 import { getShop, saveShop } from "../lib/billing";
+import { getTradeCode, saveTradeCode, DEFAULT_TRADE_CODE, type TradeCode } from "../lib/tradeCode";
 
 /* ===========================================================================
    Settings the owner works with himself (owner, 18 Oct: "he must be able to customise it, everything well
@@ -320,5 +321,24 @@ export function NoLessCard() {
       <div className="xs mut">The bill's "Less % after discount" (2–3% for good customers) is never cut on these items. Write item names, separated by commas.</div>
       <textarea className="in" rows={3} value={text ?? saved} placeholder="e.g. BRIDAL SET, KUNDAN SET" onChange={e => setText(e.target.value)} />
       <div className="row"><button className="btn p sm" disabled={text === null} onClick={() => void save()}>Save</button></div>
+    </div></div>;
+}
+
+/* Owner only (lib/tradeCode): estimate totals on the counter screens in the shop's own trade code. */
+export function TradeCodeCard() {
+  const row = useLiveQuery(getTradeCode, [], DEFAULT_TRADE_CODE);
+  const [draft, setDraft] = useState<TradeCode | null>(null);
+  const t = draft || row;
+  const save = async () => {
+    try { await saveTradeCode(t); setDraft(null); toast(t.on ? `Estimate totals show ÷${t.divisor} on the counter screens` : "Estimate totals show the real amount"); }
+    catch (e: any) { toast(e.message, true); }
+  };
+  return <div className="card"><header><h3>Estimate trade code</h3></header>
+    <div className="pad stack">
+      <div className="xs mut">Only the counter screens show an estimate's total in the shop's code: with ÷10, a ₹10,000 estimate reads "1,000.00 ÷10". Every amount is still saved as it really is, and every printed or shared bill, report, khata and GST figure shows the real amount.</div>
+      <label className="row sm" style={{ gap: 6 }}><input type="checkbox" checked={t.on} onChange={e => setDraft({ ...t, on: e.target.checked })} />Show estimate totals in the trade code</label>
+      <label className="f">Divide by<input className="in mono" inputMode="decimal" value={String(t.divisor)} onChange={e => setDraft({ ...t, divisor: Number(e.target.value.replace(/[^\d.]/g, "")) || 0 })} /></label>
+      <label className="row sm" style={{ gap: 6 }}><input type="checkbox" checked={t.owner_real} onChange={e => setDraft({ ...t, owner_real: e.target.checked })} />I (the owner) see real totals</label>
+      <div className="row"><button className="btn p sm" disabled={!draft} onClick={() => void save()}>Save</button></div>
     </div></div>;
 }
