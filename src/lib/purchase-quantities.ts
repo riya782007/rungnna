@@ -60,3 +60,22 @@ export function stickersPerPacket(rows: PhotoRow[], per: number, only?: Set<stri
     return { ...row, stickers: String(Math.min(5000, Math.ceil(qty / pack) * per)) };
   });
 }
+
+/** Owner, 27 Oct: typing a 30-line slip by hand meant writing the style and the pieces again on every line.
+    Enter on the last line adds the next one already filled in from it: item, unit, style, colour, HSN, quantity,
+    pieces per packet, cost and selling rate (and the reference code). Only what differs is typed over. The
+    bill serial goes up by one when it is a plain number; stickers and the photo start empty. */
+export function copyLineBelow(rows: PhotoRow[], index: number, id: string): PhotoRow[] {
+  const from = rows[index];
+  if (!from) return rows;
+  const sr = /^\d+$/.test(from.sr?.trim() || "") ? String(Number(from.sr) + 1) : "";
+  const line: PhotoRow = {
+    review_id: id, item: from.item, style: from.style, color: from.color, unit: from.unit, hsn: from.hsn,
+    qty: from.qty, cost: from.cost, rate: from.rate, pack: from.pack, packSource: from.packSource,
+    entry_code: from.entry_code, collection: from.collection, material: from.material,
+    // the copied cost already has the supplier's terms in it: never divide it again
+    termsDone: from.termsDone, billCost: from.billCost,
+    sr, stickers: "",
+  };
+  return [...rows.slice(0, index + 1), line, ...rows.slice(index + 1)];
+}

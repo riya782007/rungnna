@@ -14,7 +14,7 @@ import {
   preparePhotoRows, savePhotoPurchase, validatePhotoRows, pricePhotoRows, applyVendorTerms, repricePhotoRows, suspiciousCosts, restoreBillCosts,
   autoArticle, autoArticleCount, draftLabelProducts, combineRepeatedRows, labelCountFor, lineSignature, isSamePage, nextPageNo, continueSr, readDiscount, readMultiplier, readExtra, applyCosting, spreadExtra, costingOf, type PhotoRow,
 } from "../lib/purchase-photo";
-import { applyPhotoQuantities, readCount, repeatPhotoCount, stickersPerPacket, type RepeatedCountField } from "../lib/purchase-quantities";
+import { applyPhotoQuantities, copyLineBelow, readCount, repeatPhotoCount, stickersPerPacket, type RepeatedCountField } from "../lib/purchase-quantities";
 import { purchaseLabelJobs } from "../lib/purchase-labels";
 import { DEFAULT_CFG, LabelView, validateLabelPrint, loadLabelCfg, readLabelCfg, useLabelPrint, tscCommands, expandJobs, type LabelCfg, type Job } from "../pages/Labels";
 import { directPrintSupported } from "../lib/tsc";
@@ -82,7 +82,7 @@ async function receivingRack(chosen: string): Promise<string> {
 /** Blank articles and blank selling rates filled the way the bill reader does (shop pricing). */
 export const fillGaps = (rows: PhotoRow[], rule: PricingRule | null | undefined) => rule ? pricePhotoRows(autoArticle(rows), rule) : autoArticle(rows);
 
-export default function PurchasePhoto({ by, camera = false }: { by: string; camera?: boolean }) {
+export default function PurchasePhoto({ by, camera = false, typed = false }: { by: string; camera?: boolean; typed?: boolean }) {
   /* Owner, 22 Oct: "the staff who load the stock need not see the bill's money" — whoever may not see costs
      (permission "See cost & set selling rates") gets no cost/rate columns, totals or pricing buttons here.
      "More details" adds collection/style, material and a photo per line, on this same screen. */
@@ -98,9 +98,19 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
   const [photoUploads, setPhotoUploads] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const countFocus = useRef<HTMLInputElement | null>(null);
+  // a line just added by Enter: the cursor goes to the same column on it
+  const cellFocus = useRef<{ line: number; col: number } | null>(null);
+  const linesRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const next = countFocus.current; countFocus.current = null;
     if (next?.isConnected) { next.focus(); next.select(); }
+    const cell = cellFocus.current; cellFocus.current = null;
+    const tr = cell && linesRef.current?.querySelectorAll<HTMLTableRowElement>("tbody > tr")[cell.line];
+    if (cell && tr) {
+      const fields = gridFields(tr);
+      const target = fields.find(f => f.col === cell.col) || fields.filter(f => f.col >= cell.col)[0] || fields[0];
+      if (target) { focusGridCell(target.el); tr.scrollIntoView({ block: "nearest" }); }
+    }
   }, [d.rows]);
   const draftRef = useRef(d); draftRef.current = d;
   const removeRows = async (ids: string[]) => {
@@ -135,7 +145,8 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
   }
   function onPurchaseGridKey(e: React.KeyboardEvent<HTMLDivElement>) {
     const key = e.key;
-    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(key)) return;
+    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Enter"].includes(key)) return;
+    if (key === "Enter" && (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.nativeEvent.isComposing)) return;
     const el = document.activeElement as HTMLElement | null;
     const td = el?.closest("td");
     const row = el?.closest<HTMLTableRowElement>("tr");
@@ -156,6 +167,16 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
       focusGridCell(target.el);
     };
 
+    if (key === "Enter") {
+      // Enter in a typed cell: down one line; on the last line, a new line copied from this one (owner, 27 Oct)
+      if (el.tagName !== "INPUT" || input.type === "checkbox" || input.type === "file") return;
+      e.preventDefault();
+      if (e.repeat || busy || lock.current) return;
+      if (idx < rows.length - 1) { moveRow(idx + 1); return; }
+      cellFocus.current = { line: idx + 1, col: curCol };
+      set({ rows: copyLineBelow(draftRef.current.rows, idx, uid()) });
+      return;
+    }
     if (key === "ArrowDown") {
       e.preventDefault();
       if (idx < rows.length - 1) moveRow(idx + 1);
@@ -243,6 +264,16 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
     setReady(true);
   }).catch(e => { setError(e.message || "Could not restore the purchase draft"); setReady(true); }); }, []);
   useEffect(() => { if (ready) setSetting("purchase_photo_draft", d); }, [d, ready]);
+  // Labels › "Type a bill by hand": open straight on line 1, ready to type (owner, 27 Oct)
+  useEffect(() => {
+    if (!typed || !ready) return;
+    // a bill already being typed (or read) is kept: the cursor just goes to its last line
+    if (!draftRef.current.rows.length) set({ rows: [blank(packetDefault)] });
+    setTimeout(() => {
+      const items = document.querySelectorAll<HTMLInputElement>('.purchase-photo input[aria-label^="item line "]');
+      const last = items[items.length - 1]; last?.focus(); last?.scrollIntoView({ block: "center" });
+    }, 50);
+  }, [typed, ready]);
   /* The purchase just approved stays here — with its labels ready to print — when you go to
      QR labels or another screen and come back, so the bill never has to be read again. */
   const LAST = "purchase_photo_last";
@@ -602,7 +633,12 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
   ].filter(Boolean) as string[];
 
   const notReady = !!connection && !connection.startsWith("Ready");
-  return <section className="purchase-photo stack" aria-busy={!ready || busy}>
+  return <section className="purchase-photo stack" aria-busy={!ready || busy} onKeyDown={e => {
+    // Ctrl+Enter anywhere on the bill: approve and print every line's stickers in one go (owner, 27 Oct)
+    if (e.key !== "Enter" || !(e.ctrlKey || e.metaKey) || e.repeat || !d.rows.length) return;
+    e.preventDefault();
+    if (ready4 && !photoUploads.size) void approve(); else if (missing.length) toast("To approve: " + missing.join(" · "), true);
+  }}>
     {!d.rows.length && <div className="bill-drop stack">
       <button className="btn p bill-drop-btn" disabled={busy} onClick={() => setCam(true)}>
         <Camera size={22} />{busy ? "Reading the bill…" : "Take photo of the bill"}</button>
@@ -702,8 +738,8 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
         <RackPicker value={d.rack} onChange={rack => set({ rack })} /></div>
 
       <label className="row sm" style={{ gap: 6 }}><input type="checkbox" checked={more} onChange={e => setMore(e.target.checked)} /> More details: collection / style and material</label>
-      <div className="selection-bar"><SelectAll ids={d.rows.map(r => r.review_id!)} selected={selection} onChange={setSelection} label="Select all purchase lines" /><span className="sm">{d.rows.filter(r => selection.has(r.review_id!)).length} selected</span><DeleteButton className="btn sm bad" disabled={busy || !d.rows.some(r => selection.has(r.review_id!))} onDelete={() => removeRows(d.rows.filter(r => selection.has(r.review_id!)).map(r => r.review_id!))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }}>Keys: ↑↓ lines · ←→ fields · Space select · Shift+↑↓ range</span></div>
-      <div className="tw purchase-lines" onKeyDown={onPurchaseGridKey}><table className="pos-t"><thead><tr>{["No.", ...lineFields.map(f => captions[f]), "Jewellery photo", "Supplier S.No.", ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
+      <div className="selection-bar"><SelectAll ids={d.rows.map(r => r.review_id!)} selected={selection} onChange={setSelection} label="Select all purchase lines" /><span className="sm">{d.rows.filter(r => selection.has(r.review_id!)).length} selected</span><DeleteButton className="btn sm bad" disabled={busy || !d.rows.some(r => selection.has(r.review_id!))} onDelete={() => removeRows(d.rows.filter(r => selection.has(r.review_id!)).map(r => r.review_id!))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }}>Keys: ↑↓ lines · ←→ fields · Enter on the last line: next line, copied · Ctrl+Enter: approve & print · Space select · Shift+↑↓ range</span></div>
+      <div ref={linesRef} className="tw purchase-lines" onKeyDown={onPurchaseGridKey}><table className="pos-t"><thead><tr>{["No.", ...lineFields.map(f => captions[f]), "Jewellery photo", "Supplier S.No.", ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
         {d.rows.map((r, i) => <tr key={r.review_id || i}>
           <td className="line-no" data-l="Line" title="Line number: the same small boxed number printed on this line's stickers"><input type="checkbox" aria-label={"Select purchase line " + (i + 1)} checked={selection.has(r.review_id!)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(r.review_id!) : next.delete(r.review_id!); return next; })} />{r.sr?.trim() ? <span title={"Serial on the supplier's bill (line " + (i + 1) + " here)"}>{r.sr}</span> : i + 1}</td>
           {lineFields.map(k => k === "costcode" ? <td key={k} data-l={captions[k]} className="mono b" title="The cost as the shop's code (only people allowed to see costs see the rupees)">{codeFor(r)}</td> : <td key={k} data-l={captions[k]}>
@@ -714,7 +750,8 @@ export default function PurchasePhoto({ by, camera = false }: { by: string; came
               placeholder={k === "entry_code" ? "e.g. K201026" : k === "stickers" ? defaultStickers(r) : undefined}
               value={r[k] ?? ""} onChange={e => row(i, k, e.target.value)}
               onKeyDown={["qty", "pack", "stickers"].includes(k) ? e => {
-                if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+                if (e.key !== "Enter" || e.nativeEvent.isComposing || e.ctrlKey || e.metaKey) return;
+                if (i === d.rows.length - 1) return;   // last line: the grid adds the next line, copied from this one
                 e.preventDefault(); e.stopPropagation();
                 if (e.repeat || busy || lock.current) return;
                 try {
