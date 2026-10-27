@@ -263,10 +263,10 @@ export async function adoptCloudProduct(c: SupabaseClient, localId: string, code
 }
 
 /* ---------- pull ---------- */
-async function pull(c: SupabaseClient) {
+async function pull(c: SupabaseClient, tables: readonly T[] = TABLES) {
   let movedStock = false;
   try {
-    for (const t of TABLES) {
+    for (const t of tables) {
       const cursor = await getSetting<string>("cursor_" + t, "1970-01-01T00:00:00Z");
       // Replay one fixed overlap window per run; pages then move strictly forward within it.
       const since = new Date(new Date(cursor).getTime() - 5000).toISOString();
@@ -286,9 +286,14 @@ async function pull(c: SupabaseClient) {
         if (!data || !data.length) break;
         const table = (db as any)[t];
         const locals = await table.bulkGet(data.map((r: any) => r.id));
+        /* People (names, PINs, owners): a laptop whose clock runs ahead stamped its own copy "later" than the
+           cloud's, so another computer's new PIN never replaced it and the right PIN was refused (27 Oct, Raj
+           made at home could not open at the shop). A person this device has no unsent change for always
+           takes the cloud's copy; one with an unsent change keeps it, and it is sent next. */
+        const unsent = t === "staff" ? new Set((await db.outbox.where("table").equals("staff").toArray()).map(o => o.row_id)) : null;
         const fresh = data.map((r: any, i: number) => ({ r, l: locals[i] }))
-          .filter(({ r, l }: any) => !l || l.updated_at < r.updated_at)
-          .map(({ r, l }: any) => ({ ...r, photo_id: l?.photo_id || r.photo_id || undefined }));
+          .filter(({ r, l }: any) => !l || (unsent ? !unsent.has(r.id) : l.updated_at < r.updated_at))
+          .map(({ r, l }: any) => ({ ...(unsent ? l : {}), ...r, photo_id: l?.photo_id || r.photo_id || undefined }));
         if (fresh.length) { await table.bulkPut(fresh); if (t === "movements") movedStock = true; }
         const last = data[data.length - 1];
         if (after && last.updated_at === after.updated_at && last.id === after.id) throw new Error("Cloud pagination did not advance for " + t);
@@ -305,10 +310,32 @@ async function pull(c: SupabaseClient) {
   }
 }
 
-let running = false;
-export async function syncNow() {
-  if (running) return;
-  running = true;
+/* One sync at a time. A caller that asks while one is running gets that same run to wait on
+   (it used to return at once, so "sync, then check" checked before anything had arrived). */
+let running: Promise<void> | null = null;
+let again = false;   // a person was saved while a sync was already past sending: run once more after it
+export function syncNow(): Promise<void> {
+  if (!running) running = (async () => { do { again = false; await runSync(); } while (again); })().finally(() => { running = null; });
+  return running;
+}
+
+/* The sign-in screen, before it says "Name or PIN not recognised": bring just the people and roles from the
+   cloud (a few rows, a second or two), so a person or PIN made on another computer a minute ago opens here
+   now instead of after the next full sync. False when this computer can't ask the cloud. */
+export async function refreshPeople(ms = 8000): Promise<boolean> {
+  if (!navigator.onLine || !await cloudSyncEnabled()) return false;
+  const work = (async () => {
+    const c = await sb(); if (!c) return false;
+    if (!(await c.auth.getSession()).data.session && !await ensureSession()) return false;
+    await pull(c, ["config", "staff"]);
+    return true;
+  })().catch(() => false);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<boolean>(res => { timer = setTimeout(() => res(false), ms); });
+  try { return await Promise.race([work, late]); } finally { clearTimeout(timer); }
+}
+
+async function runSync() {
   try {
     await pendingCount();
     const enabled = await cloudSyncEnabled();
@@ -330,17 +357,27 @@ export async function syncNow() {
   } catch (e: any) {
     const enabled = await cloudSyncEnabled();
     emit(enabled ? { status: "error", error: e?.message || String(e) } : { status: "local", cloudEnabled: false, error: undefined });
-  } finally { running = false; await pendingCount(); }
+  } finally { await pendingCount(); }
 }
 
 let started = false;
+let soon: ReturnType<typeof setTimeout> | undefined;
 export function startSync() {
   if (started) return; started = true;
-  syncNow();
-  setInterval(syncNow, 20_000);
-  window.addEventListener("online", () => syncNow());
+  void syncNow();
+  setInterval(() => void syncNow(), 20_000);
+  window.addEventListener("online", () => void syncNow());
   window.addEventListener("offline", () => emit({ status: "offline" }));
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) syncNow(); });
+  // also when the window is hidden or closed: a person made just before the laptop is shut still reaches the cloud
+  document.addEventListener("visibilitychange", () => void syncNow());
+  window.addEventListener("pagehide", () => void syncNow());
+  /* A new or changed person (name, PIN, owner) or role is sent within a couple of seconds instead of on the next
+     20-second round, so it can open on the other computers straight away. */
+  db.outbox.hook("creating", (_key, row) => {
+    if (row.table !== "staff" && row.table !== "config") return;
+    clearTimeout(soon);
+    soon = setTimeout(() => { if (running) again = true; void syncNow(); }, 1500);
+  });
 }
 
 /* ---------- backup: the shop's data can always leave the building on a pen drive ---------- */

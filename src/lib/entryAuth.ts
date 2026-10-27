@@ -5,15 +5,21 @@ import { roleForPasscode, sessionAllowed, type CustomRole } from "./roles";
 type Failures = { n: number; until: number };
 type EntryStage = "shop" | "identity";
 const keyFor = (stage: EntryStage) => stage === "shop" ? "shop_entry_fails" : "open_fails";
+/* Owner, 27 Oct: "after too many wrong attempts the 300 seconds is too long — make it 30 seconds".
+   From the 5th wrong try: 15 s, then 30 s at most. */
+export const MAX_ENTRY_PAUSE = 30_000;
 export async function entryWait(stage: EntryStage = "identity"): Promise<number> {
   const failure = await getSetting<Failures>(keyFor(stage), { n: 0, until: 0 });
-  return Math.max(0, failure.until - Date.now());
+  const left = Math.max(0, failure.until - Date.now());
+  // a pause saved by the older app (up to 300 s) is cut down to the new limit once, and then runs out normally
+  if (left > MAX_ENTRY_PAUSE) { await setSetting(keyFor(stage), { ...failure, until: Date.now() + MAX_ENTRY_PAUSE }); return MAX_ENTRY_PAUSE; }
+  return left;
 }
 export async function recordEntryAttempt(success: boolean, stage: EntryStage = "identity"): Promise<number> {
   return db.transaction("rw", db.settings, async () => {
     if (success) { await setSetting(keyFor(stage), { n: 0, until: 0 }); return 0; }
     const failure = await getSetting<Failures>(keyFor(stage), { n: 0, until: 0 });
-    const n = failure.n + 1, pause = n >= 5 ? Math.min(300_000, 15_000 * 2 ** (n - 5)) : 0;
+    const n = failure.n + 1, pause = n >= 5 ? Math.min(MAX_ENTRY_PAUSE, 15_000 * 2 ** (n - 5)) : 0;
     await setSetting(keyFor(stage), { n, until: Date.now() + pause });
     return pause;
   });
