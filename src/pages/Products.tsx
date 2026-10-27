@@ -137,7 +137,7 @@ function ProductDetail({ id }: { id: string }) {
               <input className="in" list={"pd-sizes-" + p.id} value={p.size || ""} onChange={e => set("size", e.target.value || undefined)} />
               <datalist id={"pd-sizes-" + p.id}>{(tax?.sizes || []).map(s => <option key={s} value={s} />)}</datalist></label>
             <div style={{ gridColumn: "1/-1" }}><DeadToggle value={p.tk} onChange={v => set("tk", v)} /></div>
-            <label className="f">Wholesale rate ₹<MoneyInput className="in hi mono" paise={p.wholesale_rate || p.rate} onPaise={v => setP({ ...p, wholesale_rate: v, rate: v })} /></label>
+            <label className="f">Wholesale rate ₹<MoneyInput className="in hi mono" paise={p.rate || p.wholesale_rate || 0} onPaise={v => setP({ ...p, wholesale_rate: v, rate: v })} /></label>
             <label className="f">Retail rate ₹<MoneyInput className="in mono" paise={p.retail_rate || 0} onPaise={v => set("retail_rate", v)} /></label>
             <label className="f">MRP ₹<MoneyInput className="in mono" paise={p.mrp} onPaise={v => set("mrp", v)} /></label>
             <label className="f">Pieces per packet<input className="in mono" inputMode="numeric" value={p.pack || ""} onChange={e => set("pack", parseInt(e.target.value.replace(/\D/g, "")) || undefined)} /></label>

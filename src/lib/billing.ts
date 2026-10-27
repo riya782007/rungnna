@@ -226,9 +226,12 @@ export function newBill(by: string, shop: Shop, t0: BillType = "estimate"): Bill
     remarks: "", payments: [], items: [], device: deviceId(), by_staff: by, at: now(), updated_at: now(),
   };
 }
+/* Owner, 27 Oct (photo): a sticker printed 9 3060 X1PCS billed at ₹1,248. The sticker prints `rate`; the bill took
+   `wholesale_rate` first, an older price that a later purchase / label print never updated. `rate` is the one
+   selling (wholesale) price — what the sticker shows is what the bill charges. */
 export function priceFor(p: Product, level: Party["tier"] | Bill["price_level"] = "wholesale") {
   if (level === "retail") return p.retail_rate || p.mrp || p.rate || p.wholesale_rate || 0;
-  return p.wholesale_rate || p.rate || p.retail_rate || p.mrp || 0;
+  return p.rate || p.wholesale_rate || p.retail_rate || p.mrp || 0;
 }
 export function lineFrom(p: Product, box = 1, pkts = 1, level: Party["tier"] | Bill["price_level"] = "wholesale"): BillLine {
   const pack = p.pack && p.pack > 1 ? p.pack : 1;

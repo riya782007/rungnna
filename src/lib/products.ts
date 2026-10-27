@@ -419,6 +419,8 @@ export async function saveProduct(p: Product, fromScan = false) {
   p.item = p.item.trim().toUpperCase(); p.style = p.style.trim().toUpperCase(); p.color = p.color.trim().toUpperCase();
   p.type = (p.type || "PCS").trim().toUpperCase();
   if (p.size != null) p.size = p.size.trim().toUpperCase() || undefined;   // same key as lib/inventory normSize, incl. legacy rows
+  // one wholesale price: the sticker's rate. A stale wholesale_rate billed ₹1,248 for a ₹3,060 sticker (27 Oct)
+  if (p.rate > 0) p.wholesale_rate = p.rate;
   if (!(p.barcodes || []).includes(p.code)) p.barcodes = [...(p.barcodes || []), p.code];
   const saved = await put("products", p);
   // the first time a number gets a real name (e.g. typed on Scan & record), every later label learns it
