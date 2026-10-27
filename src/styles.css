@@ -924,6 +924,13 @@ html{scrollbar-gutter:stable}
 .purchase-photo .purchase-lines .in{font-size:16px;font-weight:700;min-height:38px;height:38px;color:var(--ink)}
 .purchase-photo .purchase-lines .supplier-number,.purchase-photo .purchase-lines td.line-no{font-size:16px;font-weight:800;color:var(--ink)}
 .sheet-full .purchase-photo .purchase-lines{overflow-x:auto}
+/* Owner, 27 Oct (photo of the counter screen): cost and selling rate were cut to "234.(" — give both room for
+   the whole figure (e.g. 1,234.50) and right-align them so the rupees line up down the column. */
+@media(min-width:861px){
+  .purchase-photo .purchase-lines td[data-l="Cost ₹"],.purchase-photo .purchase-lines td[data-l="Rate ₹"]{min-width:112px}
+  .purchase-photo .purchase-lines td[data-l="Cost code"]{min-width:96px}
+  .purchase-photo .purchase-lines td[data-l="Cost ₹"] .in,.purchase-photo .purchase-lines td[data-l="Rate ₹"] .in{width:100%;text-align:right;font-variant-numeric:tabular-nums}
+}
 
 /* Follow keyboard, Enter-to-next-line and pointer focus in purchase entry. */
 .purchase-photo .purchase-lines tbody tr:focus-within>td{background:#fff9d6}
