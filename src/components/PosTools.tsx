@@ -9,10 +9,10 @@ import { fillFromItemCode, UNITS } from "../lib/products";
 import { billAmount } from "../lib/format";
 import { beep } from "../lib/app";
 
-export function ManualItems({ products, box, level, canRates, onProduct, onCustom, onClose, inline = false, persistent = false, focusRequest = 0 }: {
+export function ManualItems({ products, box, level, canRates, onProduct, onCustom, onClose, onAdded, inline = false, persistent = false, focusRequest = 0 }: {
   products: Product[]; box: number; level: "wholesale" | "retail" | "dealer"; canRates: boolean;
   onProduct: (p: Product, count: number, pieces: boolean, rate: number) => void;
-  onCustom: (l: BillLine) => void; onClose: () => void; inline?: boolean; persistent?: boolean; focusRequest?: number;
+  onCustom: (l: BillLine) => void; onClose: () => void; onAdded?: () => void; inline?: boolean; persistent?: boolean; focusRequest?: number;
 }) {
   const [mode, setMode] = useState("custom"), [q, setQ] = useState(""), [chosen, setChosen] = useState<Product | null>(null);
   const [qty, setQty] = useState("1"), [pieces, setPieces] = useState(false), [rate, setRate] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false);
@@ -31,7 +31,9 @@ export function ManualItems({ products, box, level, canRates, onProduct, onCusto
         onProduct(chosen, count, pieces, canRates || !priceFor(chosen, level) ? moneyInput(rate) : priceFor(chosen, level));
       }
       if (!next && !persistent) return onClose();
-      setChosen(null); setQ(""); setItem(""); setRate(""); setQty("1"); setStyle(""); setColor(""); setHsn(""); setPieces(false); setError(""); search.current?.focus({ preventScroll: true });
+      setChosen(null); setQ(""); setItem(""); setRate(""); setQty("1"); setStyle(""); setColor(""); setHsn(""); setPieces(false); setError("");
+      // counter, 27 Oct: after a typed line is added the cursor goes back to the scan box, so the next label scans at once
+      if (persistent && onAdded) onAdded(); else search.current?.focus({ preventScroll: true });
     } catch (e: any) { beep(false); setError(e.message); }
   };
   /* Counter screen: one always-open row — name, unit, style, colour, qty, rate, add.

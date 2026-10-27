@@ -623,7 +623,7 @@ export default function Billing({ args }: { args: string[] }) {
   const boxLines = (n: number) => boxLineRange(t.items.map((l, i) => l.box_no === n ? i + 1 : 0).filter(Boolean));
   const balance = due(t);
   const lastScan = t.items.find(l => l.id === lastScanId);
-  const itemEditor = <Suspense fallback={<div className="pos-entry-loading" role="status">Loading items…</div>}><ManualItems key={b.id} inline persistent focusRequest={entryFocus} products={products} box={box} level={b.price_level || "wholesale"} canRates={can(me, "billing.rates")} onClose={() => {}}
+  const itemEditor = <Suspense fallback={<div className="pos-entry-loading" role="status">Loading items…</div>}><ManualItems key={b.id} inline persistent focusRequest={entryFocus} products={products} box={box} level={b.price_level || "wholesale"} canRates={can(me, "billing.rates")} onClose={() => {}} onAdded={() => scanRef.current?.focus({ preventScroll: true })}
     onProduct={(p, count, pieces, rate) => {
       void learnFromPick(p).then(ok => ok && toast(`Learnt: this sticker now scans as ${label(p)}`));
       const line = fixLine({ ...lineFrom(p, box, pieces ? 0 : count, b.price_level || "wholesale"), ...(pieces ? { qty: count, pkts: 0 } : {}), rate });
