@@ -29,7 +29,7 @@ import { closeFinancialYear, lockedUpto, setVoucherLock } from "../lib/finance";
 import { SecuritySettings } from "../components/OwnerSecurity";
 import { CloudSyncControl } from "../components/CloudSyncControl";
 import { OldCodesCard } from "../components/OldCodesCard";
-import { PricingCard, StickerLookCard, SupplierTermsCard, PrintingCard, GstCard, SaveState, NoLessCard } from "../components/SettingsCards";
+import { PricingCard, TradeCodeCard, StickerLookCard, SupplierTermsCard, PrintingCard, GstCard, SaveState, NoLessCard } from "../components/SettingsCards";
 
 /* Settings in five plain groups, one at a time (owner, 18 Oct: the long page left half the screen empty and
    things were hard to find). Each group is a tab; its cards flow into balanced columns. */
@@ -107,6 +107,7 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
       {tab === "prices" && admin && <div className="set-grid">
         <PricingCard />
         <NoLessCard />
+        {owner && <TradeCodeCard />}
         <StickerLookCard />
         <AllOldCodes />
         <TaxonomyCard />

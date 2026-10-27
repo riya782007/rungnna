@@ -26,6 +26,7 @@ import { can } from "../lib/roles";
 import { usePrivate, unlock, lockNow, getPrivate, isOpen, isEstimate } from "../lib/privacy";
 import { Icon } from "../components/Icon";
 import { billAmount, toPaise } from "../lib/format";
+import { useEstimateAmount } from "../lib/tradeCode";
 import { CameraScanner, useScanOnlyIn } from "../components/Scanner";
 import { hostRemote } from "../lib/remote";
 import { qrSvg } from "../lib/qr";
@@ -280,6 +281,7 @@ export default function Billing({ args }: { args: string[] }) {
   }, [b?.id]);
   /* private estimates: hidden until the owner's code is entered */
   const priv = usePrivate();
+  const shownNet = useEstimateAmount();   // an estimate's total in the shop's trade code, on this screen only (lib/tradeCode)
   const products = useLiveQuery(() => db.products.filter(p => !p.deleted).toArray(), [], []);
   const pmap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
   const itemNames = useLiveQuery(() => db.config.get("item_codes"), []);
@@ -818,7 +820,7 @@ export default function Billing({ args }: { args: string[] }) {
           {b.bill_type === "gst" && b.party_state && !placeCode(b.party_gstin, b.party_state) && <div className="xs" style={{ textAlign: "right", color: "var(--bad)" }}>Check buyer state “{b.party_state}” — not recognised, GST type may be wrong</div>}
           {t.igst ? <div className="xs mut" style={{ textAlign: "right" }}>IGST (other state)</div> : t.gst ? <div className="xs mut" style={{ textAlign: "right" }}>CGST {billAmount(t.cgst)} + SGST {billAmount(t.sgst)}</div> : null}
           {t.adjust ? <div className="sumrow"><span>Round off</span><span className="mono">{billAmount(t.adjust)}</span></div> : null}
-          <div className="net"><span>{b.bill_type === "challan" ? "VALUE" : "NET"}</span><b>{billAmount(t.net)}</b></div>
+          <div className="net"><span>{b.bill_type === "challan" ? "VALUE" : "NET"}</span><b>{shownNet(t.net, b)}</b></div>
           </div><div className="counter-payments stack">
           {b.bill_type === "challan" ? <div className="note sm">A challan sends the goods out with no money taken. Convert it to an invoice from Bills when the customer is billed.</div> : <>
           {(moneyMore || !!b.advance) ? <div className="sumrow"><span>Advance</span><MoneyInput inputRef={advanceRef} className="cell r" style={{ width: 80 }} paise={b.advance} onPaise={v => set({ advance: v })} /></div>
@@ -830,7 +832,7 @@ export default function Billing({ args }: { args: string[] }) {
       </div>
 
       <div className="fkeys">{KEYS.map(([k, v]) => <span key={k}><kbd>{k}</kbd>{v}</span>)}</div>
-      <div className="pos-mbar"><div><span className="xs">{t.total_qty} pcs · {t.items.length} lines</span><b>{billAmount(t.net)}</b></div>
+      <div className="pos-mbar"><div><span className="xs">{t.total_qty} pcs · {t.items.length} lines</span><b>{shownNet(t.net, b)}</b></div>
         <button className="btn g" disabled={saving} onClick={() => doSave(false, true)}>Save & Send</button><button className="btn p" disabled={saving} onClick={() => doSave(false)}>{saving ? "Saving…" : `Save ${documentName}`}</button></div>
       <Suspense fallback={<div className="toast" role="status">Loading billing tool…</div>}>
         {calculator && <PosCalculator lines={t.items} onClose={() => setCalculator(false)} onApply={(value, target: CalcTarget, id) => {
@@ -925,6 +927,7 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
 
 function HeldBills({ activeId, onPick, onClose }: { activeId: string; onPick: (b: Bill) => void; onClose: () => void }) {
   const open = usePrivate();
+  const shownNet = useEstimateAmount();
   const list = useLiveQuery(() => db.bills.where("status").equals("hold").filter(b => b.id !== activeId && inStore(b) && !b.deleted && !b.no && (open || !isEstimate(b))).reverse().sortBy("at"), [open, activeId], []);
   return (
     <Modal title="Bills on hold" onClose={onClose}>
@@ -932,7 +935,7 @@ function HeldBills({ activeId, onPick, onClose }: { activeId: string; onPick: (b
         {list.map(b => (
           <div key={b.id} className="item">
             <span className="grow"><span className="pill">{b.bill_type === "estimate" ? "Estimate" : b.bill_type === "gst" ? "Tax invoice" : "Challan"}</span> <b>{b.party_name || "Walk-in"}</b><div className="xs mut">{b.items.length} lines · {b.total_qty} pcs · {new Date(b.at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</div>{b.remarks && <div className="sm" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{b.remarks}</div>}</span>
-            <b className="mono">{billAmount(b.net)}</b>
+            <b className="mono">{shownNet(b.net, b)}</b>
             <button className="btn sm p" onClick={() => onPick(b)}>Resume</button>
             <DeleteButton className="btn sm bad" onDelete={async () => { if (await confirmDelete("Discard this held bill?")) await put("bills", { ...b, deleted: 1 }); }}>Discard</DeleteButton>
           </div>))}

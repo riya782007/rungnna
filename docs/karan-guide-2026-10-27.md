@@ -37,5 +37,11 @@
 - The first time a counter uses a new company's code it needs internet. After that it works offline as usual.
 - A counter used by two companies keeps what it already has from both. For full separation, give each company its own laptop or browser.
 
+## 7. Estimate trade code (owner only)
+**Settings › Prices › Estimate trade code:** switch it on and choose the number (e.g. 10).
+- On the counter screens (billing NET, Bills list, held bills), an estimate's total then shows in the code with its mark: a ₹10,000 estimate reads **1,000.00 ÷10**.
+- **Only the screen changes.** The estimate is saved at ₹10,000, and prints, shares, reports, khata and payments all use ₹10,000. Staff still take payment of the real amount.
+- "I see real totals" (on by default): you see real totals on your own sign-in.
+
 ## Not done
-Estimate bills showing a fraction of the real amount, or a company whose sales or stock are kept out of the records. Every amount is saved as it really is.
+Saving or printing an estimate at a fraction of its real amount, or keeping a company's sales or stock out of the records. The trade code above changes only what the screen shows.

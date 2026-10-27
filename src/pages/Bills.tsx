@@ -1,4 +1,5 @@
 import { askText } from "../components/AskHost";
+import { useEstimateAmount } from "../lib/tradeCode";
 import { DeleteButton } from "../components/DeleteButton";
 import { confirmDelete } from "../lib/confirm-delete";
 import { SelectAll } from "../components/SelectAll";
@@ -33,6 +34,7 @@ const statusText = (b: Bill) => b.status === "merged" ? `${b.bill_type === "chal
 function BillList() {
   const { me } = useApp();
   const open = usePrivate();
+  const shownNet = useEstimateAmount();   // estimate totals in the shop's trade code on this list only (lib/tradeCode)
   const [range, setRange] = useState(0);
   const [type, setType] = useState<"" | BillType>("");
   const [status, setStatus] = useState<"" | Bill["status"]>("");
@@ -98,7 +100,7 @@ function BillList() {
             <td className="mono">{(open || b.bill_type !== "gst") && <span className={"pill " + (b.bill_type === "gst" ? "ok" : b.bill_type === "return" ? "bad" : b.bill_type === "challan" ? "warn" : "")}>{docShort(b)}</span>} {b.no || "—"}</td>
             <td>{b.party_name || "Walk-in"}<div className="xs mut">{b.party_phone}</div></td>
             <td className="xs">{when(b.at)}</td><td className="r mono">{b.total_qty}</td>
-            <td className="r mono b" style={b.bill_type === "return" ? { color: "var(--ok)" } : undefined}>{b.bill_type === "return" ? "−" : ""}{rupees(b.net)}</td>
+            <td className="r mono b" style={b.bill_type === "return" ? { color: "var(--ok)" } : undefined}>{b.bill_type === "return" ? "−" : ""}{shownNet(b.net, b, rupees)}</td>
             <td className="r mono" style={{ color: "var(--rose)" }}>{b.status === "final" && isSale(b) && due(b) > 0 ? rupees(due(b)) : ""}</td>
             <td><span className={"pill " + (b.status === "void" ? "bad" : b.status === "hold" ? "warn" : b.status === "final" ? "ok" : "")}>{statusText(b)}</span></td>
           </tr>))}
