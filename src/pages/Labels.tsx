@@ -355,25 +355,25 @@ export default function Labels({ args }: { args: string[] }) {
               }} />
               {oldCopy && <div className="note stack" role="status"><b>Copy a working old sticker</b><span className="sm">This copy keeps the original QR exactly, including its old reference and price. Edits in the item form below apply only to newly generated labels.</span><code style={{ overflowWrap: "anywhere" }}>{oldCopy.sourceQr}</code><div className="row"><button className="btn p" disabled={printer.busy} onClick={() => { const n = Number(copies); if (!Number.isSafeInteger(n) || n < 1 || n > 5000) return toast("Check print quantity (1–5000)", true); showStart(printer.start(expandJobs([{ ...oldCopy, p: { ...oldCopy.p, item: oldCopy.p.item || form.item }, copies: n }]))); }}>Print exact old QR copy</button><button className="btn" onClick={() => setOldCopy(null)}>Use edited item instead</button></div></div>}
               <div className="grid g2 label-manual-fields">
-                <label className="f">ITEM
+                <label className="f lf-item">ITEM
                   <input className="in" list="litems" value={form.item} onChange={e => { const v = e.target.value.toUpperCase(); set("item", v); const c = verifiedCodeFor(v); if (c && !form.item_code) set("item_code", c); }} autoFocus />
                   <datalist id="litems">{[...new Set([...items, ...DEFAULT_ITEMS, ...Object.values(VERIFIED_ITEM_CODES).map(v => v.name)])].map(i => <option key={i} value={i} />)}</datalist></label>
-                <label className="f">TYPE
+                <label className="f lf-type">TYPE
                   <select aria-label="TYPE" className="in" value={form.type} onChange={e => set("type", e.target.value)}>{DEFAULT_TYPES.map(t => <option key={t}>{t}</option>)}</select></label>
-                <label className="f">STYLE<input ref={styleInput} className="in mono" value={form.style} onChange={e => set("style", e.target.value.toUpperCase())} placeholder="K5209/59SH" /></label>
-                <label className="f">COLOR<input className="in mono" value={form.color} onChange={e => set("color", e.target.value.toUpperCase())} placeholder="K/GBN" /></label>
-                <label className="f">TK<input className="in mono" value={form.tk} onChange={e => set("tk", e.target.value.toUpperCase())} /></label>
-                <SupplierNo suppliers={vendors} id={form.vendor_id} label="VENDOR roll no." onPick={v => { set("vendor_id", v?.id); set("vendor_name", v?.name); }} />
-                {can(me, "rates") && <label className="f">COST ₹
-                  <input className="in mono" inputMode="decimal" value={cost} placeholder="enter cost" onChange={e => applyCost(e.target.value)} /></label>}
+                <label className="f lf-style">STYLE<input ref={styleInput} className="in mono" value={form.style} onChange={e => set("style", e.target.value.toUpperCase())} placeholder="K5209/59SH" /></label>
+                <label className="f lf-color">COLOR<input className="in mono" value={form.color} onChange={e => set("color", e.target.value.toUpperCase())} placeholder="K/GBN" /></label>
+                <label className="f lf-tk">TK<input className="in mono" value={form.tk} onChange={e => set("tk", e.target.value.toUpperCase())} /></label>
+                <div className="lf-vendor" title="Vendor roll no."><SupplierNo suppliers={vendors} id={form.vendor_id} label="VENDOR" onPick={v => { set("vendor_id", v?.id); set("vendor_name", v?.name); }} /></div>
+                {can(me, "rates") && <label className="f lf-cost">COST ₹
+                  <input className="in mono" inputMode="decimal" value={cost} placeholder="cost" onChange={e => applyCost(e.target.value)} /></label>}
 
-                <label className="f">RATE ₹ {can(me, "rates") && form.cost_code && <span className="xs mut">code {form.cost_code}</span>}
+                <label className="f lf-rate">RATE ₹ {can(me, "rates") && form.cost_code && <span className="xs mut">{form.cost_code}</span>}
                   <MoneyInput className="in hi mono" paise={form.rate} onPaise={v => { set("rate", v); set("price_locked", 1); }} /></label>
-                <label className="f">QTY (pieces per packet — prints as ₹RATE X QTY PCS)<input className="in mono" inputMode="numeric" value={qty} onChange={e => setQty(e.target.value.replace(/\D/g, ""))} /></label>
-                <label className="f">BILL SR. (line no. on the supplier's bill)<input className="in mono" inputMode="numeric" value={billSr} placeholder={String(jobs.length + 1)} onChange={e => setBillSr(e.target.value.replace(/[^0-9A-Za-z\-/]/g, "").slice(0, 9))} /></label>
-                <label className="f">PRINT QTY (labels)<input className="in mono" inputMode="numeric" value={copies} onChange={e => setCopies(e.target.value.replace(/\D/g, ""))}
+                <label className="f lf-num" title="Pieces per packet — prints as ₹RATE X QTY PCS">PCS/PKT<input className="in mono" inputMode="numeric" value={qty} onChange={e => setQty(e.target.value.replace(/\D/g, ""))} /></label>
+                <label className="f lf-num" title="Line no. on the supplier's bill">BILL SR<input className="in mono" inputMode="numeric" value={billSr} placeholder={String(jobs.length + 1)} onChange={e => setBillSr(e.target.value.replace(/[^0-9A-Za-z\-/]/g, "").slice(0, 9))} /></label>
+                <label className="f lf-num" title="How many labels to print — Enter here prints">PRINT<input className="in mono" inputMode="numeric" value={copies} onChange={e => setCopies(e.target.value.replace(/\D/g, ""))}
                   onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); void addJob(true); } }} /></label>
-                <div className="f label-item-photo"><span>Jewellery photo</span><PhotoButton value={form.photo_id} label="Item photo" disabled={queueBusy || printer.busy} onBusyChange={setPhotoBusy} onChange={photo_id => setForm(current => current.id === form.id ? { ...current, photo_id } : current)} /></div>
+                <div className="f label-item-photo lf-photo"><span>PHOTO</span><PhotoButton value={form.photo_id} label="Photo" disabled={queueBusy || printer.busy} onBusyChange={setPhotoBusy} onChange={photo_id => setForm(current => current.id === form.id ? { ...current, photo_id } : current)} /></div>
                 <details className="label-advanced" open={cfg.format === "shop"}><summary>More details</summary><div className="grid g2">
                 <label className="f">MODEL / ARTICLE No.<input className="in mono" value={form.model || ""} onChange={e => set("model", e.target.value.toUpperCase() || undefined)} placeholder="vendor's article no" /></label>
 
