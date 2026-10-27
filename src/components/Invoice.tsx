@@ -85,9 +85,10 @@ export function InvoiceSheet({ b, shop, format, copy, feed = 0 }: { b: Bill; sho
         <div><b>Party:</b> {b.party_name || "Cash"}{b.party_phone ? " · " + b.party_phone : ""}{b.party_gstin ? <><br /><b>GSTIN:</b> {b.party_gstin}</> : null}{b.party_address ? <><br />{b.party_address}</> : null}{taxDoc && pos ? <><br /><b>Place of supply:</b> {pos}-{GST_STATES[pos]}</> : b.party_state ? <><br /><b>State:</b> {b.party_state}</> : null}</div>
       </div>
       <table className={"inv-t" + (thermal && !b.items.some(l => l.pkts) ? " no-pkt" : "")}>
-        {/* the slip (owner, 22 Oct): no "# / Item / Style / Colour" heading, only Pkt, Qty, Rate, Amount */}
+        {/* the slip (owner, 27 Oct, photo of estimate EST/26CUJE0005): the blank heading over the item column read as
+            "item name not written" — the slip now says "#" and "Item" too (replaces the 22 Oct blank heading) */}
         {/* the unit (PCS / PAIR / SET) has its own column before Qty, never a faint word under the item (owner, 22 Oct) */}
-        <thead><tr><th>{thermal ? "" : "#"}</th><th>Box</th><th>{thermal ? "" : full ? "Item / Style / Colour" : "Item"}</th><th className="r">Pkt</th><th>Unit</th><th className="r">Qty</th>{prices && <><th className="r">Rate</th><th className="r">Amount</th></>}</tr></thead>
+        <thead><tr><th>#</th><th>Box</th><th>{full && !thermal ? "Item / Style / Colour" : "Item"}</th><th className="r">Pkt</th><th>Unit</th><th className="r">Qty</th>{prices && <><th className="r">Rate</th><th className="r">Amount</th></>}</tr></thead>
         <tbody>
           {thermal ? boxes.map(box => <ReceiptBox key={box} b={b} box={box} prices={prices} narrow={format === "58mm"} full={full} />) :
           b.items.map((l, i) => (
