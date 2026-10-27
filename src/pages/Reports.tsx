@@ -38,9 +38,11 @@ const tabs = [
 ] as const;
 
 export default function Reports() {
-  const { me, store } = useApp();
+  const { me, store, master } = useApp();
   const stores = useLiveQuery(() => db.stores.filter(s => !s.deleted).toArray(), [], []);
-  const [branch, setBranch] = useState(store);
+  const [picked, setBranch] = useState(store);
+  // companies (owner, 27 Oct): only the master view can report on other companies or all of them together
+  const branch = master ? picked : store;
   const today = localDay(new Date().toISOString());
   const d = new Date();
   const start = localDay(new Date(d.getFullYear(), d.getMonth(), 1).toISOString());
@@ -66,7 +68,7 @@ export default function Reports() {
       }}>Share</button>
     </Head>
     <div className="card pad stack" style={{ marginBottom: 12 }}>
-      <label className="f">Store<select className="in" value={branch} onChange={e => setBranch(e.target.value)}><option value="all">All stores</option>{stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+      {master && <label className="f">Company<select className="in" value={branch} onChange={e => setBranch(e.target.value)}><option value="all">All companies</option>{stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>}
       <div className="grid g3">
         <label className="f" title="Every amount on this page is divided by this number. 1 shows the real figures.">Factor (÷)<input className="in mono" inputMode="decimal" placeholder="1" value={factor || String(savedDivisor)} onChange={e => setFactor(e.target.value)} onBlur={() => { const n = Number(factor); if (factor && Number.isFinite(n) && n > 0) void setSetting("report_divisor", n); setFactor(""); }} /></label>
         <label className="f">From<input className="in" type="date" value={from} max={to} onChange={e => e.target.value && setFrom(e.target.value)} /></label>
