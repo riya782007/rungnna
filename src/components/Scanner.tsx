@@ -425,7 +425,7 @@ export function useScannerGun(
    Real typing is slower than maxGapMs and is never touched. */
 export function useScanOnlyIn(
   target: RefObject<HTMLElement | null>,
-  onReject: (code: string) => void,
+  onReject: (code: string, from: Element | null) => void,
   opts: { enabled?: boolean; minLength?: number; maxGapMs?: number } = {},
 ) {
   const cb = useRef(onReject); cb.current = onReject;
@@ -436,7 +436,7 @@ export function useScanOnlyIn(
   useEffect(() => {
     if (!enabled) return;
     type Snap = { el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement; value: string; start: number | null; end: number | null };
-    let lastAt = 0, first = "", burst = "", timer: any = 0;
+    let lastAt = 0, first = "", burst = "", timer: any = 0, from: Element | null = null;
     let snap: Snap | null = null;
 
     const snapshot = (el: EventTarget | null): Snap | null => {
@@ -458,8 +458,8 @@ export function useScanOnlyIn(
     };
     const finish = () => {
       clearTimeout(timer);
-      const code = burst; burst = ""; first = ""; snap = null;
-      if (code.length >= minLength) cb.current(code);
+      const code = burst, origin = from; burst = ""; first = ""; snap = null; from = null;
+      if (code.length >= minLength) cb.current(code, origin);
     };
     const block = (e: KeyboardEvent) => { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); };
 
@@ -487,6 +487,7 @@ export function useScanOnlyIn(
       // Second key within a few ms: this is a scanner, not a person.
       block(e);
       restore(snap);
+      from = snap?.el || (e.target instanceof Element ? e.target : null);
       burst = first + e.key; first = "";
       clearTimeout(timer); timer = setTimeout(finish, 80);
     };

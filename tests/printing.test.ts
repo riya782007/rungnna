@@ -26,7 +26,7 @@ describe("thermal invoices", () => {
     const b = { ...newBill("o", DEFAULT_SHOP), items: [manualLine({ item: "BALI", style: "K5209", color: "G", unit: "PAIR", hsn: "7117", qty: "4", rate: "100", box: 1 })] };
     for (const format of ["80mm", "58mm"] as const) {
       const html = renderToStaticMarkup(createElement(InvoiceSheet, { b, shop: DEFAULT_SHOP, format }));
-      expect(html).toContain("BALI"); expect(html).toContain("PAIR"); expect(html).toContain("Box No.:"); expect(html).toContain("Box qty:"); expect(html).toContain("40.00");
+      expect(html).toContain("BALI"); expect(html).toContain("PAIR"); expect(html).toContain("Box No.: 1 · Qty: 4"); expect(html).not.toContain("Box qty:"); expect(html).toContain("40.00");
     }
   });
   it("waits for fonts, decoded images and two painted frames", async () => {
