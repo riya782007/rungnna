@@ -129,8 +129,10 @@ export function thermalPage(width: number, heightPx: number) {
   // +4 mm for the 2 mm margins and +10 mm slack: the slip is measured with screen styles, and the print styles
   // add a few mm (owner's photo, 26 Oct: the Balance line was still in the printer when the slip was torn).
   // 27 Oct: +14 mm left long blank gaps under every slip; +8 mm (2 mm margins + 4 mm) still fits the print styles
-  const height = Math.max(30, Math.ceil(heightPx * 25.4 / 96 + 8));
-  return `@page rj-receipt{size:${width}mm ${height}mm;margin:2mm 1mm}`;
+  // Long custom sheets are scaled down by some drivers. Paginate at a supported
+  // length while retaining the physical roll width and readable font sizes.
+  const height = Math.min(280, Math.max(30, Math.ceil(heightPx * 25.4 / 96 + 8)));
+  return `@page{size:${width}mm ${height}mm;margin:2mm 1mm}@page rj-receipt{size:${width}mm ${height}mm;margin:2mm 1mm}`;
 }
 
 /* Some mobile browsers return from print() before the preview has captured the DOM. */

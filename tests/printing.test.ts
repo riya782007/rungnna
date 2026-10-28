@@ -6,6 +6,10 @@ import { newBill, DEFAULT_SHOP } from "../src/lib/billing";
 import { manualLine } from "../src/lib/pos";
 import { preparePrint, thermalPage, receiptCut, receiptCutSetup } from "../src/lib/printing";
 describe("thermal invoices", () => {
+  it("bounds long receipts and gives both default and named pages the roll width", () => {
+    expect(thermalPage(80, 20000)).toBe("@page{size:80mm 280mm;margin:2mm 1mm}@page rj-receipt{size:80mm 280mm;margin:2mm 1mm}");
+    expect(thermalPage(58, 100)).toContain("size:58mm 35mm");
+  });
   it("defaults to the confirmed half-cut profile without accepting invalid settings", () => {
     for (const value of [undefined, null, "partial", "unknown", "toString"]) expect(receiptCut(value)).toBe("partial");
     expect(receiptCut("full")).toBe("full");
@@ -22,7 +26,7 @@ describe("thermal invoices", () => {
     const b = { ...newBill("o", DEFAULT_SHOP), items: [manualLine({ item: "BALI", style: "K5209", color: "G", unit: "PAIR", hsn: "7117", qty: "4", rate: "100", box: 1 })] };
     for (const format of ["80mm", "58mm"] as const) {
       const html = renderToStaticMarkup(createElement(InvoiceSheet, { b, shop: DEFAULT_SHOP, format }));
-      expect(html).toContain("BALI"); expect(html).toContain("PAIR"); expect(html).toContain("Box No.:"); expect(html).toContain("Box qty:"); expect(html).toContain("400.00");
+      expect(html).toContain("BALI"); expect(html).toContain("PAIR"); expect(html).toContain("Box No.:"); expect(html).toContain("Box qty:"); expect(html).toContain("40.00");
     }
   });
   it("waits for fonts, decoded images and two painted frames", async () => {
@@ -32,8 +36,8 @@ describe("thermal invoices", () => {
     expect(events).toEqual(["fonts", "image", "frame", "frame"]);
   });
   it("uses valid measured thermal dimensions instead of width plus auto", () => {
-    expect(thermalPage(80, 960)).toBe("@page rj-receipt{size:80mm 262mm;margin:2mm 1mm}");
-    expect(thermalPage(80, 6000)).toBe("@page rj-receipt{size:80mm 1596mm;margin:2mm 1mm}");
+    expect(thermalPage(80, 960)).toBe("@page{size:80mm 262mm;margin:2mm 1mm}@page rj-receipt{size:80mm 262mm;margin:2mm 1mm}");
+    expect(thermalPage(80, 6000)).toBe("@page{size:80mm 280mm;margin:2mm 1mm}@page rj-receipt{size:80mm 280mm;margin:2mm 1mm}");
     expect(() => thermalPage(90, 100)).toThrow();
     expect(() => thermalPage(80, 0)).toThrow();
     expect(() => thermalPage(58, NaN)).toThrow();

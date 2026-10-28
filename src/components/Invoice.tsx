@@ -6,7 +6,7 @@ import { createPortal } from "react-dom";
 import type { Bill } from "../lib/db";
 import { due, docName, taxSummary, type Shop } from "../lib/billing";
 import { placeCode, GST_STATES } from "../lib/states";
-import { billAmount } from "../lib/format";
+import { documentAmount, documentDiscount } from "../lib/estimate-display";
 import { qrSvg } from "../lib/qr";
 import { toast } from "../lib/app";
 import { billNarration } from "../lib/payment-narration";
@@ -36,11 +36,12 @@ export function inWords(paise: number) {
 export const COPY_NAMES = ["ORIGINAL FOR RECIPIENT", "DUPLICATE FOR TRANSPORTER", "TRIPLICATE FOR SUPPLIER"];
 
 export function InvoiceSheet({ b, shop, format, copy, feed = 0 }: { b: Bill; shop: Shop; format: PrintFormat; copy?: string; feed?: number }) {
+  const billAmount = (value: number) => documentAmount(b, value);
   const d = due(b);
   const money = b.bill_type !== "challan" && b.bill_type !== "return"; // no "pay now" on a challan or credit note
-  const upi = money && shop.upi && d > 0 ? qrSvg(`upi://pay?pa=${shop.upi}&pn=${encodeURIComponent(shop.name)}&am=${(d / 100).toFixed(2)}&cu=INR&tn=${encodeURIComponent(b.no)}`).svg : "";
+  const upi = b.bill_type !== "estimate" && money && shop.upi && d > 0 ? qrSvg(`upi://pay?pa=${shop.upi}&pn=${encodeURIComponent(shop.name)}&am=${(d / 100).toFixed(2)}&cu=INR&tn=${encodeURIComponent(b.no)}`).svg : "";
   const prices = format !== "packing";
-  const narration = prices ? billNarration(b) : b.remarks;
+  const narration = prices ? billNarration(b, billAmount) : b.remarks;
   const estimate = prices && b.bill_type === "estimate";
   const title = format === "packing" ? "PACKING SLIP" : docName(b).toUpperCase();
   const boxes = [...new Set(b.items.map(l => l.box_no))].sort((a, z) => a - z);
@@ -93,9 +94,9 @@ export function InvoiceSheet({ b, shop, format, copy, feed = 0 }: { b: Bill; sho
           {thermal ? boxes.map(box => <ReceiptBox key={box} b={b} box={box} prices={prices} narrow={format === "58mm"} full={full} />) :
           b.items.map((l, i) => (
             <tr key={l.id}><td>{i + 1}</td><td>{l.box_no}</td>
-              <td><b>{l.item}</b>{full && <> {l.style} <span className="inv-c">{l.color}</span></>}{l.disc && prices ? <span className="inv-c"> · disc {l.disc}</span> : null}</td>
+              <td><b>{l.item}</b>{full && <> {l.style} <span className="inv-c">{l.color}</span></>}{l.disc && prices ? <span className="inv-c"> · disc {documentDiscount(b, l.disc)}</span> : null}</td>
               <td className="r">{l.pkts ? `${l.pkts}×${l.pack}` : ""}</td><td>{l.type || "PCS"}</td><td className="r">{l.qty}</td>
-              {prices && <><td className="r">{(l.rate / 100).toFixed(2)}</td><td className="r">{(l.amount / 100).toFixed(2)}</td></>}</tr>))}
+              {prices && <><td className="r">{documentAmount(b, l.rate)}</td><td className="r">{documentAmount(b, l.amount)}</td></>}</tr>))}
         </tbody>
       </table>
       <div className="inv-foot">
@@ -212,6 +213,7 @@ export function BagTag({ b, shop, n, width = 80, feed = 0 }: { b: Bill; shop: Sh
 
 /** The slip the billing counter hands to the cash counter: who, which bill, how much to collect. */
 export function CashSlip({ b, shop, width = 80, feed = 0 }: { b: Bill; shop: Shop; width?: number; feed?: number }) {
+  const billAmount = (value: number) => documentAmount(b, value);
   const d = due(b);
   return <RollSlipSheet width={width} feed={feed} className="slip-cash">
     <div className="slip-head"><span>{slipShop(b, shop)}</span><span>CASH COUNTER</span></div>
@@ -232,7 +234,7 @@ function ReceiptBox({ b, box, prices, narrow, full }: { b: Bill; box: number; pr
   const lines = b.items.filter(l => l.box_no === box);
   const columns = prices ? narrow ? 5 : 7 : narrow ? 3 : 5;   // the columns that show (Box is hidden on the roll; # and Pkt on 58 mm)
   return <><tr className="receipt-box"><td colSpan={columns}>Box No.: {box}</td></tr>
-    {lines.map(l => <tr key={l.id}><td>{b.items.indexOf(l) + 1}</td><td>{box}</td><td><b>{l.item}</b>{full && (l.style || l.color) ? <div className="inv-c">{[l.style, l.color].filter(Boolean).join(" · ")}</div> : null}{l.disc && prices ? <div className="inv-c">disc {l.disc}</div> : null}</td><td className="r">{l.pkts ? `${l.pkts}×${l.pack}` : ""}</td><td>{l.type || "PCS"}</td><td className="r">{l.qty}</td>{prices && <><td className="r">{(l.rate / 100).toFixed(2)}</td><td className="r">{(l.amount / 100).toFixed(2)}</td></>}</tr>)}
+    {lines.map(l => <tr key={l.id}><td>{b.items.indexOf(l) + 1}</td><td>{box}</td><td><b>{l.item}</b>{full && (l.style || l.color) ? <div className="inv-c">{[l.style, l.color].filter(Boolean).join(" · ")}</div> : null}{l.disc && prices ? <div className="inv-c">disc {documentDiscount(b, l.disc)}</div> : null}</td><td className="r">{l.pkts ? `${l.pkts}×${l.pack}` : ""}</td><td>{l.type || "PCS"}</td><td className="r">{l.qty}</td>{prices && <><td className="r">{documentAmount(b, l.rate)}</td><td className="r">{documentAmount(b, l.amount)}</td></>}</tr>)}
     <tr className="receipt-box"><td colSpan={columns}>Box qty: {lines.reduce((n, l) => n + l.qty, 0)}</td></tr></>;
 }
 

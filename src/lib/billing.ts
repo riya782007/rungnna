@@ -1,3 +1,4 @@
+import { documentAmount, documentDiscount } from "./estimate-display";
 import { allocate } from "./allocate";
 import { billNarration } from "./payment-narration";
 import { trackCustomLines, unassignedRack } from "./stock-adjustment";
@@ -404,6 +405,7 @@ export async function partyDue(party_id: string) {
 /* ---------------- sharing ---------------- */
 export const normPhone = (p: string) => { const d = (p || "").replace(/\D/g, ""); return d.length === 10 ? "91" + d : d; };
 export function billText(b: Bill, shop: Shop) {
+  const billAmount = (value: number) => documentAmount(b, value);
   const L = [`*${shop.name}*`, `${docName(b)} ${b.no}${b.return_of_no ? " (against " + b.return_of_no + ")" : ""}`, new Date(b.at).toLocaleString("en-IN"), ""];
   if (b.bill_type === "estimate") L.push("APPROVAL CHALLAN · SALE NOT EXECUTED · बिक्री निष्पादित नहीं", "");
   b.items.forEach((l, i) => L.push(`${i + 1}. ${[l.item, l.style, l.color].filter(Boolean).join(" ")} — ${l.pkts ? l.pkts + "×" + l.pack + "=" : ""}${l.qty} × ${billAmount(l.rate)} = ${billAmount(l.amount)}`));
@@ -419,8 +421,8 @@ export function billText(b: Bill, shop: Shop) {
   const d = isSale(b) ? due(b) : 0; if (d > 0) L.push(`Balance due: ${billAmount(d)}`);
   if (isSale(b) && d < 0) L.push(`Excess received: ${billAmount(-d)}`);
   if (isSale(b) && b.prev_due) L.push(`Previous balance: ${billAmount(b.prev_due)}`, `Total due: ${billAmount(b.prev_due + d)}`);
-  if (billNarration(b)) L.push(`Remarks: ${billNarration(b)}`);
-  if (shop.upi && d > 0) L.push(`Pay by UPI: upi://pay?pa=${encodeURIComponent(shop.upi)}&pn=${encodeURIComponent(shop.name)}&am=${(d / 100).toFixed(2)}&cu=INR`);
+  if (billNarration(b, billAmount)) L.push(`Remarks: ${billNarration(b, billAmount)}`);
+  if (b.bill_type !== "estimate" && shop.upi && d > 0) L.push(`Pay by UPI: upi://pay?pa=${encodeURIComponent(shop.upi)}&pn=${encodeURIComponent(shop.name)}&am=${(d / 100).toFixed(2)}&cu=INR`);
   L.push("", "Thank you! 🙏");
   return L.join("\n");
 }
@@ -431,6 +433,7 @@ export function waLink(phone: string, text: string) {
 
 /* A clean receipt picture drawn on a canvas — shares straight into WhatsApp as an image, no server needed. */
 export async function billImage(b: Bill, shop: Shop): Promise<Blob> {
+  const billAmount = (value: number) => documentAmount(b, value);
   const W = 720, pad = 32, right = W - pad;
   const c = document.createElement("canvas"); c.width = W;
   const g = c.getContext("2d")!;
@@ -481,7 +484,7 @@ export async function billImage(b: Bill, shop: Shop): Promise<Blob> {
     const firstY = y;
     block((i + 1) + ". " + [l.item, l.style].filter(Boolean).join(" · "), "600 18px sans-serif", 25, "#241B2E", W - 2 * pad - 170);
     text(billAmount(l.amount), right, firstY, "600 18px sans-serif", "#241B2E", "right");
-    block([l.color, l.type, l.pkts ? l.pkts + " pkt × " + l.pack + " = " + l.qty : l.qty + " pcs", "rate " + billAmount(l.rate), "Box " + l.box_no, l.disc ? "disc " + l.disc : ""].filter(Boolean).join(" · "), "15px sans-serif", 22);
+    block([l.color, l.type, l.pkts ? l.pkts + " pkt × " + l.pack + " = " + l.qty : l.qty + " pcs", "rate " + billAmount(l.rate), "Box " + l.box_no, l.disc ? "disc " + documentDiscount(b, l.disc) : ""].filter(Boolean).join(" · "), "15px sans-serif", 22);
     y += 10;
   }
   rule(y); y += 30;
@@ -502,7 +505,7 @@ export async function billImage(b: Bill, shop: Shop): Promise<Blob> {
   if (d > 0) row("Balance due", d, true);
   if (isSale(b) && d < 0) row("Excess received", -d);
   if (isSale(b) && b.prev_due) { row("Previous balance", b.prev_due); row("Total due", b.prev_due + d, true); }
-  if (billNarration(b)) { y += 10; block("Remarks: " + billNarration(b)); }
+  if (billNarration(b, billAmount)) { y += 10; block("Remarks: " + billNarration(b, billAmount)); }
   if (shop.bank) block("Bank: " + shop.bank);
   y += 16; block("Thank you for shopping with us", "italic 16px Georgia", 24, "#A07E2E");
   c.height = Math.ceil(y + pad);
