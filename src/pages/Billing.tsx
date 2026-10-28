@@ -400,7 +400,14 @@ export default function Billing({ args }: { args: string[] }) {
      else is thrown away — the field is put back as it was — and the error sound
      plays, because the biller listens rather than watches the screen. The scan box
      then takes the cursor so the next scan of the same label goes in. */
-  useScanOnlyIn(scanRef, () => {
+  useScanOnlyIn(scanRef, (code, from) => {
+    // Owner, 28 Oct: the cursor now waits on Qty in the hand-entry row after Add; a label scanned there is a
+    // scan, not typing — it goes onto the bill (the row is put back as it was) and the cursor moves to the scan box
+    if (from?.closest("#pos-item-entry") && !document.querySelector(".modal,dialog[open]")) {
+      scanRef.current?.focus({ preventScroll: true });
+      void onCodeRef.current(code);
+      return;
+    }
     beep(false);
     toast("Not added — scan only in the scan box. Scan this label again.", true);
     if (!document.querySelector(".modal,dialog[open]")) scanRef.current?.focus({ preventScroll: true });
@@ -637,7 +644,7 @@ export default function Billing({ args }: { args: string[] }) {
   const boxLines = (n: number) => boxLineRange(t.items.map((l, i) => l.box_no === n ? i + 1 : 0).filter(Boolean));
   const balance = due(t);
   const lastScan = t.items.find(l => l.id === lastScanId);
-  const itemEditor = <Suspense fallback={<div className="pos-entry-loading" role="status">Loading items…</div>}><ManualItems key={b.id} inline persistent focusRequest={entryFocus} products={products} box={box} level={b.price_level || "wholesale"} canRates={can(me, "billing.rates")} codeDiv={cd} onClose={() => {}} onAdded={() => scanRef.current?.focus({ preventScroll: true })}
+  const itemEditor = <Suspense fallback={<div className="pos-entry-loading" role="status">Loading items…</div>}><ManualItems key={b.id} inline persistent focusRequest={entryFocus} products={products} box={box} level={b.price_level || "wholesale"} canRates={can(me, "billing.rates")} codeDiv={cd} onClose={() => {}}
     onProduct={(p, count, pieces, rate) => {
       void learnFromPick(p).then(ok => ok && toast(`Learnt: this sticker now scans as ${label(p)}`));
       const line = fixLine({ ...lineFrom(p, box, pieces ? 0 : count, b.price_level || "wholesale"), ...(pieces ? { qty: count, pkts: 0 } : {}), rate });

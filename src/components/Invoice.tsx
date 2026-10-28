@@ -233,9 +233,11 @@ export function CashSlip({ b, shop, width = 80, feed = 0 }: { b: Bill; shop: Sho
 function ReceiptBox({ b, box, prices, narrow, full }: { b: Bill; box: number; prices: boolean; narrow: boolean; full: boolean }) {
   const lines = b.items.filter(l => l.box_no === box);
   const columns = prices ? narrow ? 5 : 7 : narrow ? 3 : 5;   // the columns that show (Box is hidden on the roll; # and Pkt on 58 mm)
-  return <><tr className="receipt-box"><td colSpan={columns}>Box No.: {box}</td></tr>
+  /* Owner, 28 Oct (photo of a 117-line estimate): "Box No." above and "Box qty" below took two lines per box. The
+     box's quantity now sits beside its number on the one line above it. */
+  return <><tr className="receipt-box"><td colSpan={columns}>Box No.: {box} · Qty: {lines.reduce((n, l) => n + l.qty, 0)}</td></tr>
     {lines.map(l => <tr key={l.id}><td>{b.items.indexOf(l) + 1}</td><td>{box}</td><td><b>{l.item}</b>{full && (l.style || l.color) ? <div className="inv-c">{[l.style, l.color].filter(Boolean).join(" · ")}</div> : null}{l.disc && prices ? <div className="inv-c">disc {documentDiscount(b, l.disc)}</div> : null}</td><td className="r">{l.pkts ? `${l.pkts}×${l.pack}` : ""}</td><td>{l.type || "PCS"}</td><td className="r">{l.qty}</td>{prices && <><td className="r">{documentAmount(b, l.rate)}</td><td className="r">{documentAmount(b, l.amount)}</td></>}</tr>)}
-    <tr className="receipt-box"><td colSpan={columns}>Box qty: {lines.reduce((n, l) => n + l.qty, 0)}</td></tr></>;
+</>;
 }
 
 /** "RUNGNNA JEWELLERY & CO" → "RJ": what an estimate shows instead of the shop's name. */

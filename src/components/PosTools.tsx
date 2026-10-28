@@ -22,7 +22,7 @@ export function ManualItems({ products, box, level, canRates, onProduct, onCusto
   const [mode, setMode] = useState("custom"), [q, setQ] = useState(""), [chosen, setChosen] = useState<Product | null>(null);
   const [qty, setQty] = useState("1"), [pieces, setPieces] = useState(false), [rate, setRate] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false);
   const [item, setItem] = useState(""), [style, setStyle] = useState(""), [color, setColor] = useState(""), [unit, setUnit] = useState("PCS"), [hsn, setHsn] = useState("");
-  const search = useRef<HTMLInputElement>(null);
+  const search = useRef<HTMLInputElement>(null), qtyRef = useRef<HTMLInputElement>(null);
   useEffect(() => { if (focusRequest) { setMode("custom"); setChosen(null); if (mode !== "custom") setRate(""); setError(""); } }, [focusRequest]);
   useEffect(() => { if (focusRequest && mode === "custom") search.current?.focus({ preventScroll: true }); }, [focusRequest, mode]);
   const hits = useMemo(() => { const words = q.trim().toUpperCase().split(/\s+/); return products.filter(p => words.every(w => [p.item, p.item_code, p.code, p.style, p.color].join(" ").toUpperCase().includes(w))).slice(0, 30); }, [q, products]);
@@ -36,9 +36,18 @@ export function ManualItems({ products, box, level, canRates, onProduct, onCusto
         onProduct(chosen, count, pieces, canRates || !priceFor(chosen, level) ? fromCode(moneyInput(rate), codeDiv) : priceFor(chosen, level));
       }
       if (!next && !persistent) return onClose();
+      /* Owner, 28 Oct: "4–5 earrings by hand — every time Add item, the name, the qty and the rate again". On the
+         counter row the name, unit, style, colour and rate stay after Add; the cursor is on Qty (selected), so the
+         next piece is just its qty (Tab → rate if it differs) and Enter. ✕ clears the row for a different item.
+         A label scanned while the cursor is here still goes onto the bill (Billing routes it to the scan box). */
+      if (persistent) {
+        setQty("1"); setError("");
+        requestAnimationFrame(() => { qtyRef.current?.focus({ preventScroll: true }); qtyRef.current?.select(); });
+        onAdded?.();
+        return;
+      }
       setChosen(null); setQ(""); setItem(""); setRate(""); setQty("1"); setStyle(""); setColor(""); setHsn(""); setPieces(false); setError("");
-      // counter, 27 Oct: after a typed line is added the cursor goes back to the scan box, so the next label scans at once
-      if (persistent && onAdded) onAdded(); else search.current?.focus({ preventScroll: true });
+      search.current?.focus({ preventScroll: true });
     } catch (e: any) { beep(false); setError(e.message); }
   };
   /* Counter screen: one always-open row — name, unit, style, colour, qty, rate, add.
@@ -50,9 +59,10 @@ export function ManualItems({ products, box, level, canRates, onProduct, onCusto
       <select className="in" aria-label="Unit" value={unit} onChange={e => setUnit(e.target.value)}>{UNITS.map(u => <option key={u}>{u}</option>)}</select>
       <input className="in" aria-label="Style" placeholder="Style" value={style} onChange={e => setStyle(e.target.value)} />
       <input className="in" aria-label="Colour" placeholder="Colour" value={color} onChange={e => setColor(e.target.value)} />
-      <input className="in r" aria-label="Quantity" placeholder="Qty" type="number" min={1} step={1} value={qty} onChange={e => setQty(e.target.value)} />
+      <input ref={qtyRef} className="in r" aria-label="Quantity" placeholder="Qty" type="number" min={1} step={1} value={qty} onChange={e => setQty(e.target.value)} onFocus={e => e.currentTarget.select()} />
       <input className="in r" aria-label={"Rate per " + unit} placeholder={"Rate" + rateMark} title={codeDiv ? `Rate in the trade code (÷${codeDiv}) — saved as the real rate` : undefined} inputMode="decimal" value={rate} onChange={e => setRate(e.target.value)} />
       <button className="btn p" title="Tracked in stock when saved; zero stock can go negative"><Plus size={16} />Add</button>
+      {(item || style || color || rate) && <button type="button" className="btn sm" aria-label="Clear the row for a different item" title="Clear: a different item" onClick={() => { setItem(""); setStyle(""); setColor(""); setRate(""); setQty("1"); setUnit("PCS"); setError(""); search.current?.focus({ preventScroll: true }); }}>✕</button>}
     </form>
     {error && <div role="alert" className="note warn sm">{error}</div>}
   </section>;
