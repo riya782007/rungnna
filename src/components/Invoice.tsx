@@ -164,7 +164,7 @@ export function PrintBill(props: { b: Bill; shop: Shop; format: PrintFormat; onD
   useEffect(() => {
     getSetting<number>("invoice_copies", 1).then(n => setCopies(Number(n) || 1)).catch(() => setCopies(1));
     Promise.all([getSetting<number>("receipt_feed", DEFAULT_RECEIPT_FEED), getSetting("receipt_cut", "partial")])
-      .then(([n, cut]) => setFeed(slipFeed(receiptFeed(n), receiptCut(cut)))).catch(() => setFeed(0));
+      .then(([n, cut]) => setFeed(slipFeed(receiptFeed(n), receiptCut(cut)))).catch(() => setFeed(DEFAULT_RECEIPT_FEED));
   }, []);
   return copies === null || feed === null ? null : <PrintBillNow {...props} copies={copies} feed={feed} />;
 }

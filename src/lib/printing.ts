@@ -25,9 +25,11 @@ export function receiptFeed(value: unknown): number {
   const n = Number(value);
   return value !== null && value !== "" && (RECEIPT_FEEDS as readonly number[]).includes(n) ? n : DEFAULT_RECEIPT_FEED;
 }
-/* Owner, 27 Oct (photo of estimate + bag tag + cash slip): long blank gaps between the slips. An automatic cutter
-   feeds the paper to its blade by itself, so the blank paper is added only for a manual tear-off. */
-export const slipFeed = (feed: number, cut: ReceiptCut) => (cut === "manual" ? feed : 0);
+/* 27 Oct this fed no paper when the cutter was set to automatic, to shorten the gaps between slips. Owner, 28 Oct
+   (photo): the printer is not cutting by itself, and the last lines (Total quantity) stayed inside behind the cutter,
+   so the tear went through them. Whatever the cutter setting, every slip now ends with the chosen blank paper
+   (Settings › Printing › Blank paper after the bill, 15 mm unless changed), so it always comes fully out. */
+export const slipFeed = (feed: number, _cut?: ReceiptCut) => feed;
 
 export async function printDocument(source: Document, frame: () => Promise<void>, onDone = () => {}, cancelled = () => false) {
   const content = source.getElementById("printroot");

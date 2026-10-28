@@ -24,9 +24,10 @@ describe("a new estimate starts with the shop's usual discount", () => {
 });
 
 describe("slips on the roll: no long blank gap with an automatic cutter", () => {
-  it("adds blank paper only for a manual tear-off", () => {
-    expect(slipFeed(15, "partial")).toBe(0);
-    expect(slipFeed(15, "full")).toBe(0);
+  it("always ends a slip with the chosen blank paper, so the last lines come out past the cutter (owner, 28 Oct)", () => {
+    expect(slipFeed(15, "partial")).toBe(15);
+    expect(slipFeed(15, "full")).toBe(15);
     expect(slipFeed(15, "manual")).toBe(15);
+    expect(slipFeed(0, "partial")).toBe(0);
   });
 });
