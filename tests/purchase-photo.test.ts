@@ -229,3 +229,12 @@ describe("sticker preview before approval", () => {
     expect(() => draftLabelProducts([{ ...row, cost: "", rate: "" }], "owner", DEFAULT_RULE)).not.toThrow();
   });
 });
+
+describe("owner, 29 Oct: packed in 6s, 47 pieces on the bill", () => {
+  it("a typed count of one per packet still gives the odd packet its own sticker", async () => {
+    const { validatePhotoRows } = await import("../src/lib/purchase-photo");
+    const base = { item: "H CLUTCHER", style: "HC-30", color: "", unit: "PCS", hsn: "", qty: "47", pack: "6", cost: "30", rate: "74" } as any;
+    expect(validatePhotoRows([{ ...base, stickers: "8" }])[0].print_qty).toBeUndefined();   // 7 × X6 + 1 × X5
+    expect(validatePhotoRows([{ ...base, stickers: "16" }])[0].print_qty).toBe(16);        // two on every packet: as typed
+  });
+});

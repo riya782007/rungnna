@@ -16,6 +16,7 @@ import { RackPicker } from "../components/RackPicker";
 import { SupplierNo } from "../components/SupplierNo";
 import { WedgeInput } from "../components/Scanner";
 import { useApp, toast, go as navigate } from "../lib/app";
+import { entryReference, checkedEntryReference } from "../lib/entry-reference";
 import { can, roleName } from "../lib/roles";
 import { inStore } from "../lib/scope";
 import { purchaseLabelJobs, productForLabel } from "../lib/purchase-labels";
@@ -196,6 +197,11 @@ export default function Labels({ args }: { args: string[] }) {
      hand here it starts 1, 2, 3 — the line and the bill's serial don't match". He types the bill's Sr. once; it
      goes on the sticker and moves to the next number by itself. */
   const [billSr, setBillSr] = useState("");
+  /* Owner, 29 Oct (voice): "I typed the reference code in manual, and it still didn't print". The REF box under More
+     details is the old software's QR field; the sticker's Reference line is this one. It starts as today's code
+     (his initial + date, like a bill's stickers) and is remembered for the next stickers. */
+  const [refCode, setRefCode] = useState("");
+  useEffect(() => { void getSetting<string>("label_ref_code", "").then(v => setRefCode(v || entryReference(me?.name || "K"))); }, []);
   const queueLock = useRef(false);
   const [queueBusy, setQueueBusy] = useState(false);
   const [printError, setPrintError] = useState("");
@@ -252,7 +258,11 @@ export default function Labels({ args }: { args: string[] }) {
   const set = (k: keyof Product, v: any) => setForm(f => ({ ...f, [k]: v }));
 
   const addJob = async (print = false) => {
-    if (queueLock.current || printer.busy || photoBusy) return;
+    if (queueLock.current || photoBusy) return;
+    // a press always answers (owner, 29 Oct: "the print button doesn't work") — never a silent nothing
+    if (printer.busy) { toast("The last stickers are still going to the printer — press again in a moment", true); return; }
+    let ref = "";
+    try { ref = checkedEntryReference(refCode); } catch (e: any) { toast(e.message, true); return; }
     if (!form.item && !form.style) { toast("Fill ITEM or STYLE first", true); return; }
     if (addStock && !loc) return toast("Choose the rack the new stock goes to", true);
     const n = Number(copies), packet = Number(qty);
@@ -282,13 +292,15 @@ export default function Labels({ args }: { args: string[] }) {
     return saved;
     });
     if (!saved) return;
-    const job = { p: saved, qtyOnLabel: Math.max(1, parseInt(qty) || 1), copies: n, line: billSr.trim() || jobs.length + 1 };
+    const job = { p: { ...saved, entry_code: ref || undefined }, qtyOnLabel: Math.max(1, parseInt(qty) || 1), copies: n, line: billSr.trim() || jobs.length + 1 };
     if (/^\d{1,4}$/.test(billSr.trim())) setBillSr(String(Number(billSr.trim()) + 1));
     setLastJob(job);
     if (print) showStart(printer.start(expandJobs([job]))); else setJobs(j => [...j, job]);
     toast(`${n} labels ${print ? "prepared" : "queued"} · ${label(saved)}`);
-    setForm({ ...blankProduct(me?.id || ""), item: form.item, type: form.type, color: form.color, vendor_id: form.vendor_id, vendor_name: form.vendor_name }); setCost("");
-    styleInput.current?.focus({ preventScroll: true });
+    // owner, 29 Oct: "I have to type the style again and again" — it stays, selected, so Enter prints it again and
+    // typing a new style simply replaces it
+    setForm({ ...blankProduct(me?.id || ""), item: form.item, type: form.type, color: form.color, style: form.style, vendor_id: form.vendor_id, vendor_name: form.vendor_name }); setCost("");
+    styleInput.current?.focus({ preventScroll: true }); styleInput.current?.select();
     } catch (e: any) { setPrintError(e.message || "Could not prepare labels"); toast(e.message || "Could not prepare labels", true); }
     finally { queueLock.current = false; setQueueBusy(false); }
   };
@@ -361,6 +373,7 @@ export default function Labels({ args }: { args: string[] }) {
                 <label className="f lf-type">TYPE
                   <select aria-label="TYPE" className="in" value={form.type} onChange={e => set("type", e.target.value)}>{DEFAULT_TYPES.map(t => <option key={t}>{t}</option>)}</select></label>
                 <label className="f lf-style">STYLE<input ref={styleInput} className="in mono" value={form.style} onChange={e => set("style", e.target.value.toUpperCase())} placeholder="K5209/59SH" /></label>
+                <label className="f lf-ref" title="Printed on the sticker's Reference line. Remembered for the next stickers.">REF CODE<input className="in mono" value={refCode} maxLength={24} onChange={e => { const v = e.target.value.toUpperCase(); setRefCode(v); void setSetting("label_ref_code", v); }} placeholder="K291026" /></label>
                 <label className="f lf-color">COLOR<input className="in mono" value={form.color} onChange={e => set("color", e.target.value.toUpperCase())} placeholder="K/GBN" /></label>
                 <label className="f lf-tk">TK<input className="in mono" value={form.tk} onChange={e => set("tk", e.target.value.toUpperCase())} /></label>
                 <div className="lf-vendor" title="Vendor roll no."><SupplierNo suppliers={vendors} id={form.vendor_id} label="VENDOR" onPick={v => { set("vendor_id", v?.id); set("vendor_name", v?.name); }} /></div>
@@ -384,7 +397,7 @@ export default function Labels({ args }: { args: string[] }) {
               </div>
               <label className="row sm"><input type="checkbox" checked={addStock} onChange={e => setAddStock(e.target.checked)} /> These are new packets — also add them to stock</label>
               {addStock && <RackPicker value={loc} onChange={setLoc} label="Into rack" />}
-              <div className="xs mut">Enter in PRINT QTY prints this item. Item, type, colour, supplier and packet size stay ready for the next style.</div>
+              <div className="xs mut">Enter in PRINT prints. Item, style, ref code, colour, supplier and packet stay ready — type over the style for the next one.</div>
             </div>
           </div>
           {jobs.length > 0 && (

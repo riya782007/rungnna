@@ -30,7 +30,9 @@ import { checkBill, checkSummary, matchSupplier, fallbackBillNo, type LineFix } 
 import { newParty } from "../lib/billing";
 import { UNITS, UNIT_RE } from "../lib/products";
 import { isPdf, expandPdfs, splitPage, joinParts, srSpan, repeatedCodes, acceptProof } from "../lib/pdf-pages";
-import { CartonPrint } from "./CartonPrint";
+import { CartonPrint, type LineFix as SavedLineFix } from "./CartonPrint";
+import { saveProduct } from "../lib/products";
+import { evenRate } from "../lib/pricing";
 import { QuickLineBox, type QuickAdd } from "./QuickLineBox";
 import { queueForShop, doneAtShop, useShopQueue, isPhoneLike, type RemotePrint } from "../lib/print-queue";
 
@@ -44,7 +46,9 @@ const FIELDS = ["sr", "item", "style", "entry_code", "qty", "cost", "rate", "pac
 type Field = (typeof FIELDS)[number] | "collection" | "material" | "costcode";
 const defaultStickers = (r: PhotoRow) => {
   const qty = Number(r.qty), pack = Number(r.pack || "1");
-  return Number.isSafeInteger(qty) && qty > 0 && Number.isSafeInteger(pack) && pack > 0 ? String(Math.ceil(qty / pack)) : "";
+  if (!(Number.isSafeInteger(qty) && qty > 0 && Number.isSafeInteger(pack) && pack > 0)) return "";
+  // 47 pieces in 6s: "7+1" — seven X6 stickers and one for the odd packet of 5
+  return qty % pack && qty > pack ? `${Math.floor(qty / pack)}+1` : String(Math.ceil(qty / pack));
 };
 
 type Draft = { store: string; rows: PhotoRow[]; supplier: string; billNo: string; rack: string; photoId?: string; warnings: string; total: string;
@@ -155,6 +159,21 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
   }
   function onPurchaseGridKey(e: React.KeyboardEvent<HTMLDivElement>) {
     const key = e.key;
+    /* Owner, 29 Oct (voice): "like Excel — copy it down so the same item isn't typed letter by letter again".
+       Ctrl+D in a cell copies the cell above (as in Excel). With lines ticked, it copies this cell to all of them. */
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && key.toLowerCase() === "d") {
+      const m = /^(\w+) line (\d+)$/.exec((document.activeElement as HTMLElement | null)?.getAttribute("aria-label") || "");
+      if (!m) return;
+      e.preventDefault();
+      const k = m[1] as Field, at = Number(m[2]) - 1, rows = draftRef.current.rows;
+      const ticked = rows.map((r, i) => (selection.has(r.review_id || "") ? i : -1)).filter(i => i >= 0 && i !== at);
+      const value = ticked.length ? String((rows[at] as any)[k] ?? "") : String((rows[at - 1] as any)?.[k] ?? "");
+      if (!ticked.length && at < 1) return;
+      const targets = new Set(ticked.length ? ticked : [at]);
+      set({ rows: rows.map((r, i) => targets.has(i) ? { ...r, [k]: value, ...(k === "style" ? { autoStyle: false } : {}), ...(k === "pack" ? { packSource: "manual" as const, stickers: "" } : {}), ...(["item", "unit"].includes(k) ? { item_code: undefined } : {}) } : r) });
+      toast(ticked.length ? `Copied to ${ticked.length} ticked line${ticked.length === 1 ? "" : "s"}` : "Copied from the line above");
+      return;
+    }
     if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Enter"].includes(key)) return;
     if (key === "Enter" && (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.nativeEvent.isComposing)) return;
     const el = document.activeElement as HTMLElement | null;
@@ -312,8 +331,12 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
   /* the two "apply" buttons confirm in green that they did something (owner, 18 Oct) */
   const [done, setDone] = useState<{ pricing?: string; pricingSig?: string; terms?: string }>({});
   const set = (patch: Partial<Draft>) => { setReviewed(false); if (patch.rows) setError(""); setD(x => ({ ...x, ...patch, ...(patch.rows && !("check" in patch) ? { check: undefined } : {}) })); };
-  const row = (i: number, key: Field, value: string) =>
-    set({ rows: d.rows.map((r, k) => k === i ? { ...r, [key]: value, ...(key === "style" ? { autoStyle: false } : {}), ...(key === "pack" ? { packSource: "manual" as const } : {}), ...(["item", "unit"].includes(key) ? { item_code: undefined } : {}) } : r) });
+  // a line with no item yet takes the item of the line above as soon as anything else is typed on it (owner, 29 Oct)
+  const row = (i: number, key: Field, raw: string) => {
+    // "328..00", "1,014.00": typed money is tidied as it is typed
+    const value = key === "cost" || key === "rate" ? raw.replace(/\.{2,}/g, ".").replace(/,/g, "") : raw;
+    return set({ rows: d.rows.map((r, k) => k === i ? { ...r, ...(key !== "item" && !r.item.trim() && i > 0 && d.rows[i - 1].item.trim() ? { item: d.rows[i - 1].item, unit: d.rows[i - 1].unit || r.unit } : {}), [key]: value, ...(key === "style" ? { autoStyle: false } : {}), ...(key === "pack" ? { packSource: "manual" as const } : {}), ...(["item", "unit"].includes(key) ? { item_code: undefined } : {}) } : r) });
+  };
 
   useEffect(() => { void check(); }, []);
   const check = async () => {
@@ -437,7 +460,7 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
             current.warnings,
             // owner, 29 Oct: "remove unnecessary text". Only what he must act on: the supplier/buyer chatter and the
             // box-column note are dropped; a missing Sr. is named above the lines, where it can be added with one tap
-            ...(Array.isArray(out.warnings) ? out.warnings.map(String).filter((w: string) => w.trim() && !/supplier|buyer|letterhead|box\/packet|packet count/i.test(w)) : []),
+            ...(Array.isArray(out.warnings) ? out.warnings.map(String).filter((w: string) => w.trim() && !/supplier|buyer|letterhead|box\/packet|packet count|page \d+ of \d+|incomplete/i.test(w)) : []),
             counted > raw.length && !srSpan(raw) ? `Read ${raw.length} of ${counted} lines — add the missing ones with + Line.` : "",
             proofNotes.length ? `Checked against the photo and corrected (marked yellow): ${proofNotes.slice(0, 6).join(" · ")}${proofNotes.length > 6 ? ` · +${proofNotes.length - 6} more` : ""}` : "",
             // only the weak backup reader is worth a warning; Gemini standing in for OpenAI reads just as well
@@ -627,6 +650,32 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
     const q = shopQueue.find(x => !autoDone.current.has(x.id)); if (!q) return;
     autoDone.current.add(q.id); void printRemote(q);
   }, [shopQueue.length, printer.busy, cfg.output]);
+  /* A line of the saved bill put right (owner, 29 Oct: "how do I correct a mistake and print it again?"): item, code,
+     rate and packet go onto the saved purchase line and its product; quantities, cost and stock stay as saved. */
+  const fixLine = async (index: number, f: SavedLineFix): Promise<Job[]> => {
+    const p = saved; if (!p) throw new Error("Open the saved bill first");
+    const line = p.items[index]; if (!line) throw new Error("That line is not on the saved bill");
+    const item = f.item.trim().toUpperCase(), style = f.style.trim().toUpperCase();
+    if (!item) throw new Error("Type the item name");
+    const rate = f.rate.trim() ? Math.round(Number(f.rate) * 100) : line.rate;
+    if (!Number.isFinite(rate) || rate < 0) throw new Error("Check the rate");
+    const pack = Number(f.pack || "1");
+    if (!Number.isSafeInteger(pack) || pack < 1 || pack > 10000) throw new Error("Pieces in a box must be a whole number");
+    const stickers = f.stickers.trim() === "" ? undefined : Number(f.stickers);
+    if (stickers !== undefined && (!Number.isSafeInteger(stickers) || stickers < 0 || stickers > 5000)) throw new Error("Stickers must be 0–5000");
+    const even = rate ? evenRate(rate) : 0;
+    const odd = stickers !== undefined && line.qty % pack !== 0 && stickers === Math.ceil(line.qty / pack);   // 7+1: keep the X5 sticker
+    const prod = await db.products.get(line.product_id);
+    if (prod) await saveProduct({ ...prod, item, style, model: style || prod.model, ...(even ? { rate: even } : {}), pack, cost_code: prod.cost_code?.replace(/X\d+[A-Z]+$/i, `X${pack}${prod.type || "PCS"}`) }, true);
+    const { print_qty: _old, ...rest } = line;
+    const items = p.items.map((l, i) => i === index ? { ...rest, item, style, ...(even ? { rate: even } : {}), label_pack: pack, ...(stickers !== undefined && !odd ? { print_qty: stickers } : {}) } : l);
+    const next = { ...p, items, updated_at: now() };
+    await put("purchases", next);
+    const q = await jobsFor(next);
+    setSaved(next); setJobs(q);
+    return q;
+  };
+
   const reprint = async () => {
     if (!jobs.length) return;
     setError("");
@@ -651,6 +700,9 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
 
   const vendor = suppliers.find(s => s.id === d.supplier);
   const lowCost = suspiciousCosts(d.rows);
+  // item names offered while typing: this bill's and the shop's own (owner, 29 Oct: "type H CLUTCHER letter by letter again")
+  const knownItems = useLiveQuery(async () => [...new Set((await db.products.filter(p => !p.deleted && !!p.item?.trim()).toArray()).map(p => p.item.trim().toUpperCase()))].slice(0, 400), [], [] as string[]);
+  const itemChoices = useMemo(() => [...new Set([...d.rows.map(r => r.item.trim().toUpperCase()).filter(Boolean), ...knownItems])], [d.rows, knownItems]);
   /* Owner, 29 Oct: "it keeps saying lines 8 and 10 are the same article". A code on two lines is shown the moment
      the bill is read, on the lines themselves, by the Sr. he sees — so it is corrected before approving, not after. */
   const repeats = useMemo(() => repeatedCodes(d.rows), [d.rows]);
@@ -756,7 +808,7 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
       </div>
       <StickerQuickBar cfg={cfg} onChange={setCfg} />
       {showCarton && !!jobs.length
-        ? <CartonPrint purchase={saved} jobs={jobs} busy={printer.busy} autoSr={autoSr} onAutoDone={() => setAutoSr(undefined)} print={async q => { setError(""); await sendToPrinter(q, true); }} />
+        ? <CartonPrint purchase={saved} jobs={jobs} busy={printer.busy} autoSr={autoSr} onAutoDone={() => setAutoSr(undefined)} onFix={fixLine} print={async q => { setError(""); await sendToPrinter(q, true); }} />
         : <>
           <div className="xs mut">Stays here until you close it. Printing again never adds stock again.</div>
           <div className="tw"><table className="pos-t"><thead><tr><th>Item</th><th>Style</th><th>Colour</th><th className="r">Qty</th><th className="r">Rate</th></tr></thead><tbody>
@@ -827,8 +879,9 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
           (document.querySelector(`input[aria-label="style line ${i + 1}"]`) as HTMLInputElement | null)?.focus();
         }}>{x.style} on Sr. {x.lines.join(" & ")}</button>)}
       </div>}
-      <div className="selection-bar"><SelectAll ids={d.rows.map(r => r.review_id!)} selected={selection} onChange={setSelection} label="Select all purchase lines" /><span className="sm">{d.rows.filter(r => selection.has(r.review_id!)).length} selected</span><DeleteButton className="btn sm bad" disabled={busy || !d.rows.some(r => selection.has(r.review_id!))} onDelete={() => removeRows(d.rows.filter(r => selection.has(r.review_id!)).map(r => r.review_id!))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }} title="↑↓ lines · ←→ fields · Enter on the last line: next line, copied · Space select · Shift+↑↓ range">Ctrl+Enter: approve &amp; print</span></div>
-      <div ref={linesRef} className="tw purchase-lines" onKeyDown={onPurchaseGridKey}><table className="pos-t"><thead><tr>{["No.", "Print", ...lineFields.map(f => captions[f]), "Jewellery photo", "Supplier S.No.", ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
+      <div className="selection-bar"><SelectAll ids={d.rows.map(r => r.review_id!)} selected={selection} onChange={setSelection} label="Select all purchase lines" /><span className="sm">{d.rows.filter(r => selection.has(r.review_id!)).length} selected</span><DeleteButton className="btn sm bad" disabled={busy || !d.rows.some(r => selection.has(r.review_id!))} onDelete={() => removeRows(d.rows.filter(r => selection.has(r.review_id!)).map(r => r.review_id!))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }} title="↑↓ lines · ←→ fields · Enter on the last line: next line, copied · Space select · Shift+↑↓ range">Ctrl+D: same as the line above · Ctrl+Enter: approve &amp; print</span></div>
+      <datalist id="purchase-item-names">{itemChoices.map(n => <option key={n} value={n} />)}</datalist>
+      <div ref={linesRef} className="tw purchase-lines" onKeyDown={onPurchaseGridKey}><table className="pos-t"><thead><tr>{["No.", "Print", ...lineFields.map(f => captions[f]), ...(more ? ["Jewellery photo"] : []), ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
         {d.rows.map((r, i) => <tr key={r.review_id || i}>
           <td className="line-no" data-l="Line" title="Line number: the same small boxed number printed on this line's stickers"><input type="checkbox" aria-label={"Select purchase line " + (i + 1)} checked={selection.has(r.review_id!)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(r.review_id!) : next.delete(r.review_id!); return next; })} />{r.sr?.trim() ? <span title={"Serial on the supplier's bill (line " + (i + 1) + " here)"}>{r.sr}</span> : i + 1}</td>
           <td data-l="Print"><button type="button" className="btn sm p line-print" disabled={busy || !ready4 || !!photoUploads.size}
@@ -837,6 +890,7 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
           {lineFields.map(k => k === "costcode" ? <td key={k} data-l={captions[k]} className="mono b" title="The cost as the shop's code (only people allowed to see costs see the rupees)">{codeFor(r)}</td> : <td key={k} data-l={captions[k]}>
             <input className={"in" + ((k === "style" && r.autoStyle) || d.check?.fixes.some(f => f.line === i + 1 && f.field === k) ? " auto-filled" : "") + (k === "cost" && lowCost.includes(i + 1) ? " cost-low" : "") + (k === "style" && repeatedRow(r) ? " cost-low" : "") + (r.proof && (k === "style" || k === "qty" || k === "cost") ? " auto-filled" : "")} aria-label={`${k} line ${i + 1}`}
               title={k === "entry_code" ? "Editable maker initial + entry date (DDMMYY). This assumed code does not encode price." : ["qty", "pack", "stickers"].includes(k) ? `Enter copies this ${captions[k].toLowerCase()} to the next line. Type a new number to change it.${k === "stickers" ? " Blank means one per packet; 0 prints none." : ""}` : k === "style" && r.autoStyle ? "The bill printed no article number — this was built from the item and its rate. Edit it if you have the supplier's own code." : undefined}
+              list={k === "item" ? "purchase-item-names" : undefined}
               inputMode={k === "cost" || k === "rate" ? "decimal" : ["qty", "pack", "stickers"].includes(k) ? "numeric" : undefined}
               maxLength={k === "entry_code" ? 24 : undefined}
               placeholder={k === "entry_code" ? "e.g. K201026" : k === "stickers" ? defaultStickers(r) : undefined}
@@ -854,8 +908,7 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
                 } catch (error: any) { setError(error.message); }
               } : undefined}
               style={{ minWidth: k === "item" ? 130 : ["style", "entry_code", "collection", "material"].includes(k) ? 110 : 56 }} /></td>)}
-          <td data-l="Jewellery photo"><PhotoButton value={r.photo_id} disabled={busy} onBusyChange={uploading => setPhotoUploads(old => { const next = new Set(old); uploading ? next.add(r.review_id!) : next.delete(r.review_id!); return next; })} onChange={v => set({ rows: draftRef.current.rows.map(x => x.review_id === r.review_id ? { ...x, photo_id: v } : x) })} label="Photo" /></td>
-          <td data-l="Supplier S.No." className="supplier-number mono" title="Saved supplier roll number">{vendor?.vendor_code || "—"}</td>
+          {more && <td data-l="Jewellery photo"><PhotoButton value={r.photo_id} disabled={busy} onBusyChange={uploading => setPhotoUploads(old => { const next = new Set(old); uploading ? next.add(r.review_id!) : next.delete(r.review_id!); return next; })} onChange={v => set({ rows: draftRef.current.rows.map(x => x.review_id === r.review_id ? { ...x, photo_id: v } : x) })} label="Photo" /></td>}
           <td><DeleteButton className="iconbtn" aria-label="Remove line" disabled={busy} onDelete={() => removeRows([r.review_id!])}><Trash2 size={16} /></DeleteButton></td>
         </tr>)}</tbody></table></div>
       {/* Owner, 25 Oct (voice): "remove this part from here and bring it down — or give a small box to tick". The

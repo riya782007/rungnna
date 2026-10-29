@@ -180,7 +180,9 @@ export function validatePhotoRows(rows: PhotoRow[]) {
     if (!Number.isSafeInteger(qty) || qty < 1 || qty > 1000000) throw new Error(`Line ${i + 1}: quantity must be a positive whole number`);
     if (print_qty !== undefined && (!Number.isSafeInteger(print_qty) || print_qty < 0 || print_qty > 5000)) throw new Error(`Line ${i + 1}: stickers must be 0–5000, or leave blank for one per packet`);
     if (!r.cost.trim() || !r.rate.trim()) throw new Error(`Line ${i + 1}: review cost and selling rate`);
-    const cost = moneyInput(r.cost), rate = moneyInput(r.rate);
+    // owner, 29 Oct: "328..00" on one line stopped the whole bill with no line named — now it says which line and what
+    const money = (v: string, what: string) => { try { return moneyInput(v.replace(/\.{2,}/g, ".").replace(/,/g, "").trim()); } catch { throw new Error(`${r.sr?.trim() ? "Sr. " + r.sr.trim() : "Line " + (i + 1)}: ${what} "${v}" is not a number — correct it`); } };
+    const cost = money(r.cost, "cost"), rate = money(r.rate, "rate");
     if (cost <= 0 || rate <= 0) throw new Error(`Line ${i + 1}: enter positive cost and selling rate`);
     if (!Number.isSafeInteger(qty * cost)) throw new Error("Purchase amount is too large");
     if (!UNIT_RE.test(r.unit)) throw new Error(`Line ${i + 1}: choose the unit (PCS, PAIR, SET, DOZEN, BOX, CARD or PACKET)`);
@@ -190,7 +192,10 @@ export function validatePhotoRows(rows: PhotoRow[]) {
     let pack: number;
     try { pack = packOf(r); } catch (e: any) { throw new Error(`Line ${i + 1}: ${e.message}`); }
     const entry_code = checkedEntryReference(r.entry_code);
-    return { ...r, entry_code, qty, cost, rate: evenRate(rate), pack, print_qty };   // the product keeps the same even rate its label shows
+    /* Owner, 29 Oct: "packed in 6s, the bill has 47 — the 5-piece sticker meant doing everything again". A sticker
+       count equal to one per packet is the normal count: left blank, so 7 X6 stickers and 1 X5 sticker come out. */
+    const perPacket = print_qty !== undefined && qty % pack !== 0 && print_qty === Math.ceil(qty / pack);
+    return { ...r, entry_code, qty, cost, rate: evenRate(rate), pack, print_qty: perPacket ? undefined : print_qty };   // the product keeps the same even rate its label shows
   });
 }
 
