@@ -27,7 +27,9 @@ export type PhotoRow = { item: string; style: string; color: string; unit: strin
   /** the cost exactly as the bill was read, so vendor terms can be undone and a cost divided too often is caught */
   billCost?: string;
   /** owner, 22 Oct: collection/style, material and a photo set on the same screen as the stickers */
-  collection?: string; material?: string; photo_id?: string };
+  collection?: string; material?: string; photo_id?: string;
+  /** owner, 29 Oct: what the proofreading pass changed on this line ("code 19343 → 19345"), shown on the line */
+  proof?: string };
 
 /** Lines whose cost is under a tenth of their selling rate: almost always a cost divided (or misread) too often.
     1-based line numbers. */

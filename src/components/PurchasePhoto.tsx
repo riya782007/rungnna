@@ -29,7 +29,7 @@ import { SupplierNo } from "./SupplierNo";
 import { checkBill, checkSummary, matchSupplier, fallbackBillNo, type LineFix } from "../lib/billCheck";
 import { newParty } from "../lib/billing";
 import { UNITS, UNIT_RE } from "../lib/products";
-import { isPdf, expandPdfs, splitPage, joinParts, srSpan, repeatedCodes } from "../lib/pdf-pages";
+import { isPdf, expandPdfs, splitPage, joinParts, srSpan, repeatedCodes, acceptProof } from "../lib/pdf-pages";
 import { CartonPrint } from "./CartonPrint";
 import { QuickLineBox, type QuickAdd } from "./QuickLineBox";
 import { queueForShop, doneAtShop, useShopQueue, isPhoneLike, type RemotePrint } from "../lib/print-queue";
@@ -230,7 +230,7 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
   const [pricing, setPricing] = useState<PricingRule | null>(null);
   const [atShop, setAtShop] = useState(isPhoneLike());
   const [toolsOpen, setToolsOpen] = useState(false);
-  const [already, setAlready] = useState<{ p: Purchase; labels: number; lines: number } | null>(null);
+  const [already, setAlready] = useState<{ p: Purchase; labels: number; lines: number; now: number; rows: ReturnType<typeof validatePhotoRows> } | null>(null);
   const shopQueue = useShopQueue();
   useEffect(() => { if (!pricing) void getRule().then(setPricing).catch(() => {}); }, []);
   const onCosting = (patch: { mult?: string; discount?: string; extra?: string }) => {
@@ -381,6 +381,18 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
             }
           }
         }
+        /* Owner, 29 Oct: "make sure the AI makes no mistakes" — the reading is proofread once against the photo; only
+           changes that make a line add up (or a corrected code, which is then marked on the line) are taken */
+        let proofNotes: string[] = [];
+        if (rowsOf(out).length >= 3 && rowsOf(out).every((r: any) => String(r?.sr ?? "").trim())) {
+          toast(`Read ${rowsOf(out).length} lines — checking them against the photo…`);
+          const proof = await api<any>("purchase-photo", { images, verify: rowsOf(out) }).catch(() => null);
+          if (proof && rowsOf(proof).length) {
+            const p = acceptProof(rowsOf(out), rowsOf(proof));
+            proofNotes = p.changes;
+            out = { ...out, rows: p.rows, discount_amount: out.discount_amount || proof.discount_amount, discount_pct: out.discount_pct || proof.discount_pct, invoice_total: out.invoice_total || proof.invoice_total };
+          }
+        }
         const rule = await getRule(); setPricing(rule);
         const text = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v) : "");
         const raw = out.rows.map((r: any) => ({
@@ -388,12 +400,13 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
           hsn: text(r.hsn), qty: readCount(r.qty), pack: text(r.pack),
           cost: text(r.cost), rate: text(r.rate), amount: text(r.amount), box: text(r.box),
           sr: text(r.sr).trim().replace(/\s+/g, "").slice(0, 9).replace(/[^0-9A-Za-z+\-/]/g, ""),
+          ...(r.proof ? { proof: text(r.proof) } : {}),
         }));
         const before = readSoFar.current.length;
         readSoFar.current = [...readSoFar.current, ...raw];
         const total = text(out.invoice_total) || current.total || "";
         // the bill checked against itself (all pages so far): ditto marks written out, each line's amount, the Net
-        const checked = checkBill(readSoFar.current, total);
+        const checked = checkBill(readSoFar.current, total, { amount: out.discount_amount, pct: out.discount_pct });
         // keep the bill's own cost on each line; a "selling rate" equal to the cost is just the supplier's price
         // read twice (owner's bill, 18 Oct: rate 170 = cost 170), so it is left for shop pricing to fill
         const read: PhotoRow[] = checked.rows.slice(before).map(({ amount: _a, box, ...r }) => ({ ...r, ...byBoxes(box, r.qty, r.pack), billCost: r.cost, rate: r.rate && Number(r.rate) === Number(r.cost) ? "" : r.rate }));
@@ -426,7 +439,9 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
             // box-column note are dropped; a missing Sr. is named above the lines, where it can be added with one tap
             ...(Array.isArray(out.warnings) ? out.warnings.map(String).filter((w: string) => w.trim() && !/supplier|buyer|letterhead|box\/packet|packet count/i.test(w)) : []),
             counted > raw.length && !srSpan(raw) ? `Read ${raw.length} of ${counted} lines — add the missing ones with + Line.` : "",
-            fellBack && readBy ? `Read by the backup AI (${readBy}) — ${whyFellBack(out.attempts)}. Check the codes and quantities.` : "",
+            proofNotes.length ? `Checked against the photo and corrected (marked yellow): ${proofNotes.slice(0, 6).join(" · ")}${proofNotes.length > 6 ? ` · +${proofNotes.length - 6} more` : ""}` : "",
+            // only the weak backup reader is worth a warning; Gemini standing in for OpenAI reads just as well
+            fellBack && readBy === "groq" ? `Read by the backup AI (Groq) — ${whyFellBack(out.attempts)}. Check the codes and quantities.` : "",
           ].filter(Boolean).join("\n"),
           photoId: current.photoId || await savePhoto(files[0]),
         };
@@ -540,8 +555,8 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
       const before = pages.length && !freshIdx.length ? pages[pages.length - 1] : undefined;
       if (before) {
         const queue = await jobsFor(before);
-        setAlready({ p: before, labels: expandJobs(queue).length, lines: checked.length });
-        toast(`All ${checked.length} lines of bill ${D.billNo} are already saved (${before.no}) — nothing printed`);
+        setAlready({ p: before, labels: expandJobs(queue).length, lines: checked.length, now: labelCountFor(checked), rows: checked });
+        setTimeout(() => document.querySelector(".already-saved")?.scrollIntoView({ block: "center", behavior: "smooth" }), 60);
         return;
       }
       let saveRows = rows;
@@ -813,7 +828,7 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
         {d.rows.map((r, i) => <tr key={r.review_id || i}>
           <td className="line-no" data-l="Line" title="Line number: the same small boxed number printed on this line's stickers"><input type="checkbox" aria-label={"Select purchase line " + (i + 1)} checked={selection.has(r.review_id!)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(r.review_id!) : next.delete(r.review_id!); return next; })} />{r.sr?.trim() ? <span title={"Serial on the supplier's bill (line " + (i + 1) + " here)"}>{r.sr}</span> : i + 1}</td>
           {lineFields.map(k => k === "costcode" ? <td key={k} data-l={captions[k]} className="mono b" title="The cost as the shop's code (only people allowed to see costs see the rupees)">{codeFor(r)}</td> : <td key={k} data-l={captions[k]}>
-            <input className={"in" + ((k === "style" && r.autoStyle) || d.check?.fixes.some(f => f.line === i + 1 && f.field === k) ? " auto-filled" : "") + (k === "cost" && lowCost.includes(i + 1) ? " cost-low" : "") + (k === "style" && repeatedRow(r) ? " cost-low" : "")} aria-label={`${k} line ${i + 1}`}
+            <input className={"in" + ((k === "style" && r.autoStyle) || d.check?.fixes.some(f => f.line === i + 1 && f.field === k) ? " auto-filled" : "") + (k === "cost" && lowCost.includes(i + 1) ? " cost-low" : "") + (k === "style" && repeatedRow(r) ? " cost-low" : "") + (r.proof && (k === "style" || k === "qty" || k === "cost") ? " auto-filled" : "")} aria-label={`${k} line ${i + 1}`}
               title={k === "entry_code" ? "Editable maker initial + entry date (DDMMYY). This assumed code does not encode price." : ["qty", "pack", "stickers"].includes(k) ? `Enter copies this ${captions[k].toLowerCase()} to the next line. Type a new number to change it.${k === "stickers" ? " Blank means one per packet; 0 prints none." : ""}` : k === "style" && r.autoStyle ? "The bill printed no article number — this was built from the item and its rate. Edit it if you have the supplier's own code." : undefined}
               inputMode={k === "cost" || k === "rate" ? "decimal" : ["qty", "pack", "stickers"].includes(k) ? "numeric" : undefined}
               maxLength={k === "entry_code" ? 24 : undefined}
@@ -914,19 +929,30 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
 
 
       {coded && <BillCosting d={d} busy={busy} onChange={onCosting} hideRupees />}
-      {already && <div className="note warn stack" role="alert" style={{ gap: 6 }}>
-        <b>All {already.lines} lines of this bill are already saved as {already.p.no}{already.p.supplier_bill ? ` (bill ${already.p.supplier_bill})` : ""}.</b>
-        <span className="sm">Nothing was saved or printed again. If this photo has lines that are missing, add them with + Line and approve again.</span>
-        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-          <button className="btn" disabled={printer.busy} onClick={async () => { const q = await jobsFor(already.p); setSaved(already.p); setJobs(q); setAlready(null); try { await sendToPrinter(q, true); } catch (e: any) { setError(e.message); } }}>Print its {already.labels} stickers again</button>
-          <button className="btn p" onClick={() => { set({ rows: [], billNo: "", total: "", discount: "", mult: "", extra: "", warnings: "", check: undefined, photoId: undefined }); setAlready(null); }}>Clear — take the next bill</button>
-        </div>
-      </div>}
       {validation && <div className="note warn" role="status">{validation}</div>}
       {d.warnings && <div className="note warn" style={{ whiteSpace: "pre-wrap" }}>{d.warnings}</div>}
 
       {/* stays in view at the bottom of the full-window review, so approving needs no scrolling */}
       <div className="approve-bar stack">
+      {/* Owner, 29 Oct (video): "it says all 13 lines are saved, nothing printed — tell me where it went". The answer and
+          the next step sit right above the Approve button, in big type. */}
+      {already && <div className="note bad stack already-saved" role="alert" style={{ gap: 8 }}>
+        <b style={{ fontSize: 17 }}>This bill is already saved: {already.p.no}{already.p.supplier_bill ? ` · bill ${already.p.supplier_bill}` : ""} · {new Date(already.p.at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}. Its stock is already in.</b>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          {already.now !== already.labels && already.now > 0 && <button className="btn p" disabled={printer.busy} onClick={async () => {
+            /* the saved bill's stickers were made with other boxes (e.g. 1 per piece): take this reading's boxes and
+               sticker counts for the same lines — quantities and stock stay exactly as saved */
+            const key = (l: { style: string; color?: string; qty: number }) => [l.style.trim().toUpperCase(), (l.color || "").trim().toUpperCase(), l.qty].join("|");
+            const byKey = new Map(already.rows.map(r => [key(r), r]));
+            const p = { ...already.p, items: already.p.items.map(l => { const r = byKey.get(key(l)); if (!r) return l; const { print_qty: _q, ...rest } = l; return { ...rest, label_pack: r.pack, ...(r.print_qty !== undefined ? { print_qty: r.print_qty } : {}), ...(r.sr?.trim() ? { bill_sr: r.sr.trim() } : {}) }; }), updated_at: now() };
+            try { await put("purchases", p); const q = await jobsFor(p); setSaved(p); setJobs(q); setAlready(null); set({ rows: [], billNo: "", total: "", discount: "", mult: "", extra: "", warnings: "", check: undefined, photoId: undefined }); await sendToPrinter(q, true); }
+            catch (e: any) { setError(e.message); }
+          }}>Print {already.now} stickers as on this screen</button>}
+          <button className={"btn" + (already.now === already.labels ? " p" : "")} disabled={printer.busy} onClick={async () => { const q = await jobsFor(already.p); setSaved(already.p); setJobs(q); setAlready(null); try { await sendToPrinter(q, true); } catch (e: any) { setError(e.message); } }}>Print its {already.labels} saved stickers</button>
+          <button className="btn" onClick={() => { set({ rows: [], billNo: "", total: "", discount: "", mult: "", extra: "", warnings: "", check: undefined, photoId: undefined }); setAlready(null); }}>Clear — next bill</button>
+        </div>
+        {already.now !== already.labels && <span className="sm">The saved bill has {already.labels} stickers; this screen makes {already.now}. Quantities and stock do not change either way.</span>}
+      </div>}
       {!!autoFill.length && <div className="xs mut">Approve fills in by itself — {autoFill.join(" · ")}. Change any of them above if you like.</div>}
       <label className="row"><input type="checkbox" checked={reviewed} onChange={e => setReviewed(e.target.checked)} />
         {d.check?.ok ? "The lines add up to the bill. I checked the highlighted cells and the selling rates." : "I checked quantities, units, costs, selling rates and tax/freight differences."} <span className="xs mut">(optional)</span></label>

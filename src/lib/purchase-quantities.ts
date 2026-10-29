@@ -2,7 +2,8 @@ import type { PhotoRow } from "./purchase-photo";
 
 /** Normalize visible counts without confusing pieces, packets and sticker copies. */
 export function readCount(value: unknown): string {
-  const raw = String(value ?? "").trim();
+  // printed bills write the quantity with its unit: "48PC", "12 PCS", "24 Pcs." (owner's TIKA/NATH bill, 29 Oct)
+  const raw = String(value ?? "").trim().replace(/^(\d[\d,]*(?:\.0+)?)\s*(?:PCS?|PIECES?|NOS?)\.?$/i, "$1");
   if (raw.includes(",") && !/^\d{1,3}(?:,\d{3})+(?:\.0+)?$/.test(raw)) return raw;
   const numeric = raw.replace(/,/g, "");
   if (!/^\d+(?:\.0+)?$/.test(numeric)) return raw;

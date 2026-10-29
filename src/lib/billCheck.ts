@@ -31,6 +31,7 @@ export type BillCheck = {
   net?: number;                     // paise, as the bill states it
   addsUp: boolean | null;           // null when the bill states no total
   pieces: number;
+  less?: number;                    // paise: the bill's discount that makes the lines meet its total
 };
 
 /** "1,044" "1044.00" "₹ 1044" → 104400 paise. Anything unreadable is undefined, never 0. */
@@ -83,7 +84,8 @@ export function sharedFactor(rows: ReadRow[]): number | undefined {
   const [best, n] = [...counts].sort((a, b) => b[1] - a[1])[0] || [0, 0];
   return best && n >= 3 && n / ks.length >= 0.6 ? best : undefined;
 }
-export function checkBill(input: ReadRow[], netTotal?: string): BillCheck {
+/** discount: the bill's own discount line ("% -1,834.00" or "Less 10%"), so a total after discount still adds up. */
+export function checkBill(input: ReadRow[], netTotal?: string, discount?: { amount?: unknown; pct?: unknown }): BillCheck {
   const fixes: LineFix[] = [], doubts: { line: number; why: string }[] = [];
   const resolved = resolveDitto(input), factor = sharedFactor(resolved);
   const rows = resolved.map((r, i): ReadRow => {
@@ -114,8 +116,12 @@ export function checkBill(input: ReadRow[], netTotal?: string): BillCheck {
     if (q && c) sum += q * c;
   }
   const net = paise(netTotal);
-  const addsUp = net === undefined ? null : sum === net || (!!factor && sum * factor === net);
-  return { rows, fixes, doubts, sum, net, addsUp, pieces, ...(factor ? { factor } : {}) };
+  // owner's TIKA/NATH bill, 29 Oct: Total 18,336 · % −1,834 · Amount 16,502 — the lines add up once the discount is off
+  const dAmt = paise(String(discount?.amount ?? "").replace(/[-−,\s]/g, "")) || 0, dPct = Number(String(discount?.pct ?? "").replace(/[%\s-]/g, "")) || 0;
+  const near = (a: number, b: number) => Math.abs(a - b) <= 100;   // a rupee of rounding
+  const less = net === undefined || sum === net ? 0 : dAmt && near(sum - dAmt, net) ? dAmt : dPct > 0 && dPct < 100 && near(Math.round(sum * (1 - dPct / 100)), net) ? sum - net : 0;
+  const addsUp = net === undefined ? null : sum === net || !!less || (!!factor && sum * factor === net);
+  return { rows, fixes, doubts, sum, net, addsUp, pieces, ...(less ? { less } : {}), ...(factor ? { factor } : {}) };
 }
 
 /** The one line the owner reads before approving. */
@@ -123,7 +129,7 @@ export function checkSummary(c: BillCheck): string {
   if (c.factor) return `${c.rows.length} lines · ${c.pieces} pieces as printed · this bill multiplies every rate by ${c.factor} (Amount = ${c.factor} × Qty × Rate): "Multiply ×${c.factor}" is set in Bill costing below${c.doubts.length ? ` · ${c.doubts.length} line${c.doubts.length > 1 ? "s" : ""} to check` : ""}`;
   const total = `₹${(c.sum / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
   if (c.addsUp === true && !c.doubts.length)
-    return `${c.rows.length} lines · ${c.pieces} pieces · adds up to ${total}, the bill's own total${c.fixes.length ? ` (after ${c.fixes.length} correction${c.fixes.length > 1 ? "s" : ""} shown below)` : ""}`;
+    return `${c.rows.length} lines · ${c.pieces} pieces · adds up to ${total}${c.less ? ` − ₹${(c.less / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 })} discount = ₹${((c.net || 0) / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 })}` : ""}, the bill's own total${c.fixes.length ? ` (after ${c.fixes.length} correction${c.fixes.length > 1 ? "s" : ""} shown below)` : ""}`;
   if (c.addsUp === false)
     return `Lines add up to ${total}, but the bill says ₹${((c.net || 0) / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 })} (difference ₹${(Math.abs(c.sum - (c.net || 0)) / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 })}). Check the highlighted lines`;
   return `${c.rows.length} lines · ${c.pieces} pieces · ${total}${c.doubts.length ? ` · ${c.doubts.length} line${c.doubts.length > 1 ? "s" : ""} to check` : " · the bill shows no total to check against"}`;

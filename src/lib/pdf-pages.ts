@@ -106,3 +106,40 @@ export function repeatedCodes(rows: { style?: string; color?: string; sr?: strin
 }
 /** @deprecated two parts only — kept for older callers */
 export const joinHalves = ([top, bottom]: ReadRow[][]) => joinParts([top, bottom]);
+
+/* Owner, 29 Oct: "make sure the AI makes no mistakes". The finished reading is proofread once against the photo.
+   What the proofreading may change, line by line (matched by the bill's Sr.):
+     • quantity / rate / amount: only when its line then adds up (qty × rate = amount) and the first one did not;
+     • code, item, box, pieces per box: taken from the proofreading, and the line is marked so it is looked at;
+     • a line it found that was missing: added when it adds up (or the bill shows no amount for it);
+     • a line it dropped: dropped only when its code is on another line (a line read twice). */
+type ProofRow = ReadRow & { item?: unknown; box?: unknown; pack?: unknown; amount?: unknown; color?: unknown; unit?: unknown; proof?: string };
+const num = (v: unknown) => { const n = Number(String(v ?? "").replace(/,/g, "").replace(/[^\d.]/g, "")); return Number.isFinite(n) && n > 0 ? n : 0; };
+const addsUp = (r: ProofRow) => { const q = num(r.qty), c = num(r.cost), a = num(r.amount); return !!(q && c && a && Math.abs(q * c - a) < 0.6); };
+export function acceptProof(before: ProofRow[], after: ProofRow[]): { rows: ProofRow[]; changes: string[] } {
+  const srOf = (r: ProofRow) => String(r.sr ?? "").trim();
+  if (!after.length || before.some(r => !srOf(r)) || after.some(r => !srOf(r))) return { rows: before, changes: [] };
+  const was = new Map(before.map(r => [srOf(r), r])), now = new Map(after.map(r => [srOf(r), r]));
+  const changes: string[] = [], out: ProofRow[] = [];
+  const S = (v: unknown) => String(v ?? "").trim();
+  for (const [sr, a] of now) {
+    const b = was.get(sr);
+    if (!b) { if (addsUp(a) || !num(a.amount)) { out.push({ ...a, proof: "line added by proofreading" }); changes.push(`Sr. ${sr} added`); } continue; }
+    let r: ProofRow = { ...b }; const notes: string[] = [];
+    for (const k of ["style", "item", "box", "pack"] as const) {
+      if (S(a[k]) && S(a[k]).toUpperCase() !== S(b[k]).toUpperCase()) { notes.push(`${k === "style" ? "code" : k} ${S(b[k]) || "—"} → ${S(a[k])}`); r = { ...r, [k]: a[k] }; }
+    }
+    if (!addsUp(b) && addsUp(a) && (S(a.qty) !== S(b.qty) || S(a.cost) !== S(b.cost))) {
+      notes.push(`qty × rate ${S(b.qty)} × ${S(b.cost)} → ${S(a.qty)} × ${S(a.cost)}`); r = { ...r, qty: a.qty, cost: a.cost, amount: a.amount };
+    }
+    if (notes.length) { r.proof = notes.join(", "); changes.push(`Sr. ${sr}: ${r.proof}`); }
+    out.push(r);
+  }
+  const codes = new Set(out.map(r => S(r.style).toUpperCase()).filter(Boolean));
+  for (const [sr, b] of was) if (!now.has(sr)) {
+    if (S(b.style) && codes.has(S(b.style).toUpperCase())) { changes.push(`Sr. ${sr} removed (its code ${S(b.style)} is on another line)`); continue; }
+    out.push(b);
+  }
+  if (out.every(r => /^\d+$/.test(srOf(r)))) out.sort((x, y) => Number(srOf(x)) - Number(srOf(y)));
+  return { rows: out, changes };
+}

@@ -103,3 +103,31 @@ describe("owner, 29 Oct: TIKA/NATH bill came out 12 × 12", () => {
     expect(r.rows.map(x => byBoxes(x.box, x.qty, x.pack).stickers)).toEqual(["4", "2", "1", "1"]);
   });
 });
+
+import { acceptProof } from "../src/lib/pdf-pages";
+describe("owner, 29 Oct: the reading is proofread against the photo (TIKA/NATH bill 1752)", () => {
+  const R = (sr: string, style: string, qty: string, cost: string, amount: string, extra: any = {}) => ({ sr, item: "TIKA", style, qty, cost, amount, box: "1", pack: "12", ...extra });
+  it("takes a corrected code (marked), a qty that now adds up, and a missed line; drops a line read twice", () => {
+    const before = [R("14", "19420/19422", "24", "62", "1488"), R("15", "19343", "12", "60", "720"), R("16", "470", "1", "47", "564", { item: "NATH" }), R("17", "19420/19422", "24", "62", "1488")];
+    const after = [R("14", "19420/19422", "24", "62", "1488"), R("15", "19345", "12", "60", "720"), R("16", "470", "12", "47", "564", { item: "NATH" }), R("18", "500", "12", "50", "600", { item: "NATH" })];
+    const p = acceptProof(before, after);
+    expect(p.rows.map(r => `${r.sr}:${r.style}:${r.qty}`)).toEqual(["14:19420/19422:24", "15:19345:12", "16:470:12", "18:500:12"]);
+    expect(p.rows[1].proof).toBe("code 19343 → 19345");
+    expect(p.changes).toContain("Sr. 17 removed (its code 19420/19422 is on another line)");
+  });
+  it("never swaps a quantity that already adds up for one that does not", () => {
+    const p = acceptProof([R("3", "19430", "12", "51", "612"), R("4", "19016", "12", "67", "804"), R("5", "19429", "12", "65", "780")],
+      [R("3", "19430", "1", "51", "612"), R("4", "19016", "12", "67", "804"), R("5", "19429", "12", "65", "780")]);
+    expect(p.rows[0].qty).toBe("12"); expect(p.changes).toEqual([]);
+  });
+});
+
+describe("owner's TIKA/NATH bill: Total 18,336 · % −1,834 · Amount 16,502", () => {
+  it("adds up once the bill's discount is taken off, and 48PC is 48 pieces", async () => {
+    const { readCount } = await import("../src/lib/purchase-quantities");
+    expect([readCount("48PC"), readCount("12 PCS"), readCount("24 Pcs.")]).toEqual(["48", "12", "24"]);
+    const L = (qty: string, cost: string, amount: string) => ({ item: "TIKA", style: "", color: "", unit: "PCS", hsn: "", qty, pack: "12", stickers: "", cost, rate: "", amount }) as any;
+    const c = checkBill([L("48", "53", "2544"), L("24", "65", "1560"), L("12", "51", "612")], "4245.40", { amount: "-471.60" });
+    expect(c.addsUp).toBe(true); expect(c.less).toBe(47160);
+  });
+});
