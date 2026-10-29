@@ -30,14 +30,17 @@ import { checkBill, checkSummary, matchSupplier, fallbackBillNo, type LineFix } 
 import { newParty } from "../lib/billing";
 import { UNITS, UNIT_RE } from "../lib/products";
 import { isPdf, expandPdfs, splitPage, joinParts, srSpan, repeatedCodes } from "../lib/pdf-pages";
+import { CartonPrint } from "./CartonPrint";
+import { QuickLineBox, type QuickAdd } from "./QuickLineBox";
 import { queueForShop, doneAtShop, useShopQueue, isPhoneLike, type RemotePrint } from "../lib/print-queue";
 
 const blank = (pack = "1"): PhotoRow => ({ review_id: uid(), item: "", style: "", color: "", unit: "PCS", hsn: "", qty: "", pack, packSource: "default", stickers: "", cost: "", rate: "" });
-const captions: Record<string, string> = { costcode: "Cost code", sr: "Bill Sr.", collection: "Collection / style", material: "Material", item: "Item", style: "Style/article", color: "Colour", unit: "Unit", entry_code: "Reference Code", hsn: "HSN", qty: "Total qty", pack: "Pieces per packet (X)", stickers: "Stickers", cost: "Cost ₹", rate: "Rate ₹" };
+const captions: Record<string, string> = { costcode: "Cost code", sr: "Bill Sr.", collection: "Collection / style", material: "Material", item: "Item", style: "Style/article", color: "Colour", unit: "Unit", entry_code: "Reference Code", hsn: "HSN", qty: "Qty", pack: "Pcs in box (X)", stickers: "Stickers", cost: "Cost ₹", rate: "Rate ₹" };
 /* pack = the "X1" / "X3" after the rate on his stickers: pieces in one packet (his old software's QTY box) */
 /* Owner, 24 Oct (call): the order he tallies a bill in — the bill's own serial no., item, quantity, cost, our
    rate, pieces per packet (X), stickers, colour — and the things filled once (reference code, supplier) last. */
-const FIELDS = ["sr", "item", "style", "qty", "cost", "rate", "pack", "stickers", "color", "unit", "entry_code"] as const;
+/* Owner, 29 Oct: "the reference code should be in front — I have to shift the whole page to see it" */
+const FIELDS = ["sr", "item", "style", "entry_code", "qty", "cost", "rate", "pack", "stickers", "color", "unit"] as const;
 type Field = (typeof FIELDS)[number] | "collection" | "material" | "costcode";
 const defaultStickers = (r: PhotoRow) => {
   const qty = Number(r.qty), pack = Number(r.pack || "1");
@@ -80,6 +83,8 @@ async function receivingRack(chosen: string): Promise<string> {
 }
 
 /** Blank articles and blank selling rates filled the way the bill reader does (shop pricing). */
+/** The Sr. a new line gets: one after the highest number already on the bill. */
+const nextSrOf = (rows: PhotoRow[]) => String(Math.max(0, ...rows.map((r, i) => (/^\d{1,4}$/.test((r.sr || "").trim()) ? Number(r.sr) : i + 1))) + 1);
 export const fillGaps = (rows: PhotoRow[], rule: PricingRule | null | undefined) => rule ? pricePhotoRows(autoArticle(rows), rule) : autoArticle(rows);
 
 export default function PurchasePhoto({ by, camera = false, typed = false }: { by: string; camera?: boolean; typed?: boolean }) {
@@ -96,6 +101,11 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
   const lineFields: Field[] = [...FIELDS.flatMap((f): Field[] => money ? [f] : f === "rate" ? (coded ? ["costcode", "rate"] : []) : f === "cost" ? [] : [f]), ...(more ? ["collection", "material"] as Field[] : [])];
   const [d, setD] = useState<Draft>({ store: currentStore(), rows: [], supplier: "", billNo: "", rack: "", warnings: "", total: "" });
   const [photoUploads, setPhotoUploads] = useState<Set<string>>(new Set());
+  /* Owner, 29 Oct: "carton by carton". When ticked, approving saves the bill (stock in once) and the stickers are
+     then printed one carton at a time from the saved purchase. Remembered on this computer. */
+  const [cartonMode, setCartonMode] = useState(false);
+  const [showCarton, setShowCarton] = useState(false);
+  useEffect(() => { void getSetting<boolean>("carton_mode", false).then(v => { setCartonMode(!!v); setShowCarton(!!v); }); }, []);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const countFocus = useRef<HTMLInputElement | null>(null);
   // a line just added by Enter: the cursor goes to the same column on it
@@ -269,11 +279,21 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
     if (!typed || !ready) return;
     // a bill already being typed (or read) is kept: the cursor just goes to its last line
     if (!draftRef.current.rows.length) set({ rows: [blank(packetDefault)] });
-    setTimeout(() => {
-      const items = document.querySelectorAll<HTMLInputElement>('.purchase-photo input[aria-label^="item line "]');
-      const last = items[items.length - 1]; last?.focus(); last?.scrollIntoView({ block: "center" });
-    }, 50);
+    // the cursor goes to the one-line box: type a bill line, Enter, the next (owner, 29 Oct)
+    setTimeout(() => { quickRef.current?.focus(); quickRef.current?.scrollIntoView({ block: "center" }); }, 80);
   }, [typed, ready]);
+  const quickRef = useRef<HTMLInputElement>(null);
+  /* A line typed in the quick box goes under the others with the next Sr.; an empty first line is replaced. */
+  const addQuick = (q: QuickAdd) => {
+    const rows = draftRef.current.rows;
+    const emptyOnly = rows.length === 1 && !rows[0].item.trim() && !rows[0].style.trim() && !String(rows[0].qty).trim();
+    const base = emptyOnly ? [] : rows;
+    let row: PhotoRow = { ...blank(q.pack || packetDefault), item: q.item, style: q.style, qty: q.qty, cost: q.cost, billCost: q.cost || undefined,
+      stickers: q.stickers || "", sr: nextSrOf(base), ...(q.pack ? { packSource: "manual" as const } : {}) };
+    if (pricing && row.cost) row = pricePhotoRows([row], pricing)[0];
+    set({ rows: [...base, row] });
+    setTimeout(() => linesRef.current?.querySelector("tbody > tr:last-child")?.scrollIntoView({ block: "nearest" }), 30);
+  };
   /* The purchase just approved stays here — with its labels ready to print — when you go to
      QR labels or another screen and come back, so the bill never has to be read again. */
   const LAST = "purchase_photo_last";
@@ -560,11 +580,12 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
         toast(`Purchase ${p.no} saved · ${expandJobs(queue).length} stickers will print at the shop computer`);
         return;
       }
+      if (cartonMode) { setShowCarton(true); toast(`Purchase ${p.no} saved · type the Sr. of the first carton's lines and press Enter`); return; }
       const how = await sendToPrinter(queue, true);
       toast(how === "none" ? `Purchase ${p.no} saved · no stickers requested` : how === "browser" ? `Purchase ${p.no} saved · opening the label print window` : `Purchase ${p.no} saved · starting label printing`);
     } catch (e: any) {
       // the purchase may already be saved; say so rather than inviting a second save
-      setError(savedPurchase ? `${e.message}\nPurchase ${savedPurchase.no} is saved. Use “Print saved labels” after fixing the printer setting; do not approve the bill again.` : e.message);
+      setError(savedPurchase ? `${e.message}\nPurchase ${savedPurchase.no} is saved. Use “Print all stickers” after fixing the printer setting; do not approve the bill again.` : e.message);
     } finally { lock.current = false; setBusy(false); }
   };
 
@@ -615,6 +636,14 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
      the bill is read, on the lines themselves, by the Sr. he sees — so it is corrected before approving, not after. */
   const repeats = useMemo(() => repeatedCodes(d.rows), [d.rows]);
   const repeatedRow = (r: PhotoRow) => { const s = (r.style || "").trim().toUpperCase(); return !!s && repeats.some(x => x.style === s); };
+  /* Owner, 29 Oct: "pieces came out 1-1 although the bill says everything". When the packet size was not read and
+     almost every line's quantity is a whole number of 12s (or 6s, 24s…), one tap sets the boxes for all of them. */
+  const boxGuess = useMemo(() => {
+    const open = d.rows.filter(r => Number(r.qty) > 0 && (!r.pack || r.pack === "1") && r.packSource !== "manual" && r.packSource !== "bill");
+    if (open.length < 3 || open.length < d.rows.length * 0.6) return 0;
+    for (const c of [12, 24, 6, 10, 36]) if (open.filter(r => Number(r.qty) % c === 0).length >= open.length * 0.8) return c;
+    return 0;
+  }, [d.rows]);
   const missingSr = useMemo(() => {
     const ns = d.rows.map(r => /^\d{1,4}$/.test((r.sr || "").trim()) ? Number(r.sr) : NaN).filter(Number.isFinite);
     if (ns.length < 3 || ns.length < d.rows.length * 0.8) return [] as number[];
@@ -663,7 +692,7 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
       <div className="row xs" style={{ justifyContent: "center", gap: 14 }}>
         <span className={notReady ? "bad-text" : "mut"}>{checking ? "Checking the AI…" : connection || ""}</span>
         <button className="linkbtn" disabled={busy || probing} onClick={testEach}>{probing ? "Testing…" : "Test each AI"}</button>
-        <button className="linkbtn" disabled={busy} onClick={() => set({ rows: [blank(packetDefault)] })}>Type the lines instead</button>
+        <button className="linkbtn" disabled={busy} onClick={() => { set({ rows: [blank(packetDefault)] }); setTimeout(() => quickRef.current?.focus(), 80); }}>Type the lines instead</button>
       </div>
       {probe && <div className="note sm ai-probe" role="status" style={{ textAlign: "left" }}>
         {probe.map(r => <div key={r.provider}><b className={r.ok ? "ok-text" : "bad-text"}>{r.ok ? "✓" : "✗"}</b> {r.plain} <span className="xs mut mono">{r.model}</span></div>)}
@@ -701,15 +730,20 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
     {saved && !d.rows.length && <div className="note stack saved-purchase" role="status" style={{ gap: 8 }}>
       <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
         <b className="grow">Purchase {saved.no} saved{saved.supplier_name ? " · " + saved.supplier_name : ""} · {expandJobs(jobs).length} label{expandJobs(jobs).length === 1 ? "" : "s"} ready</b>
-        {!!jobs.length && <button className="btn p" disabled={printer.busy} onClick={reprint}>Print saved labels</button>}
+        {!!jobs.length && <button className={"btn" + (showCarton ? "" : " p")} disabled={printer.busy} onClick={reprint}>Print all {expandJobs(jobs).length} stickers</button>}
+        {!!jobs.length && <button className={"btn" + (showCarton ? " p" : "")} onClick={() => setShowCarton(v => !v)}>{showCarton ? "Hide cartons" : "Carton by carton"}</button>}
         <a className="btn" href={"#/labels/purchase/" + saved.id}>Open in QR labels</a>
         <button type="button" className="linkbtn" onClick={() => { setSaved(null); setJobs([]); void setSetting(LAST, null); }}>Close</button>
       </div>
       <StickerQuickBar cfg={cfg} onChange={setCfg} />
-      <div className="xs mut">This stays here until you close it or approve the next bill — no need to read the bill photo again. Change the sticker above, then “Print saved labels”. The stock went in when the bill was approved: printing the stickers again never adds stock again.</div>
-      <div className="tw"><table className="pos-t"><thead><tr><th>Item</th><th>Style</th><th>Colour</th><th className="r">Qty</th><th className="r">Rate</th></tr></thead><tbody>
-        {saved.items.map((l, i) => <tr key={i}><td>{l.item}</td><td className="mono">{l.style}</td><td>{l.color}</td><td className="r">{l.pack > 1 ? l.pkts * l.pack : l.qty}</td><td className="r">{l.rate ? (l.rate / 100).toFixed(2) : "—"}</td></tr>)}
-      </tbody></table></div>
+      {showCarton && !!jobs.length
+        ? <CartonPrint purchase={saved} jobs={jobs} busy={printer.busy} print={async q => { setError(""); await sendToPrinter(q, true); }} />
+        : <>
+          <div className="xs mut">Stays here until you close it. Printing again never adds stock again.</div>
+          <div className="tw"><table className="pos-t"><thead><tr><th>Item</th><th>Style</th><th>Colour</th><th className="r">Qty</th><th className="r">Rate</th></tr></thead><tbody>
+            {saved.items.map((l, i) => <tr key={i}><td>{l.item}</td><td className="mono">{l.style}</td><td>{l.color}</td><td className="r">{l.pack > 1 ? l.pkts * l.pack : l.qty}</td><td className="r">{l.rate ? (l.rate / 100).toFixed(2) : "—"}</td></tr>)}
+          </tbody></table></div>
+        </>}
     </div>}
     {!d.rows.length && !saved && <details className="note" open>
       <summary><b>Sticker settings</b> <span className="xs mut">— what prints on each sticker, its position and text size. Saved on this computer.</span></summary>
@@ -754,8 +788,15 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
         <RackPicker value={d.rack} onChange={rack => set({ rack })} /></div>
 
       <label className="row sm" style={{ gap: 6 }}><input type="checkbox" checked={more} onChange={e => setMore(e.target.checked)} /> More details: collection / style and material</label>
-      {(!!missingSr.length || !!repeats.length) && <div className="note bad bill-gaps" role="alert">
+      <QuickLineBox ref={quickRef} prevItem={[...d.rows].reverse().find(r => r.item.trim())?.item || ""} prevPack={Number([...d.rows].reverse().find(r => r.item.trim())?.packSource === "manual" ? [...d.rows].reverse().find(r => r.item.trim())?.pack : 1) || 1} expectCode={d.rows.filter(r => r.style.trim() && !r.autoStyle).length >= 2}
+        money={money} nextSr={nextSrOf(d.rows.length === 1 && !d.rows[0].item.trim() && !d.rows[0].style.trim() ? [] : d.rows)} disabled={busy} onAdd={addQuick} />
+      {(!!missingSr.length || !!repeats.length || !!boxGuess) && <div className="note bad bill-gaps" role="alert">
         <b>Check with the bill:</b>
+        {!!boxGuess && <button type="button" className="btn sm p" disabled={busy} title={`Pieces per box is 1 on these lines, but their quantities are all in ${boxGuess}s`} onClick={() => {
+          set({ rows: d.rows.map(r => Number(r.qty) > 0 && Number(r.qty) % boxGuess === 0 && (!r.pack || r.pack === "1") && r.packSource !== "manual" && r.packSource !== "bill"
+            ? { ...r, pack: String(boxGuess), packSource: "manual" as const, stickers: "" } : r) });
+          toast(`Boxes of ${boxGuess}: one sticker per box`);
+        }}>Boxes of {boxGuess}? Set X{boxGuess} on all lines</button>}
         {missingSr.map(n => <button key={"m" + n} type="button" className="btn sm" disabled={busy} title={`The bill's Sr. ${n} was not read. Adds an empty line ${n} in its place.`} onClick={() => {
           const at = d.rows.findIndex(r => /^\d+$/.test((r.sr || "").trim()) && Number(r.sr) > n);
           const rows = [...d.rows]; rows.splice(at < 0 ? rows.length : at, 0, { ...blank(packetDefault), sr: String(n) });
@@ -889,6 +930,7 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
       {!!autoFill.length && <div className="xs mut">Approve fills in by itself — {autoFill.join(" · ")}. Change any of them above if you like.</div>}
       <label className="row"><input type="checkbox" checked={reviewed} onChange={e => setReviewed(e.target.checked)} />
         {d.check?.ok ? "The lines add up to the bill. I checked the highlighted cells and the selling rates." : "I checked quantities, units, costs, selling rates and tax/freight differences."} <span className="xs mut">(optional)</span></label>
+      <label className="row"><input type="checkbox" checked={cartonMode} disabled={atShop} onChange={e => { setCartonMode(e.target.checked); setShowCarton(e.target.checked); void setSetting("carton_mode", e.target.checked); }} /> <b>Carton by carton</b> — save the bill, then print each carton's stickers as you open it</label>
       <label className="row"><input type="checkbox" checked={atShop} onChange={e => setAtShop(e.target.checked)} /> Print the stickers at the shop computer (not here)</label>
       <button className="btn p" disabled={!ready4 || !!photoUploads.size} onClick={approve}>
         {busy ? "Working…" : `Approve: draft ${d.rows.length} product${d.rows.length === 1 ? "" : "s"}${labelCount ? ` & print ${labelCount} label${labelCount === 1 ? "" : "s"}` : " & save purchase"}`}

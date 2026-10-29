@@ -1533,3 +1533,12 @@ tr.act-estimate td { background: #fde8e8; }
 .purchase-photo .note.warn{color:#4A3300} .purchase-photo .note.bad{color:#7A1F1A}
 html[data-company="gst"] .purchase-photo .note.warn{color:var(--warn)} html[data-company="gst"] .purchase-photo .note.bad{color:var(--bad)}
 .purchase-photo .purchase-lines input::placeholder{color:var(--ink-2);opacity:.9}
+/* Owner, 29 Oct: one box to type a bill line; cartons ticked and printed one at a time */
+.quick-line{background:var(--surface);border:2px solid var(--gold-d);border-radius:12px;padding:10px 12px}
+.quick-line .quick-in{font-size:18px;font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:.02em}
+.quick-line .quick-sr{font-size:15px;min-width:54px}
+.quick-line .quick-preview{font-size:15px;color:var(--ink)}
+.carton-print .carton-head{font-size:18px}
+.carton-print .carton-in{font-size:18px;min-width:280px}
+.carton-t tbody tr{cursor:pointer} .carton-t tbody tr.on{background:var(--warn-l)} .carton-t tbody tr.done{opacity:.6}
+.carton-t td{font-size:15px}

@@ -147,8 +147,13 @@ export function canServe(p: AIProvider, parts: AIPart[]): boolean {
   return true;
 }
 
+/* 29 Oct: three strip readings of one bill each ran past the server's limit and were cut off, so lines went missing.
+   Every call now stops in time for the next provider to have its turn. */
+const wait = (o: { timeoutMs?: number; deadline?: number }, fallback: number) =>
+  Math.max(5000, Math.min(o.timeoutMs ?? fallback, o.deadline ? o.deadline - Date.now() : Infinity));
+
 /* ---- OpenAI-dialect call that can carry images (serves OpenAI and Groq) ---- */
-async function chatOpenAIDialect(p: "openai" | "groq", parts: AIPart[], o: { system?: string; json?: boolean; temperature?: number; timeoutMs?: number }): Promise<string> {
+async function chatOpenAIDialect(p: "openai" | "groq", parts: AIPart[], o: { system?: string; json?: boolean; temperature?: number; timeoutMs?: number; deadline?: number }): Promise<string> {
   const key = env(p === "openai" ? "OPENAI_API_KEY" : "GROQ_API_KEY");
   if (!key) throw new ProviderError(p, 503, "no_key", `${p === "openai" ? "OPENAI_API_KEY" : "GROQ_API_KEY"} is not set`);
   const content = parts.map(part => "text" in part
@@ -165,7 +170,7 @@ async function chatOpenAIDialect(p: "openai" | "groq", parts: AIPart[], o: { sys
     try {
       return await fetch(ENDPOINT[p], {
         method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-        body: JSON.stringify(b), signal: AbortSignal.timeout(o.timeoutMs ?? 45_000),
+        body: JSON.stringify(b), signal: AbortSignal.timeout(wait(o, 45_000)),
       });
     } catch (e: any) {
       const t = /timeout|abort/i.test(String(e?.name || e?.message));
@@ -213,7 +218,7 @@ async function liveGeminiModels(key: string): Promise<string[]> {
 }
 
 /* ---- Gemini, same shape in and out ---- */
-async function chatGemini(parts: AIPart[], o: { system?: string; json?: boolean; temperature?: number; timeoutMs?: number }): Promise<string> {
+async function chatGemini(parts: AIPart[], o: { system?: string; json?: boolean; temperature?: number; timeoutMs?: number; deadline?: number }): Promise<string> {
   const key = env("GEMINI_API_KEY");
   if (!key) throw new ProviderError("groq", 503, "no_key", "GEMINI_API_KEY is not set");   // provider field is cosmetic here
   const body: any = {
@@ -227,11 +232,12 @@ async function chatGemini(parts: AIPart[], o: { system?: string; json?: boolean;
   const models = (alive.length ? alive : all).slice(0, 6);
   let r!: Response, j: any = {}, best: { r: Response; j: any; rank: number } | undefined;
   for (const model of models) {
+    if (o.deadline && Date.now() > o.deadline - 5000 && best) break;   // out of time: the next provider's turn
     for (let tryNo = 0; tryNo < 2; tryNo++) {
       try {
         r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
           method: "POST", headers: { "content-type": "application/json", "x-goog-api-key": key },
-          body: JSON.stringify(body), signal: AbortSignal.timeout(o.timeoutMs ?? 45_000),
+          body: JSON.stringify(body), signal: AbortSignal.timeout(wait(o, 45_000)),
         });
       } catch (e: any) {
         const t = /timeout|abort/i.test(String(e?.name || e?.message));
@@ -241,10 +247,10 @@ async function chatGemini(parts: AIPart[], o: { system?: string; json?: boolean;
       if (r.ok) break;
       // 25 Oct: "This model is currently experiencing high demand" (503): wait a moment and ask once more
       const busy = r.status === 503 || r.status === 500 || /high demand|overloaded|unavailable/i.test(String(j?.error?.message || ""));
-      if (!busy || tryNo) break;
+      if (!busy || tryNo || (o.deadline && Date.now() > o.deadline - 15000)) break;
       await new Promise(ok => setTimeout(ok, 1200));
     }
-    if (r.ok) break;
+    if (r.ok) { console.info(`[ai] gemini answered with ${model}`); break; }
     const msg = String(j?.error?.message || "");
     const retired = r.status === 404 || /no longer available|not found|is not supported|deprecated/i.test(msg);
     const busy = r.status === 503 || r.status === 500 || /high demand|overloaded|unavailable/i.test(msg);
@@ -264,18 +270,19 @@ async function chatGemini(parts: AIPart[], o: { system?: string; json?: boolean;
 export type AIAttempt = { provider: AIProvider; ok: boolean; skipped?: boolean; kind?: string; message?: string };
 
 /** Ask one provider. Exported so a caller can pin one deliberately. */
-export const askOne = (p: AIProvider, parts: AIPart[], o: { system?: string; json?: boolean; temperature?: number; timeoutMs?: number } = {}) =>
+export const askOne = (p: AIProvider, parts: AIPart[], o: { system?: string; json?: boolean; temperature?: number; timeoutMs?: number; deadline?: number } = {}) =>
   p === "gemini" ? chatGemini(parts, o) : chatOpenAIDialect(p, parts, o);
 
 /** OpenAI → Gemini → Groq. Returns the first usable answer and how it got there. */
 export async function askAI(
   parts: AIPart[],
-  o: { system?: string; json?: boolean; temperature?: number; timeoutMs?: number; accept?: (raw: any) => any } = {},
+  o: { system?: string; json?: boolean; temperature?: number; timeoutMs?: number; budgetMs?: number; accept?: (raw: any) => any } = {},
   order: AIProvider[] = DEFAULT_ORDER,
 ): Promise<{ text: string; data?: any; provider: AIProvider; attempts: AIAttempt[] }> {
   const attempts: AIAttempt[] = [];
   let asked = 0;
-  for (const p of order) {
+  const start = Date.now(), budget = o.budgetMs ?? 0;
+  for (const [k, p] of order.entries()) {
     if (!canServe(p, parts)) {
       const keyed = p === "openai" ? openaiConfigured() : p === "gemini" ? geminiConfigured() : groqConfigured();
       attempts.push({ provider: p, ok: false, skipped: true, message: !keyed ? "no API key" : "no vision model configured" });
@@ -283,7 +290,9 @@ export async function askAI(
     }
     asked++;
     try {
-      const text = await askOne(p, parts, o);
+      // with a budget, each provider must leave ~35 s for every provider after it
+      const later = order.slice(k + 1).filter(q => canServe(q, parts)).length;
+      const text = await askOne(p, parts, budget ? { ...o, deadline: start + budget - later * 35_000 } : o);
       const data = o.json ? (o.accept ? o.accept(parseJsonLoose(text)) : parseJsonLoose(text)) : undefined;
       attempts.push({ provider: p, ok: true });
       return { text, data, provider: p, attempts };

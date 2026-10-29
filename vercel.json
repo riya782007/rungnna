@@ -34,7 +34,7 @@
       "maxDuration": 60
     },
     "api/purchase-photo.ts": {
-      "maxDuration": 60
+      "maxDuration": 300
     }
   },
   "headers": [
