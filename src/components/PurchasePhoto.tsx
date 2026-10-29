@@ -502,7 +502,10 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
   };
 
   /* THE one approval: drafts the products, records the purchase, and sends the labels — one press. */
-  const approve = async () => {
+  /* lineIdx: the Print button on one bill line (owner, 29 Oct: "print, next, next"). The bill is saved first — stock in
+     once — and only that line's stickers print; the other lines wait in the list with their own Print buttons. */
+  const [autoSr, setAutoSr] = useState<string | undefined>();
+  const approve = async (lineIdx?: number) => {
     if (photoUploads.size) return;
     if (lock.current) return;
     lock.current = true; setBusy(true); setError("");
@@ -595,6 +598,7 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
         toast(`Purchase ${p.no} saved · ${expandJobs(queue).length} stickers will print at the shop computer`);
         return;
       }
+      if (lineIdx !== undefined) { setAutoSr(filled[lineIdx]?.sr?.trim() || String(lineIdx + 1)); setShowCarton(true); return; }
       if (cartonMode) { setShowCarton(true); toast(`Purchase ${p.no} saved · type the Sr. of the first carton's lines and press Enter`); return; }
       const how = await sendToPrinter(queue, true);
       toast(how === "none" ? `Purchase ${p.no} saved · no stickers requested` : how === "browser" ? `Purchase ${p.no} saved · opening the label print window` : `Purchase ${p.no} saved · starting label printing`);
@@ -752,7 +756,7 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
       </div>
       <StickerQuickBar cfg={cfg} onChange={setCfg} />
       {showCarton && !!jobs.length
-        ? <CartonPrint purchase={saved} jobs={jobs} busy={printer.busy} print={async q => { setError(""); await sendToPrinter(q, true); }} />
+        ? <CartonPrint purchase={saved} jobs={jobs} busy={printer.busy} autoSr={autoSr} onAutoDone={() => setAutoSr(undefined)} print={async q => { setError(""); await sendToPrinter(q, true); }} />
         : <>
           <div className="xs mut">Stays here until you close it. Printing again never adds stock again.</div>
           <div className="tw"><table className="pos-t"><thead><tr><th>Item</th><th>Style</th><th>Colour</th><th className="r">Qty</th><th className="r">Rate</th></tr></thead><tbody>
@@ -824,9 +828,12 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
         }}>{x.style} on Sr. {x.lines.join(" & ")}</button>)}
       </div>}
       <div className="selection-bar"><SelectAll ids={d.rows.map(r => r.review_id!)} selected={selection} onChange={setSelection} label="Select all purchase lines" /><span className="sm">{d.rows.filter(r => selection.has(r.review_id!)).length} selected</span><DeleteButton className="btn sm bad" disabled={busy || !d.rows.some(r => selection.has(r.review_id!))} onDelete={() => removeRows(d.rows.filter(r => selection.has(r.review_id!)).map(r => r.review_id!))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }} title="↑↓ lines · ←→ fields · Enter on the last line: next line, copied · Space select · Shift+↑↓ range">Ctrl+Enter: approve &amp; print</span></div>
-      <div ref={linesRef} className="tw purchase-lines" onKeyDown={onPurchaseGridKey}><table className="pos-t"><thead><tr>{["No.", ...lineFields.map(f => captions[f]), "Jewellery photo", "Supplier S.No.", ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
+      <div ref={linesRef} className="tw purchase-lines" onKeyDown={onPurchaseGridKey}><table className="pos-t"><thead><tr>{["No.", "Print", ...lineFields.map(f => captions[f]), "Jewellery photo", "Supplier S.No.", ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
         {d.rows.map((r, i) => <tr key={r.review_id || i}>
           <td className="line-no" data-l="Line" title="Line number: the same small boxed number printed on this line's stickers"><input type="checkbox" aria-label={"Select purchase line " + (i + 1)} checked={selection.has(r.review_id!)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(r.review_id!) : next.delete(r.review_id!); return next; })} />{r.sr?.trim() ? <span title={"Serial on the supplier's bill (line " + (i + 1) + " here)"}>{r.sr}</span> : i + 1}</td>
+          <td data-l="Print"><button type="button" className="btn sm p line-print" disabled={busy || !ready4 || !!photoUploads.size}
+            title="Saves the bill (stock in once) and prints only this line's stickers. The other lines then wait with their own Print buttons."
+            onClick={() => void approve(i)}>Print</button></td>
           {lineFields.map(k => k === "costcode" ? <td key={k} data-l={captions[k]} className="mono b" title="The cost as the shop's code (only people allowed to see costs see the rupees)">{codeFor(r)}</td> : <td key={k} data-l={captions[k]}>
             <input className={"in" + ((k === "style" && r.autoStyle) || d.check?.fixes.some(f => f.line === i + 1 && f.field === k) ? " auto-filled" : "") + (k === "cost" && lowCost.includes(i + 1) ? " cost-low" : "") + (k === "style" && repeatedRow(r) ? " cost-low" : "") + (r.proof && (k === "style" || k === "qty" || k === "cost") ? " auto-filled" : "")} aria-label={`${k} line ${i + 1}`}
               title={k === "entry_code" ? "Editable maker initial + entry date (DDMMYY). This assumed code does not encode price." : ["qty", "pack", "stickers"].includes(k) ? `Enter copies this ${captions[k].toLowerCase()} to the next line. Type a new number to change it.${k === "stickers" ? " Blank means one per packet; 0 prints none." : ""}` : k === "style" && r.autoStyle ? "The bill printed no article number — this was built from the item and its rate. Edit it if you have the supplier's own code." : undefined}
@@ -958,7 +965,7 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
         {d.check?.ok ? "The lines add up to the bill. I checked the highlighted cells and the selling rates." : "I checked quantities, units, costs, selling rates and tax/freight differences."} <span className="xs mut">(optional)</span></label>
       <label className="row"><input type="checkbox" checked={cartonMode} disabled={atShop} onChange={e => { setCartonMode(e.target.checked); setShowCarton(e.target.checked); void setSetting("carton_mode", e.target.checked); }} /> <b>Carton by carton</b> — save the bill, then print each carton's stickers as you open it</label>
       <label className="row"><input type="checkbox" checked={atShop} onChange={e => setAtShop(e.target.checked)} /> Print the stickers at the shop computer (not here)</label>
-      <button className="btn p" disabled={!ready4 || !!photoUploads.size} onClick={approve}>
+      <button className="btn p" disabled={!ready4 || !!photoUploads.size} onClick={() => void approve()}>
         {busy ? "Working…" : `Approve: draft ${d.rows.length} product${d.rows.length === 1 ? "" : "s"}${labelCount ? ` & print ${labelCount} label${labelCount === 1 ? "" : "s"}` : " & save purchase"}`}
       </button>
       {!busy && !!missing.length && <div className="sm bad-text" role="status">To approve: {missing.join(" · ")}</div>}

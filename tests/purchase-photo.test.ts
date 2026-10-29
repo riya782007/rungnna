@@ -17,8 +17,9 @@ beforeEach(async () => {
 });
 describe("reviewed photo purchases", () => {
   it("calculates missing selling rates without changing printed rates or guessing packaging", () => {
+    expect(pricePhotoRows([{ ...row, rate: "", unit: "BOX", cost: "240" }], DEFAULT_RULE)[0].rate).not.toBe("");   // owner, 29 Oct: TOPS by the box
     expect(pricePhotoRows([{ ...row, rate: "" }], DEFAULT_RULE)[0].rate).toBe("66.00");   // 65 → 66: label rates are even (owner, 18 Oct)
-    for (const patch of [{ rate: "100" }, { rate: "", cost: "unclear" }, { rate: "", unit: "DOZEN" }]) {
+    for (const patch of [{ rate: "100" }, { rate: "", cost: "unclear" }, { rate: "", unit: "GROSS" }]) {   // every shop unit (BOX, DOZEN…) is priced; an unknown one is not
       const r = { ...row, ...patch }; expect(pricePhotoRows([r], DEFAULT_RULE)[0]).toEqual(r);
     }
   });

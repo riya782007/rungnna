@@ -17,14 +17,19 @@ type Progress = { done: Record<string, number> };
 const keyOf = (id: string) => "carton_" + id;
 const up = (v?: string) => (v || "").trim().toUpperCase();
 
-export function CartonPrint({ purchase, jobs, print, busy }: { purchase: Purchase; jobs: Job[]; print: (queue: Job[]) => Promise<unknown>; busy?: boolean }) {
+/* Owner, 29 Oct (voice): "a print column, once — give it the print command, it comes out, then the next, the next".
+   Every line also has its own Print button; after it prints, the cursor waits on the next line's button, so Enter,
+   Enter, Enter goes down the bill one line at a time. autoSr: a line whose Print was pressed on the bill screen
+   before the bill was saved — it prints as soon as the saved bill is here. */
+export function CartonPrint({ purchase, jobs, print, busy, autoSr, onAutoDone }: { purchase: Purchase; jobs: Job[]; print: (queue: Job[]) => Promise<unknown>; busy?: boolean; autoSr?: string; onAutoDone?: () => void }) {
   const [prog, setProg] = useState<Progress>({ done: {} });
   const [ticked, setTicked] = useState<Set<string>>(new Set());
   const [text, setText] = useState("");
   const [working, setWorking] = useState(false);
   const box = useRef<HTMLInputElement>(null);
-  useEffect(() => { void getSetting<Progress>(keyOf(purchase.id), { done: {} }).then(p => setProg(p && p.done ? p : { done: {} })); setTicked(new Set()); }, [purchase.id]);
-  useEffect(() => { setTimeout(() => box.current?.focus(), 50); }, [purchase.id]);
+  const [loaded, setLoaded] = useState("");
+  useEffect(() => { void getSetting<Progress>(keyOf(purchase.id), { done: {} }).then(p => { setProg(p && p.done ? p : { done: {} }); setLoaded(purchase.id); }); setTicked(new Set()); }, [purchase.id]);
+  useEffect(() => { if (!autoSr) setTimeout(() => box.current?.focus(), 50); }, [purchase.id]);
 
   // one row per bill line, with the stickers that line prints
   const lines = useMemo(() => purchase.items.map((l, i) => {
@@ -55,6 +60,25 @@ export function CartonPrint({ purchase, jobs, print, busy }: { purchase: Purchas
     } catch (e: any) { toast(e?.message || "Printing did not start", true); }
     finally { setWorking(false); setTimeout(() => box.current?.focus(), 50); }
   };
+
+  const focusNext = (after: string, done: Record<string, number>) => {
+    const i = lines.findIndex(l => l.sr === after);
+    const next = lines.slice(i + 1).find(l => !done[l.sr] && l.stickers > 0) || lines.find(l => !done[l.sr] && l.stickers > 0);
+    setTimeout(() => (document.querySelector(`.carton-t button[data-sr="${next?.sr}"]`) as HTMLButtonElement | null)?.focus(), 80);
+  };
+  const printLine = async (l: (typeof lines)[number]) => {
+    await run([l], `Sr. ${l.sr}`);
+    const done = { ...prog.done, [l.sr]: carton };
+    focusNext(l.sr, done);
+  };
+  const autoRan = useRef("");
+  useEffect(() => {
+    if (!autoSr || loaded !== purchase.id || autoRan.current === purchase.id + autoSr || !jobs.length) return;
+    autoRan.current = purchase.id + autoSr;
+    const l = lines.find(x => x.sr === autoSr) || lines.find(x => x.sr.split("+").includes(autoSr));
+    onAutoDone?.();
+    if (l) void printLine(l);
+  }, [autoSr, loaded, purchase.id, jobs.length]);
 
   const enter = () => {
     const t = text.trim();
@@ -88,12 +112,14 @@ export function CartonPrint({ purchase, jobs, print, busy }: { purchase: Purchas
         {working ? "Printing…" : sel.length ? `Print carton ${carton} · ${selStickers} sticker${selStickers === 1 ? "" : "s"}` : `Tick the lines of carton ${carton}`}</button>
       {!!left.length && <button type="button" className="btn" disabled={busy || working} onClick={() => void run(left, "All left")}>Print all left ({left.reduce((n, l) => n + l.stickers, 0)})</button>}
     </div>
-    <div className="tw"><table className="pos-t carton-t"><thead><tr><th></th><th>Sr.</th><th>Item</th><th>Code</th><th className="r">Qty</th><th className="r">Stickers</th><th>Carton</th></tr></thead><tbody>
+    <div className="tw"><table className="pos-t carton-t"><thead><tr><th></th><th>Sr.</th><th>Item</th><th>Code</th><th className="r">Qty</th><th className="r">Stickers</th><th>Carton</th><th></th></tr></thead><tbody>
       {lines.map(l => <tr key={l.sr} className={(ticked.has(l.sr) ? "on " : "") + (prog.done[l.sr] ? "done" : "")} onClick={() => tick([l.sr], !ticked.has(l.sr))}>
         <td><input type="checkbox" aria-label={"Sr. " + l.sr + " in this carton"} checked={ticked.has(l.sr)} onChange={() => { /* the row's click does it */ }} /></td>
         <td className="mono b">{l.sr}</td><td>{l.item}</td><td className="mono">{l.style}{l.color ? " · " + l.color : ""}</td>
         <td className="r">{l.qty}</td><td className="r">{l.stickers}</td>
         <td>{prog.done[l.sr] ? <span className="ok-text">✓ {prog.done[l.sr]}</span> : ""}</td>
+        <td><button type="button" data-sr={l.sr} className={"btn sm" + (prog.done[l.sr] ? "" : " p")} disabled={busy || working || !l.stickers}
+          onClick={e => { e.stopPropagation(); void printLine(l); }}>{prog.done[l.sr] ? "Again" : "Print"} {l.stickers}</button></td>
       </tr>)}
     </tbody></table></div>
   </div>;

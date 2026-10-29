@@ -57,7 +57,8 @@ export function packOf(r: Pick<PhotoRow, "pack">): number {
 const packOrOne = (r: Pick<PhotoRow, "pack">) => { try { return packOf(r); } catch { return 1; } };
 export function pricePhotoRows(rows: PhotoRow[], rule: PricingRule): PhotoRow[] {
   return rows.map(r => {
-    if (r.rate.trim() || !r.cost.trim() || !/^(PCS|PAIR|SET)$/i.test(r.unit.trim())) return r;
+    // owner, 29 Oct: a TOPS line sold by the BOX came with no rate — every unit the shop sells in is priced the same way
+    if (r.rate.trim() || !r.cost.trim() || !UNIT_RE.test(r.unit.trim())) return r;
     try {
       const cost = moneyInput(r.cost);
       if (cost <= 0) return r;
