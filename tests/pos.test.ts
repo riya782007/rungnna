@@ -20,7 +20,9 @@ describe("owner's photographed QR", () => {
     expect(lineFrom(p)).toMatchObject({ item: "BALI", type: "PAIR", pack: 1, qty: 1, style: "K5209/", color: "KXZKLN", rate: 10000 });
     const b = await finalize({ ...newBill("owner", DEFAULT_SHOP), items: [lineFrom(p)] }, "");
     const html = renderToStaticMarkup(createElement(InvoiceSheet, { b, shop: DEFAULT_SHOP, format: "58mm" }));
-    expect(html).toContain("BALI"); expect(html).toContain("PAIR"); expect(html).toContain("100.00");
+    expect(html).toContain("BALI"); expect(html).toContain("PAIR");
+    // owner, 28 Oct: an estimate prints every rate and amount as 10% of the real one (₹100 → 10.00); the bill keeps ₹100
+    expect(html).toContain("10.00"); expect(html).not.toContain("100.00"); expect(b.items[0].rate).toBe(10000);
     expect((await db.bills.get(b.id))?.items[0].item).toBe("BALI");
   });
   it("reuses the same product on four scans and respects shop overrides", async () => {

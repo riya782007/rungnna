@@ -33,7 +33,9 @@ describe("roll printer slips after the bill (owner, 26 Oct)", () => {
   it("cash slip shows the customer, bill number and the amount to collect", () => {
     const html = renderToStaticMarkup(createElement(CashSlip, { b: saved({ carry_bags: 2 }), shop: DEFAULT_SHOP, width: 58 }));
     expect(html).toContain("CASH COUNTER"); expect(html).toContain("POONAM JI"); expect(html).toContain("EST/26/0002");
-    expect(html).toContain("TO COLLECT"); expect(html).toContain("2,461"); expect(html).toContain('data-thermal-width="58"');
+    expect(html).toContain("TO COLLECT");
+    // an estimate's slip shows 10% of the amount (₹2,461 → 246.10), like the estimate itself
+    expect(html).toContain("246.10"); expect(html).not.toContain("2,461"); expect(html).toContain('data-thermal-width="58"');
   });
   it("the bill mentions the carry bags", () => {
     expect(renderToStaticMarkup(createElement(InvoiceSheet, { b: saved({ carry_bags: 2 }), shop: DEFAULT_SHOP, format: "80mm" }))).toContain("Carry bags:");
