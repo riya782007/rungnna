@@ -60,7 +60,10 @@ type Draft = { store: string; rows: PhotoRow[]; supplier: string; billNo: string
   /* what the bill's own arithmetic said: shown so the owner checks only what is in doubt */
   check?: { summary: string; ok: boolean; fixes: LineFix[]; doubts: { line: number; why: string }[]; factor?: number };
   supplierName?: string;   // as read from the bill, for one-tap "add this supplier"
-  autoBillNo?: boolean };  // the bill printed no number; one was made from its date and total
+  autoBillNo?: boolean;  // the bill printed no number; one was made from its date and total
+  /** the last Sr. the bill's pages should reach, from the lines the AI counted (owner, 29 Oct: "18 lines, it read
+      16" — the two at the end were not named anywhere, so nothing said which were missing) */
+  expectTo?: number };
 
 /* "Take photo" from anywhere (the AI strip on every Stock tab) opens this reader's camera: directly when the reader
    is in a box of its own (`camera`), or by event when it is already on the page (Labels, Stock in). */
@@ -371,7 +374,7 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
     lock.current = true; setBusy(true); setError(""); setJobs([]); setSaved(null);
     if (!adding) { setBulkQty(""); setBulkRef(""); setQuantityNote(""); readSoFar.current = []; }
     try {
-      let current = adding ? d : { ...d, rows: [] as PhotoRow[], warnings: "", total: "" };
+      let current = adding ? d : { ...d, rows: [] as PhotoRow[], warnings: "", total: "", expectTo: undefined };
       /* One page per reading, sharper photos, and a page read short is read again (owner, 23 Oct: "a bill of
          30 lines reads only 15 or 20; Google Lens reads every line"). */
       for (let at = 0; at < files.length; at += 1) {
@@ -460,8 +463,11 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
         const printedNo = text(out.bill_no).trim();
         const counted = Number(text(out.lines_on_bill)) || 0;
         const keepNo = !!current.billNo && !current.autoBillNo;
+        const pageNs = raw.map((r: { sr: string }) => /^\d{1,4}$/.test(r.sr) ? Number(r.sr) : NaN).filter(Number.isFinite);
+        const expectTo = pageNs.length >= raw.length * 0.8 && counted > raw.length && counted <= raw.length + 12 ? Math.min(...pageNs) + counted - 1 : 0;
         current = {
           ...current,
+          expectTo: Math.max(current.expectTo || 0, expectTo) || undefined,
           rows: [...current.rows, ...rows], supplier, supplierName, total,
           ...costing,
           billNo: keepNo ? current.billNo : printedNo || fallbackBillNo(text(out.bill_date), checked.net),
@@ -623,7 +629,7 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
       await setSetting(LAST, { id: p.id });
       // Financial saving succeeded. Any subsequent print failure is recovered
       // by printing this saved purchase, never by approving it a second time.
-      set({ rows: [], supplier: D.supplier, billNo: "", total: "", discount: "", mult: "", extra: "", warnings: "", photoId: undefined });
+      set({ rows: [], expectTo: undefined, supplier: D.supplier, billNo: "", total: "", discount: "", mult: "", extra: "", warnings: "", photoId: undefined });
       setReviewed(false);
       const queue = await jobsFor(p);
       setJobs(queue);
@@ -729,10 +735,10 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
   const missingSr = useMemo(() => {
     const ns = d.rows.map(r => /^\d{1,4}$/.test((r.sr || "").trim()) ? Number(r.sr) : NaN).filter(Number.isFinite);
     if (ns.length < 3 || ns.length < d.rows.length * 0.8) return [] as number[];
-    const have = new Set(ns), lo = Math.min(...ns), hi = Math.max(...ns), gone: number[] = [];
+    const have = new Set(ns), lo = Math.min(...ns), hi = Math.max(...ns, d.expectTo || 0), gone: number[] = [];
     for (let n = lo; n <= hi && gone.length <= 12; n++) if (!have.has(n)) gone.push(n);
     return gone.length <= 12 ? gone : [];
-  }, [d.rows]);
+  }, [d.rows, d.expectTo]);
   const invented = autoArticleCount(d.rows);
   let total = "—", labelCount = 0, validation = "";
   try {
@@ -770,7 +776,7 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
       <button className="btn p bill-drop-btn" disabled={busy} onClick={() => setCam(true)}>
         <Camera size={22} />{busy ? "Reading the bill…" : "Take photo of the bill"}</button>
       <button className="linkbtn" disabled={busy} onClick={() => file.current?.click()}>or upload a photo or PDF of the bill</button>
-      <div className="xs mut">Up to 3 pages of one bill. Then check what is highlighted, and approve: the products are drafted and the labels print.</div>
+      <div className="xs mut">A bill of many pages: choose all its photos or its PDF at once (up to 12 pages) — they are read one after another into one bill. Then check what is highlighted, and approve.</div>
       <div className="row xs" style={{ justifyContent: "center", gap: 14 }}>
         <span className={notReady ? "bad-text" : "mut"}>{checking ? "Checking the AI…" : connection || ""}</span>
         <button className="linkbtn" disabled={busy || probing} onClick={testEach}>{probing ? "Testing…" : "Test each AI"}</button>
@@ -783,13 +789,14 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
     </div>}
     {!!d.rows.length && <div className="row"><b className="grow">{(d.supplierName && !OWN_SHOP.test(d.supplierName) && d.supplierName) || "Purchase bill"}{d.billNo ? <span className="xs mut"> · {d.billNo}</span> : null}</b>
       <button className="btn sm" disabled={busy} onClick={() => setCam(true)}><Camera size={15} />Add next page</button>
+      <button className="btn sm" disabled={busy} title="Add more pages of this bill from photos or a PDF — several at once" onClick={() => file.current?.click()}>+ Pages from file</button>
       <button className="btn sm" disabled={busy} title="Adds a blank line at the top" onClick={() => {
         set({ rows: [blank(packetDefault), ...d.rows] });
         setTimeout(() => (document.querySelector('input[aria-label="item line 1"]') as HTMLInputElement | null)?.focus(), 50);
       }}><Plus size={15} />Line</button>
       <button type="button" className="linkbtn" disabled={busy} onClick={async () => {
         if (busy || lock.current || !await confirmDelete("Clear this bill and start again? Nothing has been saved.")) return;
-        set({ rows: [], supplier: "", billNo: "", total: "", discount: "", mult: "", extra: "", warnings: "", check: undefined, supplierName: "", photoId: undefined, autoBillNo: undefined });
+        set({ rows: [], expectTo: undefined, supplier: "", billNo: "", total: "", discount: "", mult: "", extra: "", warnings: "", check: undefined, supplierName: "", photoId: undefined, autoBillNo: undefined });
         readSoFar.current = [];
         setDone({}); setSelection(new Set()); setError("");
         setBulkQty(""); setBulkPack(packetDefault); setBulkRef(""); setQuantityNote("");
@@ -1016,11 +1023,11 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
             const key = (l: { style: string; color?: string; qty: number }) => [l.style.trim().toUpperCase(), (l.color || "").trim().toUpperCase(), l.qty].join("|");
             const byKey = new Map(already.rows.map(r => [key(r), r]));
             const p = { ...already.p, items: already.p.items.map(l => { const r = byKey.get(key(l)); if (!r) return l; const { print_qty: _q, ...rest } = l; return { ...rest, label_pack: r.pack, ...(r.print_qty !== undefined ? { print_qty: r.print_qty } : {}), ...(r.sr?.trim() ? { bill_sr: r.sr.trim() } : {}) }; }), updated_at: now() };
-            try { await put("purchases", p); const q = await jobsFor(p); setSaved(p); setJobs(q); setAlready(null); set({ rows: [], billNo: "", total: "", discount: "", mult: "", extra: "", warnings: "", check: undefined, photoId: undefined }); await sendToPrinter(q, true); }
+            try { await put("purchases", p); const q = await jobsFor(p); setSaved(p); setJobs(q); setAlready(null); set({ rows: [], expectTo: undefined, billNo: "", total: "", discount: "", mult: "", extra: "", warnings: "", check: undefined, photoId: undefined }); await sendToPrinter(q, true); }
             catch (e: any) { setError(e.message); }
           }}>Print {already.now} stickers as on this screen</button>}
           <button className={"btn" + (already.now === already.labels ? " p" : "")} disabled={printer.busy} onClick={async () => { const q = await jobsFor(already.p); setSaved(already.p); setJobs(q); setAlready(null); try { await sendToPrinter(q, true); } catch (e: any) { setError(e.message); } }}>Print its {already.labels} saved stickers</button>
-          <button className="btn" onClick={() => { set({ rows: [], billNo: "", total: "", discount: "", mult: "", extra: "", warnings: "", check: undefined, photoId: undefined }); setAlready(null); }}>Clear — next bill</button>
+          <button className="btn" onClick={() => { set({ rows: [], expectTo: undefined, billNo: "", total: "", discount: "", mult: "", extra: "", warnings: "", check: undefined, photoId: undefined }); setAlready(null); }}>Clear — next bill</button>
         </div>
         {already.now !== already.labels && <span className="sm">The saved bill has {already.labels} stickers; this screen makes {already.now}. Quantities and stock do not change either way.</span>}
       </div>}
