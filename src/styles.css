@@ -1526,3 +1526,10 @@ tr.act-estimate td { background: #fde8e8; }
    break, and its grey fill came out as dots. One heading at the top only, no grey fill on thermal paper. */
 .inv.thermal .inv-t thead{display:table-row-group}
 .inv.thermal .inv-t th{background:none!important}
+.bill-gaps{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+/* Owner, 29 Oct: "these light-coloured words I can't read". On the bill → stickers screen the small grey notes are
+   dark and a size bigger, and the warning boxes use full-strength text. */
+.purchase-photo .mut{color:var(--ink-2)} .purchase-photo .xs{font-size:13px} .purchase-photo .note{font-size:14px}
+.purchase-photo .note.warn{color:#4A3300} .purchase-photo .note.bad{color:#7A1F1A}
+html[data-company="gst"] .purchase-photo .note.warn{color:var(--warn)} html[data-company="gst"] .purchase-photo .note.bad{color:var(--bad)}
+.purchase-photo .purchase-lines input::placeholder{color:var(--ink-2);opacity:.9}

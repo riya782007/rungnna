@@ -58,19 +58,51 @@ export function srSpan(rows: ReadRow[]): number {
   const lo = Math.min(...ns), hi = Math.max(...ns);
   return hi - lo + 1 <= 300 ? hi - lo + 1 : 0;
 }
-/** Lines from several readings of one page, each line once, in the bill's own order. */
+/** Lines from several readings of one page, each line once, in the bill's own order.
+    parts[0] is the whole-page reading; the rest are close-up strips. Where the readings disagree about what is
+    on a Sr. line, most votes win, and a close-up strip beats the whole page (owner, 29 Oct: the whole-page read
+    slipped by one line, so "3902" turned up on two Sr. numbers and the real codes of lines 17–18 were lost). */
 export function joinParts(parts: ReadRow[][]): ReadRow[] {
-  const bySr = new Map<string, ReadRow>(), loose: ReadRow[] = [], seenKey = new Set<string>();
-  for (const part of parts) for (const r of part || []) {
-    const sr = String(r.sr ?? "").trim();
-    if (sr) { if (!bySr.has(sr)) bySr.set(sr, r); continue; }
-    const k = key(r); if (seenKey.has(k)) continue; seenKey.add(k); loose.push(r);
+  const cands = new Map<string, { r: ReadRow; votes: number; style: string }[]>(), loose: ReadRow[] = [], seenKey = new Set<string>();
+  const styleOf = (r: ReadRow) => String(r.style ?? "").trim().toUpperCase().replace(/\s+/g, "");
+  parts.forEach((part, p) => {
+    const weight = p === 0 && parts.length > 1 ? 1 : 1.5;
+    for (const r of part || []) {
+      const sr = String(r.sr ?? "").trim();
+      if (!sr) { const k = key(r); if (!seenKey.has(k)) { seenKey.add(k); loose.push(r); } continue; }
+      const list = cands.get(sr) || [];
+      const same = list.find(c => c.style === styleOf(r) && String(c.r.qty ?? "").trim() === String(r.qty ?? "").trim());
+      if (same) { same.votes += weight; if (weight > 1) same.r = r; }   // a close-up's own values are kept
+      else list.push({ r, votes: weight, style: styleOf(r) });
+      cands.set(sr, list);
+    }
+  });
+  const pick = new Map<string, { r: ReadRow; style: string }>();
+  for (const [sr, list] of cands) { const best = [...list].sort((a, b) => b.votes - a.votes)[0]; pick.set(sr, best); }
+  // one code chosen for two Sr. lines: where another reading of one of those lines saw a code nobody else has, use it
+  const used = () => { const m = new Map<string, number>(); for (const v of pick.values()) if (v.style) m.set(v.style, (m.get(v.style) || 0) + 1); return m; };
+  for (const [sr, list] of cands) {
+    const u = used(), cur = pick.get(sr)!;
+    if (!cur.style || (u.get(cur.style) || 0) < 2) continue;
+    const alt = list.filter(c => c.style && c.style !== cur.style && !u.has(c.style)).sort((a, b) => b.votes - a.votes)[0];
+    if (alt) pick.set(sr, alt);
   }
-  const numbered = [...bySr.values()];
+  const numbered = [...pick.values()].map(v => v.r);
   if (numbered.every(r => Number.isFinite(srNum(r)))) numbered.sort((a, b) => srNum(a) - srNum(b));
   // lines without an Sr. that match a numbered one (same article, qty and rate) are the same line
   const have = new Set(numbered.map(key));
   return [...numbered, ...loose.filter(r => !have.has(key(r)))];
+}
+
+/** Lines that carry the same article code on two Sr. numbers — usually one of them misread. */
+export function repeatedCodes(rows: { style?: string; color?: string; sr?: string }[]): { style: string; lines: string[] }[] {
+  const by = new Map<string, string[]>();
+  rows.forEach((r, i) => {
+    const s = String(r.style ?? "").trim().toUpperCase(); if (!s) return;
+    const k = s + "|" + String(r.color ?? "").trim().toUpperCase();
+    by.set(k, [...(by.get(k) || []), String(r.sr ?? "").trim() || String(i + 1)]);
+  });
+  return [...by].filter(([, l]) => l.length > 1).map(([k, lines]) => ({ style: k.split("|")[0], lines }));
 }
 /** @deprecated two parts only — kept for older callers */
 export const joinHalves = ([top, bottom]: ReadRow[][]) => joinParts([top, bottom]);

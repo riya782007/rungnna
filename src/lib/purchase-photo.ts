@@ -122,7 +122,9 @@ export function combineRepeatedRows(rows: PhotoRow[]): { rows: PhotoRow[]; combi
     if (j === undefined) { at.set(key, out.length); out.push({ ...r, src: [i + 1] }); return; }
     const t = out[j];
     const same = up(t.item) === up(r.item) && up(t.unit) === up(r.unit) && t.rate.trim() === r.rate.trim() && t.cost.trim() === r.cost.trim() && String(t.pack || "1").trim() === String(r.pack || "1").trim();
-    if (!same) { conflict ||= `Lines ${t.src.join(", ")} and ${i + 1} are the same article/colour (${r.style}${r.color ? " · " + r.color : ""}) but differ in rate, cost, unit or packet. Make them match, or change one line's style/colour.`; out.push({ ...r, src: [i + 1] }); return; }
+    // named by the Sr. shown in the first column (owner, 29 Oct: "it says lines 8 and 10, the screen shows 9 and 11")
+    const no = (k: number) => rows[k - 1]?.sr?.trim() || String(k);
+    if (!same) { conflict ||= `Sr. ${t.src.map(no).join(", ")} and Sr. ${no(i + 1)} both have the code ${r.style.trim()}${r.color ? " · " + r.color : ""} but different ${t.rate.trim() !== r.rate.trim() || t.cost.trim() !== r.cost.trim() ? "rates" : "units or packets"}. One code is probably misread: correct it from the bill (both lines are marked red).`; out.push({ ...r, src: [i + 1] }); return; }
     const anySet = !!(t.stickers?.trim() || r.stickers?.trim());
     // a sticker of a combined line names both bill lines, e.g. "1-4+1-13", so either packet can be matched to the bill
     const sr = [t.sr, r.sr].map(x => (x || "").trim()).filter(Boolean).join("+");
@@ -130,6 +132,40 @@ export function combineRepeatedRows(rows: PhotoRow[]): { rows: PhotoRow[]; combi
     combined++;
   });
   return { rows: out.map(({ src, ...r }) => r as PhotoRow), combined, conflict };
+}
+
+/** Owner, 29 Oct: "remove this error — if something is wrong I'll correct it by hand". When he approves two lines
+    with one code at different prices anyway, the later one becomes its own article: the code + its cost in rupees
+    (3902 at ₹495 → 3902-495), the same way articles are built for bills that print none. */
+export function keepRepeatsApart(rows: PhotoRow[]): { rows: PhotoRow[]; renamed: { sr: string; from: string; to: string }[] } {
+  const up = (v?: string) => (v || "").trim().toUpperCase();
+  const first = new Map<string, PhotoRow>(), used = new Set(rows.map(r => up(r.style))), renamed: { sr: string; from: string; to: string }[] = [];
+  const out = rows.map((r, i) => {
+    if (!up(r.style)) return r;
+    const k = up(r.style) + "|" + up(r.color), t = first.get(k);
+    if (!t) { first.set(k, r); return r; }
+    const same = up(t.item) === up(r.item) && up(t.unit) === up(r.unit) && t.rate.trim() === r.rate.trim() && t.cost.trim() === r.cost.trim() && String(t.pack || "1").trim() === String(r.pack || "1").trim();
+    if (same) return r;
+    const rupees = (() => { try { const c = moneyInput(r.cost); return c > 0 ? String(Math.round(c / 100)) : ""; } catch { return ""; } })();
+    const stem = `${r.style.trim()}-${rupees || "2"}`;
+    let style = stem;
+    for (let n = 2; used.has(up(style)); n++) style = `${stem}-${n}`;
+    used.add(up(style));
+    renamed.push({ sr: r.sr?.trim() || String(i + 1), from: r.style.trim(), to: style });
+    return { ...r, style };
+  });
+  return { rows: out, renamed };
+}
+
+/* Owner, 29 Oct (voice, with the TIKA/NATH bill): "the bill clearly says how many boxes and pieces, and still the
+   stickers came out wrong". A bill that prints Box | Pcs | Qty (4 · 12 · 48PC) says it all: 4 packets of 12, so
+   4 stickers each marked X12 — whatever the packet default or a saved article says. */
+export function byBoxes(box: unknown, qty: unknown, pack: unknown): { stickers: string; pack?: string; packSource?: "bill" } {
+  const b = Number(String(box ?? "").trim()), q = Number(String(qty ?? "").trim()), p = Number(String(pack ?? "").trim());
+  if (!Number.isInteger(b) || b <= 0 || !Number.isFinite(q) || q <= 0 || b > q) return { stickers: "" };
+  if (p > 0 && p * b === q) return { stickers: String(b), pack: String(p), packSource: "bill" };
+  if (q % b === 0) return { stickers: String(b), pack: String(q / b), packSource: "bill" };
+  return { stickers: "" };
 }
 
 export function validatePhotoRows(rows: PhotoRow[]) {

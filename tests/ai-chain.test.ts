@@ -212,7 +212,7 @@ describe("Test each AI", () => {
     });
     const { probeAll } = await load();
     const r = await probeAll("AAAA", "4271");
-    expect(seen.sort()).toEqual(["gemini", "groq", "openai"]);          // all three asked, not a chain that stops early
+    expect([...new Set(seen)].sort()).toEqual(["gemini", "groq", "openai"]);          // all three asked, not a chain that stops early
     expect(r.map(x => [x.provider, x.ok])).toEqual([["openai", false], ["gemini", false], ["groq", true]]);
     expect(r[0].plain).toBe("OpenAI: out of credit. Add credit at platform.openai.com → Billing");
     expect(r[2].plain).toMatch(/^Groq: working, read 4271 in \d+\.\ds$/);
@@ -226,5 +226,28 @@ describe("Test each AI", () => {
     const groq = (await probeAll("AAAA", "4271")).find(x => x.provider === "groq")!;
     expect(groq.ok).toBe(false);
     expect(groq.plain).toBe('Groq: answered but read "4721" instead of 4271');
+  });
+});
+
+describe("Gemini model chosen from Google's own list (owner, 29 Oct: every fixed name was refused)", () => {
+  it("picks the newest plain Flash model first", async () => {
+    const { pickGeminiModels } = await load();
+    const list = ["gemini-2.5-flash", "gemini-3-flash-preview", "gemini-3-flash-lite", "gemini-3-pro", "gemini-flash-latest", "gemini-3-flash-image", "text-embedding-004", "gemini-3.5-flash"]
+      .map(n => ({ name: "models/" + n, supportedGenerationMethods: n.includes("embedding") ? ["embedContent"] : ["generateContent"] }));
+    expect(pickGeminiModels(list)).toEqual(["gemini-3.5-flash", "gemini-3-flash-preview", "gemini-2.5-flash", "gemini-flash-latest"]);
+  });
+  it("reads a bill with the listed model when the fixed names are gone", async () => {
+    ENV.GEMINI_API_KEY = "g";
+    const asked: string[] = [];
+    vi.spyOn(globalThis, "fetch" as any).mockImplementation(async (url: any) => {
+      const u = String(url);
+      if (u.includes("/models?")) return { ok: true, status: 200, json: async () => ({ models: [{ name: "models/gemini-3.5-flash", supportedGenerationMethods: ["generateContent"] }] }) } as any;
+      const m = /models\/([^:]+):/.exec(u)![1]; asked.push(m);
+      if (m !== "gemini-3.5-flash") return { ok: false, status: 404, json: async () => ({ error: { message: `models/${m} is not found` } }) } as any;
+      return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '{"ok":1}' }] } }] }) } as any;
+    });
+    const { askOne } = await load();
+    expect(await askOne("gemini", WITH_IMAGE, { json: true })).toBe('{"ok":1}');
+    expect(asked).toEqual(["gemini-3.5-flash"]);
   });
 });

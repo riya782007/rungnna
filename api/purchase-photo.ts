@@ -73,12 +73,16 @@ HANDWRITTEN ESTIMATE FORMS
 READING THE COLUMNS
 - sr is the line's own serial as the bill prints it, so stickers can point back to the bill line. Bills that number lines box-wise print it like "1-10" (box 1, line 10): use that one when the bill has both a plain Sr. column and a box-line column. Leave it empty on handwritten forms whose serial column holds a circled box count.
 - qty is the PIECE count. When a bill has both a Box column and a Qty column (e.g. Box 4, Qty 23 Pcs), qty is 23 and box is 4. Never multiply them.
+- Printed bills often have three count columns "Box | Pcs | Qty" (e.g. Box 4, Pcs 12, Qty 48PC): box is 4, pack is 12 (pieces in one box), qty is 48 — the Qty column. The Box column is never the quantity. If the Qty cell is unreadable, leave qty empty rather than copying Box.
+- Read the lines strictly top to bottom, one output row per printed line, in the bill's order. Never output a line twice and never skip one: the number of rows must equal the number of item lines.
 - cost is the UNIT rate, never the line total. If a row shows Rate 273.00 and Total 6279.00, cost is 273.
 - Handwritten estimate forms often write quantity and rate together as "23x252" or "24 x 75", meaning 23 pieces at rate 252. Split them: qty 23, cost 252. If the two numbers could be read either way round, leave both blank and say so in warnings.
 - A trailing column that equals qty x cost is the line total; do not put it in cost.
 
 ARTICLE NUMBERS
 - style is ONLY an article/design/model code actually printed on the bill (e.g. 0705, R.74, K5208).
+- Copy each line's own code exactly, character for character, from THAT line: "SET - 3902" is item SET, style 3902; "TIKA - 19020 TO 19854" is item TIKA, style "19020 TO 19854"; "SET - 8500-1 TO 8500-12" is style "8500-1 TO 8500-12". Never copy a code from the line above or below. If a line's code is unreadable, leave its style empty and say which Sr. in warnings — an empty style is fixed in seconds, a wrong one costs a carton of wrong stickers.
+- The same code printed on two lines is rare. Before returning a code twice, look at both lines again.
 - Many of this shop's bills have no article column and simply repeat a plain description like "CHOTI", "SETS" or "Copper Set" on many lines at different rates. In that case leave style EMPTY — the app fills it in. Never invent an article number, and never copy the description into style.
 - Keep every line separate even when the description repeats. Lines at different rates are different articles.
 

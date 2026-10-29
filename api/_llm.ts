@@ -187,6 +187,31 @@ async function chatOpenAIDialect(p: "openai" | "groq", parts: AIPart[], o: { sys
   return text;
 }
 
+/* 29 Oct: bills were read by the weak backup reader all day because every Gemini name in the fixed list was
+   refused ("models/gemini-3-flash is not found"). Google publishes which models a key may use; that list is
+   read once per server instance and the newest Flash model (not lite, image, audio or live) is asked first. */
+let geminiList: { at: number; names: string[] } | undefined;
+const geminiDead = new Set<string>();
+export function pickGeminiModels(list: { name?: string; supportedGenerationMethods?: string[] }[]): string[] {
+  const ver = (n: string) => { const m = /gemini-(\d+(?:\.\d+)?)/.exec(n); return m ? Number(m[1]) : 0; };
+  return list
+    .filter(m => (m.supportedGenerationMethods || []).includes("generateContent"))
+    .map(m => String(m.name || "").replace(/^models\//, ""))
+    .filter(n => /^gemini-/.test(n) && /flash/.test(n) && !/lite|image|audio|tts|live|embed|native|thinking|exp-\d|computer|robotics/.test(n))
+    .sort((a, b) => ver(b) - ver(a) || Number(/latest/.test(b)) - Number(/latest/.test(a)) || Number(/preview|exp/.test(a)) - Number(/preview|exp/.test(b)) || a.length - b.length);
+}
+async function liveGeminiModels(key: string): Promise<string[]> {
+  if (!geminiList || Date.now() - geminiList.at > 6 * 3600_000) {
+    try {
+      const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", { headers: { "x-goog-api-key": key }, signal: AbortSignal.timeout(6000) });
+      const j: any = r.ok ? await r.json() : {};
+      geminiList = { at: Date.now(), names: pickGeminiModels(Array.isArray(j?.models) ? j.models : []) };
+    } catch { geminiList = { at: Date.now() - 5.5 * 3600_000, names: [] }; }   // try the list again in half an hour
+  }
+  const pinned = env("GEMINI_MODEL").trim();
+  return [...(pinned && geminiList.names.includes(pinned) ? [pinned] : []), ...geminiList.names].filter(n => !geminiDead.has(n));
+}
+
 /* ---- Gemini, same shape in and out ---- */
 async function chatGemini(parts: AIPart[], o: { system?: string; json?: boolean; temperature?: number; timeoutMs?: number }): Promise<string> {
   const key = env("GEMINI_API_KEY");
@@ -196,25 +221,40 @@ async function chatGemini(parts: AIPart[], o: { system?: string; json?: boolean;
     generationConfig: { temperature: o.temperature ?? 0.2, ...(o.json ? { responseMimeType: "application/json" } : {}) },
   };
   if (o.system) body.systemInstruction = { parts: [{ text: o.system }] };
-  const models = [...new Set([geminiModel(), ...GEMINI_FALLBACKS])];
-  let r!: Response, j: any = {};
+  // the models Google says this key can use (cached), newest Flash first; then the fixed list as a last resort
+  const all = [...new Set([...(await liveGeminiModels(key)), geminiModel(), ...GEMINI_FALLBACKS])];
+  const alive = all.filter(n => !geminiDead.has(n));
+  const models = (alive.length ? alive : all).slice(0, 6);
+  let r!: Response, j: any = {}, best: { r: Response; j: any; rank: number } | undefined;
   for (const model of models) {
-    try {
-      r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-        method: "POST", headers: { "content-type": "application/json", "x-goog-api-key": key },
-        body: JSON.stringify(body), signal: AbortSignal.timeout(o.timeoutMs ?? 45_000),
-      });
-    } catch (e: any) {
-      const t = /timeout|abort/i.test(String(e?.name || e?.message));
-      throw new ProviderError("groq", 504, t ? "timeout" : "error", t ? "gemini took too long" : `gemini unreachable: ${e?.message || e}`);
+    for (let tryNo = 0; tryNo < 2; tryNo++) {
+      try {
+        r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+          method: "POST", headers: { "content-type": "application/json", "x-goog-api-key": key },
+          body: JSON.stringify(body), signal: AbortSignal.timeout(o.timeoutMs ?? 45_000),
+        });
+      } catch (e: any) {
+        const t = /timeout|abort/i.test(String(e?.name || e?.message));
+        throw new ProviderError("groq", 504, t ? "timeout" : "error", t ? "gemini took too long" : `gemini unreachable: ${e?.message || e}`);
+      }
+      j = await r.json().catch(() => ({}));
+      if (r.ok) break;
+      // 25 Oct: "This model is currently experiencing high demand" (503): wait a moment and ask once more
+      const busy = r.status === 503 || r.status === 500 || /high demand|overloaded|unavailable/i.test(String(j?.error?.message || ""));
+      if (!busy || tryNo) break;
+      await new Promise(ok => setTimeout(ok, 1200));
     }
-    j = await r.json().catch(() => ({}));
-    // a retired or unknown model: try the next one; anything else (quota, bad photo) is the answer
-    const retired = !r.ok && (r.status === 404 || /no longer available|not found|is not supported|deprecated/i.test(String(j?.error?.message || "")));
-    // 25 Oct: "This model is currently experiencing high demand" (503) — another Flash model usually answers
-    const busy = !r.ok && (r.status === 503 || /high demand|overloaded|unavailable/i.test(String(j?.error?.message || "")));
-    if (!retired && !busy) break;
+    if (r.ok) break;
+    const msg = String(j?.error?.message || "");
+    const retired = r.status === 404 || /no longer available|not found|is not supported|deprecated/i.test(msg);
+    const busy = r.status === 503 || r.status === 500 || /high demand|overloaded|unavailable/i.test(msg);
+    // remember the most useful failure: "busy" or "quota" says more than "this old model name is gone"
+    const rank = retired ? 0 : busy ? 2 : 1;
+    if (!best || rank > best.rank) best = { r, j, rank };
+    if (!retired && !busy) break;   // quota, a bad photo: the next model would say the same
+    if (retired) geminiDead.add(model);
   }
+  if (!r.ok && best) ({ r, j } = best);
   if (!r.ok) throw new ProviderError("groq", r.status, classify(r.status, j), j?.error?.message || `gemini error ${r.status}`);
   const text = (j?.candidates?.[0]?.content?.parts || []).map((x: any) => x.text || "").join("");
   if (!text.trim()) throw new ProviderError("groq", 502, "error", "gemini returned an empty answer");

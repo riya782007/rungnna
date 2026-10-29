@@ -12,7 +12,7 @@ import { compress, savePhoto } from "../lib/image";
 import { getRule, costCode, type PricingRule } from "../lib/pricing";
 import {
   preparePhotoRows, savePhotoPurchase, validatePhotoRows, pricePhotoRows, applyVendorTerms, repricePhotoRows, suspiciousCosts, restoreBillCosts,
-  autoArticle, autoArticleCount, draftLabelProducts, combineRepeatedRows, labelCountFor, lineSignature, isSamePage, nextPageNo, continueSr, readDiscount, readMultiplier, readExtra, applyCosting, spreadExtra, costingOf, type PhotoRow,
+  autoArticle, autoArticleCount, draftLabelProducts, combineRepeatedRows, keepRepeatsApart, byBoxes, labelCountFor, lineSignature, isSamePage, nextPageNo, continueSr, readDiscount, readMultiplier, readExtra, applyCosting, spreadExtra, costingOf, type PhotoRow,
 } from "../lib/purchase-photo";
 import { applyPhotoQuantities, copyLineBelow, readCount, repeatPhotoCount, stickersPerPacket, type RepeatedCountField } from "../lib/purchase-quantities";
 import { purchaseLabelJobs } from "../lib/purchase-labels";
@@ -29,7 +29,7 @@ import { SupplierNo } from "./SupplierNo";
 import { checkBill, checkSummary, matchSupplier, fallbackBillNo, type LineFix } from "../lib/billCheck";
 import { newParty } from "../lib/billing";
 import { UNITS, UNIT_RE } from "../lib/products";
-import { isPdf, expandPdfs, splitPage, joinParts, srSpan } from "../lib/pdf-pages";
+import { isPdf, expandPdfs, splitPage, joinParts, srSpan, repeatedCodes } from "../lib/pdf-pages";
 import { queueForShop, doneAtShop, useShopQueue, isPhoneLike, type RemotePrint } from "../lib/print-queue";
 
 const blank = (pack = "1"): PhotoRow => ({ review_id: uid(), item: "", style: "", color: "", unit: "PCS", hsn: "", qty: "", pack, packSource: "default", stickers: "", cost: "", rate: "" });
@@ -291,7 +291,7 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
 
   /* the two "apply" buttons confirm in green that they did something (owner, 18 Oct) */
   const [done, setDone] = useState<{ pricing?: string; pricingSig?: string; terms?: string }>({});
-  const set = (patch: Partial<Draft>) => { setReviewed(false); setD(x => ({ ...x, ...patch, ...(patch.rows && !("check" in patch) ? { check: undefined } : {}) })); };
+  const set = (patch: Partial<Draft>) => { setReviewed(false); if (patch.rows) setError(""); setD(x => ({ ...x, ...patch, ...(patch.rows && !("check" in patch) ? { check: undefined } : {}) })); };
   const row = (i: number, key: Field, value: string) =>
     set({ rows: d.rows.map((r, k) => k === i ? { ...r, [key]: value, ...(key === "style" ? { autoStyle: false } : {}), ...(key === "pack" ? { packSource: "manual" as const } : {}), ...(["item", "unit"].includes(key) ? { item_code: undefined } : {}) } : r) });
 
@@ -376,7 +376,7 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
         const checked = checkBill(readSoFar.current, total);
         // keep the bill's own cost on each line; a "selling rate" equal to the cost is just the supplier's price
         // read twice (owner's bill, 18 Oct: rate 170 = cost 170), so it is left for shop pricing to fill
-        const read: PhotoRow[] = checked.rows.slice(before).map(({ amount: _a, box: _b, ...r }) => ({ ...r, stickers: "", billCost: r.cost, rate: r.rate && Number(r.rate) === Number(r.cost) ? "" : r.rate }));
+        const read: PhotoRow[] = checked.rows.slice(before).map(({ amount: _a, box, ...r }) => ({ ...r, ...byBoxes(box, r.qty, r.pack), billCost: r.cost, rate: r.rate && Number(r.rate) === Number(r.cost) ? "" : r.rate }));
         // bills that print no article get one built from item + rate, so the lines neither collide nor merge
         const readName = OWN_SHOP.test(text(out.supplier)) ? "" : text(out.supplier).trim();
         const supplier = current.supplier || matchSupplier(readName, suppliers)?.id || "";
@@ -387,7 +387,6 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
           extra: current.extra || readExtra(out),
         };
         const rows = await preparePhotoRows(pricePhotoRows(autoArticle(applyCosting(read, { mult: costing.mult, less: costing.discount })), rule), supplier, packetDefault);
-        const boxes = out.rows.filter((r: any) => r?.box && String(r.box).trim() && String(r.box).trim() !== "0").length;
         const readBy = out.read_by ? String(out.read_by) : "";
         const fellBack = Array.isArray(out.attempts) && out.attempts.some((a: any) => a && a.ok === false && !a.skipped);
         const supplierName = current.supplierName || readName;
@@ -403,10 +402,11 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
           check: { summary: checkSummary(checked), ok: checked.addsUp === true && !checked.doubts.length, fixes: checked.fixes, doubts: checked.doubts, ...(checked.factor ? { factor: checked.factor } : {}) },
           warnings: [
             current.warnings,
-            ...(Array.isArray(out.warnings) ? out.warnings.map(String) : []),
-            counted > raw.length ? `The AI counted ${counted} lines on ${part.length > 1 ? "these pages" : "this page"} but read only ${raw.length}. Take the photo again (closer, one page at a time) or add the missing lines with + Line.` : "",
-            boxes ? `${boxes} line(s) showed a box/packet count. Printed packet sizes, known articles, or your saved packet default fill X automatically; check the quantities below.` : "",
-            fellBack && readBy ? `Read by ${readBy} — ${whyFellBack(out.attempts)}. Check these lines a little harder than usual.` : "",
+            // owner, 29 Oct: "remove unnecessary text". Only what he must act on: the supplier/buyer chatter and the
+            // box-column note are dropped; a missing Sr. is named above the lines, where it can be added with one tap
+            ...(Array.isArray(out.warnings) ? out.warnings.map(String).filter((w: string) => w.trim() && !/supplier|buyer|letterhead|box\/packet|packet count/i.test(w)) : []),
+            counted > raw.length && !srSpan(raw) ? `Read ${raw.length} of ${counted} lines — add the missing ones with + Line.` : "",
+            fellBack && readBy ? `Read by the backup AI (${readBy}) — ${whyFellBack(out.attempts)}. Check the codes and quantities.` : "",
           ].filter(Boolean).join("\n"),
           photoId: current.photoId || await savePhoto(files[0]),
         };
@@ -491,8 +491,13 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
       set({ supplier: supplierId, rack: rackId, billNo: billNoIn, rows: filled });
       const D = { ...d, supplier: supplierId, rack: rackId, billNo: billNoIn };
       // a bill listing the same article twice: add identical lines together instead of refusing
-      const merged = combineRepeatedRows(filled);
-      if (merged.conflict) throw new Error(merged.conflict);
+      let merged = combineRepeatedRows(filled);
+      if (merged.conflict) {
+        const apart = keepRepeatsApart(filled);
+        if (!confirm(`${merged.conflict.replace(/ One code is probably misread.*$/, "")}\n\nOK — they really are different: keep both (${apart.renamed.map(x => `Sr. ${x.sr} prints as ${x.to}`).join(", ")}).\nCancel — let me correct the code first.`)) throw new Error(merged.conflict);
+        set({ rows: apart.rows });
+        merged = combineRepeatedRows(apart.rows);
+      }
       if (merged.combined) { set({ rows: merged.rows }); toast(`${merged.combined} repeated line${merged.combined === 1 ? "" : "s"} added together`); }
       const cst = costingOf({ mult: d.mult, less: d.discount, extra: d.extra }), pct = cst.less;
       const rows = await preparePhotoRows(cst.extra ? spreadExtra(merged.rows, cst.extra) : merged.rows, D.supplier, packetDefault);
@@ -606,6 +611,17 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
 
   const vendor = suppliers.find(s => s.id === d.supplier);
   const lowCost = suspiciousCosts(d.rows);
+  /* Owner, 29 Oct: "it keeps saying lines 8 and 10 are the same article". A code on two lines is shown the moment
+     the bill is read, on the lines themselves, by the Sr. he sees — so it is corrected before approving, not after. */
+  const repeats = useMemo(() => repeatedCodes(d.rows), [d.rows]);
+  const repeatedRow = (r: PhotoRow) => { const s = (r.style || "").trim().toUpperCase(); return !!s && repeats.some(x => x.style === s); };
+  const missingSr = useMemo(() => {
+    const ns = d.rows.map(r => /^\d{1,4}$/.test((r.sr || "").trim()) ? Number(r.sr) : NaN).filter(Number.isFinite);
+    if (ns.length < 3 || ns.length < d.rows.length * 0.8) return [] as number[];
+    const have = new Set(ns), lo = Math.min(...ns), hi = Math.max(...ns), gone: number[] = [];
+    for (let n = lo; n <= hi && gone.length <= 12; n++) if (!have.has(n)) gone.push(n);
+    return gone.length <= 12 ? gone : [];
+  }, [d.rows]);
   const invented = autoArticleCount(d.rows);
   let total = "—", labelCount = 0, validation = "";
   try {
@@ -715,7 +731,7 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
         <StickerQuickBar cfg={cfg} onChange={setCfg} />
         {cfg.format !== "rungnna" && <OldCodesCard names={d.rows.map(r => r.item)} open={false} />}
         {!!preview.length && <>
-          <div className="row"><b>{labelCount} labels</b><span className="xs mut">Stickers: grey means one per packet; enter an exact count, or 0 for none. X is the quantity in each packet. · {cfg.w}×{cfg.h}mm · {cfg.output === "tspl" && directPrintSupported() ? "straight to the TSC printer" : "browser print sheet"}</span></div>
+          <div className="row"><b>{labelCount} labels</b><span className="xs mut">{cfg.w}×{cfg.h}mm · {cfg.output === "tspl" && directPrintSupported() ? "straight to the TSC printer" : "browser print sheet"}</span></div>
           <div className="label-preview">{preview.map((p, i) => <LabelView key={i} cfg={cfg} p={p} qtyOnLabel={p.pack || 1} line={d.rows[i]?.sr?.trim() || i + 1} />)}
             {d.rows.length > preview.length && <span className="xs mut">+{d.rows.length - preview.length} more designs</span>}</div>
         </>}
@@ -738,12 +754,25 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
         <RackPicker value={d.rack} onChange={rack => set({ rack })} /></div>
 
       <label className="row sm" style={{ gap: 6 }}><input type="checkbox" checked={more} onChange={e => setMore(e.target.checked)} /> More details: collection / style and material</label>
-      <div className="selection-bar"><SelectAll ids={d.rows.map(r => r.review_id!)} selected={selection} onChange={setSelection} label="Select all purchase lines" /><span className="sm">{d.rows.filter(r => selection.has(r.review_id!)).length} selected</span><DeleteButton className="btn sm bad" disabled={busy || !d.rows.some(r => selection.has(r.review_id!))} onDelete={() => removeRows(d.rows.filter(r => selection.has(r.review_id!)).map(r => r.review_id!))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }}>Keys: ↑↓ lines · ←→ fields · Enter on the last line: next line, copied · Ctrl+Enter: approve & print · Space select · Shift+↑↓ range</span></div>
+      {(!!missingSr.length || !!repeats.length) && <div className="note bad bill-gaps" role="alert">
+        <b>Check with the bill:</b>
+        {missingSr.map(n => <button key={"m" + n} type="button" className="btn sm" disabled={busy} title={`The bill's Sr. ${n} was not read. Adds an empty line ${n} in its place.`} onClick={() => {
+          const at = d.rows.findIndex(r => /^\d+$/.test((r.sr || "").trim()) && Number(r.sr) > n);
+          const rows = [...d.rows]; rows.splice(at < 0 ? rows.length : at, 0, { ...blank(packetDefault), sr: String(n) });
+          set({ rows });
+          setTimeout(() => (document.querySelector(`input[aria-label="style line ${(at < 0 ? rows.length : at + 1)}"]`) as HTMLInputElement | null)?.focus(), 50);
+        }}>+ Sr. {n} missing</button>)}
+        {repeats.map(x => <button key={"r" + x.style} type="button" className="btn sm" title="One of these is probably misread. Jumps to the second one." onClick={() => {
+          const i = d.rows.findIndex((r, k) => k > d.rows.findIndex(q => (q.style || "").trim().toUpperCase() === x.style) && (r.style || "").trim().toUpperCase() === x.style);
+          (document.querySelector(`input[aria-label="style line ${i + 1}"]`) as HTMLInputElement | null)?.focus();
+        }}>{x.style} on Sr. {x.lines.join(" & ")}</button>)}
+      </div>}
+      <div className="selection-bar"><SelectAll ids={d.rows.map(r => r.review_id!)} selected={selection} onChange={setSelection} label="Select all purchase lines" /><span className="sm">{d.rows.filter(r => selection.has(r.review_id!)).length} selected</span><DeleteButton className="btn sm bad" disabled={busy || !d.rows.some(r => selection.has(r.review_id!))} onDelete={() => removeRows(d.rows.filter(r => selection.has(r.review_id!)).map(r => r.review_id!))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }} title="↑↓ lines · ←→ fields · Enter on the last line: next line, copied · Space select · Shift+↑↓ range">Ctrl+Enter: approve &amp; print</span></div>
       <div ref={linesRef} className="tw purchase-lines" onKeyDown={onPurchaseGridKey}><table className="pos-t"><thead><tr>{["No.", ...lineFields.map(f => captions[f]), "Jewellery photo", "Supplier S.No.", ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
         {d.rows.map((r, i) => <tr key={r.review_id || i}>
           <td className="line-no" data-l="Line" title="Line number: the same small boxed number printed on this line's stickers"><input type="checkbox" aria-label={"Select purchase line " + (i + 1)} checked={selection.has(r.review_id!)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(r.review_id!) : next.delete(r.review_id!); return next; })} />{r.sr?.trim() ? <span title={"Serial on the supplier's bill (line " + (i + 1) + " here)"}>{r.sr}</span> : i + 1}</td>
           {lineFields.map(k => k === "costcode" ? <td key={k} data-l={captions[k]} className="mono b" title="The cost as the shop's code (only people allowed to see costs see the rupees)">{codeFor(r)}</td> : <td key={k} data-l={captions[k]}>
-            <input className={"in" + ((k === "style" && r.autoStyle) || d.check?.fixes.some(f => f.line === i + 1 && f.field === k) ? " auto-filled" : "") + (k === "cost" && lowCost.includes(i + 1) ? " cost-low" : "")} aria-label={`${k} line ${i + 1}`}
+            <input className={"in" + ((k === "style" && r.autoStyle) || d.check?.fixes.some(f => f.line === i + 1 && f.field === k) ? " auto-filled" : "") + (k === "cost" && lowCost.includes(i + 1) ? " cost-low" : "") + (k === "style" && repeatedRow(r) ? " cost-low" : "")} aria-label={`${k} line ${i + 1}`}
               title={k === "entry_code" ? "Editable maker initial + entry date (DDMMYY). This assumed code does not encode price." : ["qty", "pack", "stickers"].includes(k) ? `Enter copies this ${captions[k].toLowerCase()} to the next line. Type a new number to change it.${k === "stickers" ? " Blank means one per packet; 0 prints none." : ""}` : k === "style" && r.autoStyle ? "The bill printed no article number — this was built from the item and its rate. Edit it if you have the supplier's own code." : undefined}
               inputMode={k === "cost" || k === "rate" ? "decimal" : ["qty", "pack", "stickers"].includes(k) ? "numeric" : undefined}
               maxLength={k === "entry_code" ? 24 : undefined}
@@ -821,7 +850,7 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
 
       </details>
 
-      {!!invented && <div className="note sm">{invented} line{invented === 1 ? "" : "s"} had no article number on the bill. An article was built from the item and its rate (e.g. CHOTI-273) so lines at different rates stay separate — and so buying the same thing again at the same rate matches the same product. Edit any of them if the supplier has a code.</div>}
+      {!!invented && <div className="note sm">{invented} line{invented === 1 ? " has" : "s have"} no code on the bill — made from item + rate (e.g. SET-360). Type the bill's code if it has one.</div>}
 
       {money && <>
       <div className="row">
@@ -865,7 +894,6 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
         {busy ? "Working…" : `Approve: draft ${d.rows.length} product${d.rows.length === 1 ? "" : "s"}${labelCount ? ` & print ${labelCount} label${labelCount === 1 ? "" : "s"}` : " & save purchase"}`}
       </button>
       {!busy && !!missing.length && <div className="sm bad-text" role="status">To approve: {missing.join(" · ")}</div>}
-      <div className="xs mut">One press records the purchase, drafts the products onto {d.rack ? "the chosen rack" : "the rack"} and sends the labels. Nothing is printed before you press it.</div>
       </div>
     </>}
 
@@ -920,7 +948,6 @@ function BillCosting({ d, busy, onChange, hideRupees = false }: { d: { mult?: st
       {field("mult", "Multiply ×", "1")}{field("discount", "Less / discount %", "0")}{!hideRupees && field("extra", "Packing / freight ₹", "0", 120)}
       {!hideRupees && sample && (c.mult !== 1 || c.less) ? <span className="sm">e.g. printed ₹{sample.billCost ?? sample.cost}{c.mult !== 1 ? ` × ${c.mult}` : ""}{c.less ? ` − ${c.less}%` : ""} = <b>₹{sample.cost}</b> cost</span> : null}
     </div>
-    <div className="xs mut">Multiply and less % change every line's cost now, and the selling rates are worked out again from it. Packing / freight is spread over the lines by value when you approve. All of it is written on the saved purchase.</div>
   </fieldset>;
 }
 

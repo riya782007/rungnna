@@ -54,3 +54,52 @@ describe("lines typed by hand carry on the bill's Sr. (owner, 25 Oct)", () => {
     expect(continueSr([{ sr: "" }, { sr: "" }]).map(r => r.sr)).toEqual(["", ""]);
   });
 });
+
+import { repeatedCodes } from "../src/lib/pdf-pages";
+describe("owner, 29 Oct: the whole-page read slipped a line, so 3902 showed on Sr. 9 and 11", () => {
+  const L = (sr: number, style: string, qty = "10") => ({ sr: String(sr), style, qty, cost: "100" });
+  it("the close-up strips win over a slipped whole-page reading", () => {
+    const whole = [L(8, "SET-360"), L(9, "3902", "12"), L(10, "6548"), L(11, "3902"), L(17, "14001", "13"), L(18, "14001", "14")];
+    const top = [L(7, "6580"), L(8, "3902", "12"), L(9, "6548"), L(10, "19020"), L(11, "19026")];
+    const bottom = [L(16, "14001"), L(17, "8500-1 TO 8500-12", "156"), L(18, "7200-1 TO 7200-9", "108")];
+    const out = joinParts([whole, top, bottom]);
+    expect(out.map(r => `${r.sr}:${r.style}`)).toEqual(["7:6580", "8:3902", "9:6548", "10:19020", "11:19026", "16:14001", "17:8500-1 TO 8500-12", "18:7200-1 TO 7200-9"]);
+    expect(repeatedCodes(out)).toEqual([]);
+  });
+  it("names the bill's Sr. numbers of a code read twice", () => {
+    expect(repeatedCodes([L(9, "3902"), L(10, "6548"), L(11, "3902 ")])).toEqual([{ style: "3902", lines: ["9", "11"] }]);
+  });
+});
+
+import { keepRepeatsApart, combineRepeatedRows } from "../src/lib/purchase-photo";
+describe("owner, 29 Oct: one code at two prices can still be approved", () => {
+  const R = (sr: string, style: string, cost: string) => ({ review_id: sr, sr, item: "SET", style, color: "", unit: "PCS", hsn: "", qty: "10", pack: "1", stickers: "", cost, rate: "" }) as any;
+  it("names the later line after its cost, and the merge then has no conflict", () => {
+    const rows = [R("8", "3902", "410"), R("9", "6548", "510"), R("10", "3902", "495")];
+    expect(combineRepeatedRows(rows).conflict).toMatch(/^Sr\. 8 and Sr\. 10 both have the code 3902/);
+    const apart = keepRepeatsApart(rows);
+    expect(apart.renamed).toEqual([{ sr: "10", from: "3902", to: "3902-495" }]);
+    expect(combineRepeatedRows(apart.rows).conflict).toBeUndefined();
+  });
+});
+
+import { byBoxes } from "../src/lib/purchase-photo";
+describe("owner, 29 Oct: Box | Pcs | Qty on the bill decides the stickers", () => {
+  it("one sticker per box, each with the pieces in that box", () => {
+    expect(byBoxes("4", "48", "12")).toEqual({ stickers: "4", pack: "12", packSource: "bill" });
+    expect(byBoxes("1", "12", "")).toEqual({ stickers: "1", pack: "12", packSource: "bill" });
+    expect(byBoxes("2", "25", "")).toEqual({ stickers: "" });      // uneven boxes: left to the usual rules
+    expect(byBoxes("", "12", "12")).toEqual({ stickers: "" });
+  });
+});
+
+import { checkBill } from "../src/lib/billCheck";
+describe("owner, 29 Oct: TIKA/NATH bill came out 12 × 12", () => {
+  it("a box count read as the quantity is put right from the amount, not taken as a ×12 supplier rate", () => {
+    const L = (box: string, cost: string, amount: string) => ({ item: "TIKA", style: "", color: "", unit: "PCS", hsn: "", qty: box, box, pack: "12", stickers: "", cost, rate: "", amount }) as any;
+    const r = checkBill([L("4", "53", "2544"), L("2", "65", "1560"), L("1", "51", "612"), L("1", "67", "804")], "18336");
+    expect(r.factor).toBeUndefined();
+    expect(r.rows.map(x => x.qty)).toEqual(["48", "24", "12", "12"]);
+    expect(r.rows.map(x => byBoxes(x.box, x.qty, x.pack).stickers)).toEqual(["4", "2", "1", "1"]);
+  });
+});

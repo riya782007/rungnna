@@ -72,7 +72,11 @@ export function resolveDitto(rows: ReadRow[]): ReadRow[] {
    real cost of one piece is Amount ÷ Qty (= Rate × 5): that is what he pays, and what the selling rate is worked
    out from. The owner is told once. */
 export function sharedFactor(rows: ReadRow[]): number | undefined {
-  const ks = rows.map(r => { const q = wholeQty(r.qty), c = paise(r.cost), a = paise(r.amount); return q && c && a ? a / (q * c) : NaN; }).filter(k => Number.isFinite(k));
+  /* Owner, 29 Oct (TIKA/NATH bill, "Box 1 · Pcs 12 · Qty 12PC"): when the box count was read as the quantity,
+     every line is off by the pieces in a box (×12). That is a misread quantity, not a supplier who multiplies his
+     rates: such lines are left out here, and the line check below sets qty = amount ÷ rate. */
+  const boxesAsQty = (r: ReadRow, k: number) => { const b = wholeQty(r.box), p = wholeQty(r.pack), q = wholeQty(r.qty); return (!!b && b === q) || (!!p && p === k); };
+  const ks = rows.map(r => { const q = wholeQty(r.qty), c = paise(r.cost), a = paise(r.amount); const k = q && c && a ? a / (q * c) : NaN; return Number.isFinite(k) && boxesAsQty(r, k) ? NaN : k; }).filter(k => Number.isFinite(k));
   if (ks.length < 3) return undefined;
   const counts = new Map<number, number>();
   for (const k of ks) if (Number.isInteger(k) && k >= 2 && k <= 100) counts.set(k, (counts.get(k) || 0) + 1);
