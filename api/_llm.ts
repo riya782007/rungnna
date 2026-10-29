@@ -70,6 +70,8 @@ export async function chat(p: Provider, a: ChatArgs): Promise<string> {
   }
   const j: any = await r.json().catch(() => ({}));
   if (!r.ok) throw new ProviderError(p, r.status, classify(r.status, j), j?.error?.message || `${p} error ${r.status}`);
+  // what each call cost in tokens, in Vercel's log, so the credit can be watched
+  if (j?.usage) console.info(`[ai] ${p} ${body.model} tokens in ${j.usage.prompt_tokens ?? "?"} · out ${j.usage.completion_tokens ?? "?"}${j.usage.completion_tokens_details?.reasoning_tokens ? ` (thinking ${j.usage.completion_tokens_details.reasoning_tokens})` : ""}`);
   const text = j?.choices?.[0]?.message?.content;
   if (typeof text !== "string" || !text.trim()) throw new ProviderError(p, 502, "error", `${p} returned an empty answer`);
   return text;
@@ -123,6 +125,14 @@ export type AIProvider = "openai" | "gemini" | "groq";
 export type AIPart = { text: string } | { image: { mime: string; data: string } };
 
 export const DEFAULT_ORDER: AIProvider[] = ["openai", "gemini", "groq"];
+/* Bills (photos): Gemini first while its free daily quota lasts, then the paid OpenAI credit, then Groq — so the
+   OpenAI credit is spent only on what Gemini could not take (owner's $10 has to last two months).
+   AI_PHOTO_ORDER="openai,gemini,groq" in Vercel puts OpenAI back in front without a deploy. */
+export function photoOrder(): AIProvider[] {
+  const want = env("AI_PHOTO_ORDER").toLowerCase().split(/[\s,>]+/).filter((x): x is AIProvider => x === "openai" || x === "gemini" || x === "groq");
+  const list = want.length ? want : (["gemini", "openai", "groq"] as AIProvider[]);
+  return [...new Set([...list, ...DEFAULT_ORDER])];
+}
 
 export const geminiConfigured = () => !!env("GEMINI_API_KEY");
 /* 25 Oct: Google closed "gemini-2.5-flash" to new users ("This model … is no longer available to new users"), so
@@ -166,6 +176,9 @@ async function chatOpenAIDialect(p: "openai" | "groq", parts: AIPart[], o: { sys
   if (o.json) body.response_format = { type: "json_object" };
   if (p === "groq") body.temperature = o.temperature ?? 0.2;
   if (p === "groq" && /^qwen\//i.test(body.model)) body.reasoning_format = "hidden";
+  /* 29 Oct: $10 of OpenAI credit has to last two months. Reading a bill needs little "thinking": low reasoning
+     effort cuts the billed output tokens several times over (OPENAI_REASONING=medium/high to change it). */
+  if (p === "openai" && /^(gpt-5|o\d)/i.test(body.model)) body.reasoning_effort = env("OPENAI_REASONING").trim() || "low";
   const send = async (b: any) => {
     try {
       return await fetch(ENDPOINT[p], {
@@ -181,8 +194,8 @@ async function chatOpenAIDialect(p: "openai" | "groq", parts: AIPart[], o: { sys
   let j: any = await r.json().catch(() => ({}));
   // a parameter this particular model doesn't take (Groq says which): drop it and ask once more.
   // The prompt itself demands JSON and parseJsonLoose reads it, so nothing is lost.
-  if (p === "groq" && r.status === 400 && /reasoning_format|response_format|json/i.test(String(j?.error?.message || ""))) {
-    const { reasoning_format: _r, response_format: _f, ...plain } = body;
+  if (r.status === 400 && /reasoning_format|reasoning_effort|response_format|json/i.test(String(j?.error?.message || ""))) {
+    const { reasoning_format: _r, reasoning_effort: _e, response_format: _f, ...plain } = body;
     r = await send(plain);
     j = await r.json().catch(() => ({}));
   }

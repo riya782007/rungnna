@@ -13,6 +13,7 @@ vi.mock("../api/_llm.js", () => ({
   openaiModel: () => process.env.OPENAI_MODEL || "gpt-5.4-mini",
   geminiModel: () => process.env.GEMINI_MODEL || "gemini-2.5-flash",
   DEFAULT_ORDER: ["openai", "gemini", "groq"],
+  photoOrder: () => ["gemini", "openai", "groq"],
 }));
 import { GET, POST } from "../api/purchase-photo";
 const request = (images: any = [{ mime: "image/jpeg", data: "test" }], token = "token") => new Request("https://shop.example/api/purchase-photo", { method: "POST", headers: { authorization: token ? `Bearer ${token}` : "", "content-type": "application/json" }, body: JSON.stringify({ images }) });
@@ -41,7 +42,7 @@ it("reports which providers can read a bill, without exposing a key or making a 
   const r = await GET(request()); expect(await r.text()).not.toContain("private-test-key");
   expect(await (await GET(request())).json()).toMatchObject({ configured: true, provider: "Gemini" });
   vi.stubEnv("OPENAI_API_KEY", "o");
-  expect(await (await GET(request())).json()).toMatchObject({ configured: true, provider: "OpenAI \u2192 Gemini" });
+  expect(await (await GET(request())).json()).toMatchObject({ configured: true, provider: "Gemini \u2192 OpenAI" });   // bills: free Gemini first, paid OpenAI next (29 Oct)
   expect(state.read).not.toHaveBeenCalled();
   state.user.app_metadata = {}; expect((await GET(request())).status).toBe(403);
 });

@@ -407,7 +407,18 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
         /* Owner, 29 Oct: "make sure the AI makes no mistakes" — the reading is proofread once against the photo; only
            changes that make a line add up (or a corrected code, which is then marked on the line) are taken */
         let proofNotes: string[] = [];
-        if (rowsOf(out).length >= 3 && rowsOf(out).every((r: any) => String(r?.sr ?? "").trim())) {
+        /* 29 Oct, the OpenAI credit has to last: a reading OpenAI made whose lines add up to the bill's own total, with
+           no line short, no Sr. missing and no code twice, is not sent again */
+        const pre = (() => {
+          const rs = rowsOf(out).map((r: any) => ({ item: String(r?.item ?? ""), style: String(r?.style ?? ""), color: "", unit: "PCS", hsn: "", qty: readCount(r?.qty), pack: "", stickers: "", cost: String(r?.cost ?? ""), rate: "", amount: String(r?.amount ?? ""), sr: String(r?.sr ?? "") }));
+          const c = checkBill(rs as any, String(out.invoice_total ?? ""), { amount: out.discount_amount, pct: out.discount_pct });
+          const ns = rs.map(r => Number(r.sr)).filter(Number.isFinite);
+          const gap = ns.length ? Math.max(...ns) - Math.min(...ns) + 1 > ns.length : false;
+          const counted = Number(out.lines_on_bill) || 0;
+          return c.addsUp === true && !c.doubts.length && !c.fixes.length && !repeatedCodes(rs).length && !gap && (!counted || counted <= rs.length);
+        })();
+        // free readers (Gemini's daily quota, Groq) always proofread; the paid OpenAI credit only when something is off
+        if ((!pre || out.read_by !== "openai") && rowsOf(out).length >= 3 && rowsOf(out).every((r: any) => String(r?.sr ?? "").trim())) {
           toast(`Read ${rowsOf(out).length} lines — checking them against the photo…`);
           const proof = await api<any>("purchase-photo", { images, verify: rowsOf(out) }).catch(() => null);
           if (proof && rowsOf(proof).length) {
