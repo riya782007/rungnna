@@ -366,7 +366,19 @@ export default function Labels({ args }: { args: string[] }) {
                 } catch (error: any) { setOldCopy(null); toast(error.message, true); }
               }} />
               {oldCopy && <div className="note stack" role="status"><b>Copy a working old sticker</b><span className="sm">This copy keeps the original QR exactly, including its old reference and price. Edits in the item form below apply only to newly generated labels.</span><code style={{ overflowWrap: "anywhere" }}>{oldCopy.sourceQr}</code><div className="row"><button className="btn p" disabled={printer.busy} onClick={() => { const n = Number(copies); if (!Number.isSafeInteger(n) || n < 1 || n > 5000) return toast("Check print quantity (1–5000)", true); showStart(printer.start(expandJobs([{ ...oldCopy, p: { ...oldCopy.p, item: oldCopy.p.item || form.item }, copies: n }]))); }}>Print exact old QR copy</button><button className="btn" onClick={() => setOldCopy(null)}>Use edited item instead</button></div></div>}
-              <div className="grid g2 label-manual-fields">
+              {/* Owner, 1 Nov (voice, with a photo of his old software's BARCODE PRINT box): "Enter, Enter, and it's done".
+                  Like that box: Enter moves to the next field, Enter on PRINT prints. What stays the same is kept. */}
+              <div className="grid g2 label-manual-fields" onKeyDown={e => {
+                if (e.key !== "Enter" || e.ctrlKey || e.metaKey || e.altKey || e.nativeEvent.isComposing) return;
+                const t = e.target as HTMLElement;
+                if (!(t instanceof HTMLInputElement || t instanceof HTMLSelectElement) || t.getAttribute("data-print") === "1") return;
+                const all = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("input:not([type=checkbox]):not([type=file]):not([disabled]), select:not([disabled])"))
+                  .filter(x => x.offsetParent !== null && !x.closest("details:not([open])"));
+                const i = all.indexOf(t);
+                if (i < 0 || i === all.length - 1) return;
+                e.preventDefault();
+                const next = all[i + 1]; next.focus(); if (next instanceof HTMLInputElement) next.select();
+              }}>
                 <label className="f lf-item">ITEM
                   <input className="in" list="litems" value={form.item} onChange={e => { const v = e.target.value.toUpperCase(); set("item", v); const c = verifiedCodeFor(v); if (c && !form.item_code) set("item_code", c); }} autoFocus />
                   <datalist id="litems">{[...new Set([...items, ...DEFAULT_ITEMS, ...Object.values(VERIFIED_ITEM_CODES).map(v => v.name)])].map(i => <option key={i} value={i} />)}</datalist></label>
@@ -384,7 +396,7 @@ export default function Labels({ args }: { args: string[] }) {
                   <MoneyInput className="in hi mono" paise={form.rate} onPaise={v => { set("rate", v); set("price_locked", 1); }} /></label>
                 <label className="f lf-num" title="Pieces per packet — prints as ₹RATE X QTY PCS">PCS/PKT<input className="in mono" inputMode="numeric" value={qty} onChange={e => setQty(e.target.value.replace(/\D/g, ""))} /></label>
                 <label className="f lf-num" title="Line no. on the supplier's bill">BILL SR<input className="in mono" inputMode="numeric" value={billSr} placeholder={String(jobs.length + 1)} onChange={e => setBillSr(e.target.value.replace(/[^0-9A-Za-z\-/]/g, "").slice(0, 9))} /></label>
-                <label className="f lf-num" title="How many labels to print — Enter here prints">PRINT<input className="in mono" inputMode="numeric" value={copies} onChange={e => setCopies(e.target.value.replace(/\D/g, ""))}
+                <label className="f lf-num" title="How many labels to print — Enter here prints">PRINT<input data-print="1" className="in mono" inputMode="numeric" value={copies} onChange={e => setCopies(e.target.value.replace(/\D/g, ""))}
                   onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); void addJob(true); } }} /></label>
                 <div className="f label-item-photo lf-photo"><span>PHOTO</span><PhotoButton value={form.photo_id} label="Photo" disabled={queueBusy || printer.busy} onBusyChange={setPhotoBusy} onChange={photo_id => setForm(current => current.id === form.id ? { ...current, photo_id } : current)} /></div>
                 <details className="label-advanced" open={cfg.format === "shop"}><summary>More details</summary><div className="grid g2">
