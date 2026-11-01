@@ -154,8 +154,14 @@ function roundRupees(rupees: number, to: RoundTo, dir: "nearest" | "up"): number
 /* The owner can turn it off in Settings → Prices & stickers; then a rate is printed exactly as worked out. */
 let evenOn = true;
 export const evenRatesOn = () => evenOn;
+/* Owner, 1 Nov (voice): "items costing in paise should stay in points". Small articles (rate under ₹20 — bindis,
+   pins, rubber bands) keep paise: the rate goes up to the next 20 paise (so half of it, the wholesale rate, is a clean
+   10 paise) instead of a whole even rupee or the ₹5 rounding meant for bigger pieces. */
+export const SMALL_RATE = 2000;
+const smallRate = (paise: number) => Math.ceil(Math.round(paise) / 20 - 1e-9) * 20;
 export function evenRate(paise: number): number {
   if (!(paise > 0)) return 0;
+  if (paise < SMALL_RATE) return smallRate(paise);
   if (!evenOn) return Math.round(paise);
   const r = Math.ceil(Math.round(paise) / 100);
   return (r % 2 ? r + 1 : r) * 100;
@@ -164,6 +170,7 @@ export function evenRate(paise: number): number {
 export function priceSteps(costPaise: number, rule: PricingRule) {
   const cost = costPaise / 100, m = rule.margin;
   const raw = m.mode === "multiply" ? cost * (m.factor || 1) : m.mode === "divide" ? (m.factor ? cost / m.factor : cost) : cost * (1 + (m.percent || 0) / 100);
+  if (raw > 0 && raw * 100 < SMALL_RATE) { const small = smallRate(raw * 100); return { raw: Math.round(raw * 100), rounded: small, final: small }; }
   const rounded = Math.round(roundRupees(raw, m.round_to, m.round_dir) * 100);
   const even = rule.even_rate !== false;
   const r = Math.ceil(rounded / 100);
@@ -177,20 +184,24 @@ export function sellFromCost(costPaise: number, rule: PricingRule): number {
 /* The encrypted cost code — the same cost ALWAYS gives the same code. */
 export function costCode(costPaise: number, rule: PricingRule, pack = 1, type = "PCS"): string {
   const c = rule.code;
-  const costRupees = Math.round(costPaise / 100); // codes are on whole rupees, like the shop's current labels
+  // codes are on whole rupees, like the shop's current labels — except a cost with paise (₹2.40), which keeps them
+  // after a dot (owner, 1 Nov: "items in paise should come in points")
+  const paiseCost = Math.round(costPaise) % 100 !== 0 && costPaise < SMALL_RATE;   // small articles only
+  const costRupees = paiseCost ? Math.round(costPaise) / 100 : Math.round(costPaise / 100);
+  const num = (n: number) => (paiseCost ? n.toFixed(2).replace(/0$/, "") : String(Math.round(n)));
   let core: string;
 
   if (c.method === "letters") {
     const key = (c.key || DEFAULT_RULE.code.key).toUpperCase();
     // spell each digit of the cost as its keyed letter
-    core = String(costRupees).split("").map(d => key[Number(d)] ?? d).join("");
+    core = num(costRupees).split("").map(d => key[Number(d)] ?? d).join("");
   } else if (c.method === "shift" || c.method === "shift_letters") {
-    const shifted = Math.round(costRupees * (c.mult || 1) + (c.add || 0));
+    const shifted = paiseCost ? costRupees * (c.mult || 1) + (c.add || 0) : Math.round(costRupees * (c.mult || 1) + (c.add || 0));
     // shift_letters (owner, 22 Oct: "double the number, then the code letters"): the shifted number spelt in the code word
     const key = (c.key || DEFAULT_RULE.code.key).toUpperCase();
-    core = c.method === "shift" ? String(shifted) : String(shifted).split("").map(d => key[Number(d)] ?? d).join("");
+    core = c.method === "shift" ? num(shifted) : num(shifted).split("").map(d => key[Number(d)] ?? d).join("");
   } else {
-    core = String(costRupees);
+    core = num(costRupees);
   }
 
   let out = (c.prefix || "") + core;
@@ -211,22 +222,24 @@ export function decodeCostCode(code: string, rule: PricingRule): number | null {
     const key = (c.key || DEFAULT_RULE.code.key).toUpperCase();
     const inv: Record<string, string> = {};
     for (let d = 0; d < 10; d++) inv[key[d]] = String(d);
+    inv["."] = ".";
     let digits = "";
     for (const ch of s) { if (inv[ch] == null) return null; digits += inv[ch]; }
-    return digits ? parseInt(digits, 10) * 100 : null;
+    return digits && Number.isFinite(Number(digits)) ? Math.round(Number(digits) * 100) : null;
   }
   if (c.method === "shift_letters") {
     const key = (c.key || DEFAULT_RULE.code.key).toUpperCase();
     let digits = "";
-    for (const ch of s) { const d = key.indexOf(ch); if (d < 0) return null; digits += d; }
-    if (!digits) return null;
-    return Math.round((parseInt(digits, 10) - (c.add || 0)) / (c.mult || 1)) * 100;
+    for (const ch of s) { if (ch === ".") { digits += "."; continue; } const d = key.indexOf(ch); if (d < 0) return null; digits += d; }
+    if (!digits || !Number.isFinite(Number(digits))) return null;
+    const back = (Number(digits) - (c.add || 0)) / (c.mult || 1);
+    return digits.includes(".") ? Math.round(back * 100) : Math.round(back) * 100;
   }
   if (c.method === "shift") {
-    const n = parseInt(s.replace(/\D/g, ""), 10);
+    const n = parseFloat(s.replace(/[^\d.]/g, ""));
     if (Number.isNaN(n)) return null;
     const back = (c.mult || 1) ? (n - (c.add || 0)) / (c.mult || 1) : n;
-    return Math.round(back) * 100;
+    return s.includes(".") ? Math.round(back * 100) : Math.round(back) * 100;
   }
   const n = parseInt(s.replace(/\D/g, ""), 10);
   return Number.isNaN(n) ? null : n * 100;

@@ -238,3 +238,16 @@ describe("owner, 29 Oct: packed in 6s, 47 pieces on the bill", () => {
     expect(validatePhotoRows([{ ...base, stickers: "16" }])[0].print_qty).toBe(16);        // two on every packet: as typed
   });
 });
+
+describe("owner, 1 Nov: small articles keep their paise", () => {
+  it("rate under ₹20 goes up to the next 20 paise; cost code keeps the paise and reads back", async () => {
+    const { evenRate, priceSteps, costCode, decodeCostCode, DEFAULT_RULE } = await import("../src/lib/pricing");
+    expect(evenRate(340)).toBe(340); expect(evenRate(325)).toBe(340); expect(evenRate(7500)).toBe(7600);
+    const rule = { ...DEFAULT_RULE, margin: { ...DEFAULT_RULE.margin, mode: "multiply" as const, factor: 2.5, round_to: 5 as any, round_dir: "nearest" as const } };
+    expect(priceSteps(130, rule).final).toBe(340);      // ₹1.30 × 2.5 = ₹3.25 → ₹3.40, not ₹5
+    const code = costCode(240, rule);
+    expect(code).toContain(".");
+    expect(decodeCostCode(code, rule)).toBe(240);
+    expect(decodeCostCode(costCode(2550, rule), rule)).toBe(2600);   // bigger pieces: whole rupees as before
+  });
+});
