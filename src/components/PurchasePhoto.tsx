@@ -12,7 +12,7 @@ import { compress, savePhoto } from "../lib/image";
 import { getRule, costCode, type PricingRule } from "../lib/pricing";
 import {
   preparePhotoRows, savePhotoPurchase, validatePhotoRows, pricePhotoRows, applyVendorTerms, repricePhotoRows, suspiciousCosts, restoreBillCosts,
-  autoArticle, autoArticleCount, draftLabelProducts, combineRepeatedRows, keepRepeatsApart, byBoxes, labelCountFor, lineSignature, isSamePage, nextPageNo, continueSr, readDiscount, readMultiplier, readExtra, applyCosting, spreadExtra, costingOf, type PhotoRow,
+  autoArticle, autoArticleCount, draftLabelProducts, combineRepeatedRows, keepRepeatsApart, byBoxes, unfinishedRow, labelCountFor, lineSignature, isSamePage, nextPageNo, continueSr, readDiscount, readMultiplier, readExtra, applyCosting, spreadExtra, costingOf, type PhotoRow,
 } from "../lib/purchase-photo";
 import { applyPhotoQuantities, copyLineBelow, readCount, repeatPhotoCount, stickersPerPacket, type RepeatedCountField } from "../lib/purchase-quantities";
 import { purchaseLabelJobs } from "../lib/purchase-labels";
@@ -566,18 +566,23 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
       await setSetting(RACK_KEY, rackId);
       // date AND time, so two un-numbered bills on one day never look like the same bill
       const billNoIn = d.billNo.trim() || `EST ${new Date().toLocaleString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).replace(",", "")}`;
-      const filled = continueSr(fillGaps(d.rows, rule0));
-      set({ supplier: supplierId, rack: rackId, billNo: billNoIn, rows: filled });
+      const all = continueSr(fillGaps(d.rows, rule0));
+      set({ supplier: supplierId, rack: rackId, billNo: billNoIn, rows: all });
+      // finished lines are saved and printed now; lines with no quantity or cost stay on the screen for later
+      const later = all.filter(unfinishedRow), filled = all.filter(r => !unfinishedRow(r));
+      if (lineIdx !== undefined && unfinishedRow(all[lineIdx])) throw new Error(`Sr. ${all[lineIdx].sr || lineIdx + 1} is not finished: type its quantity and cost first`);
+      if (!filled.length) throw new Error("No line is finished yet: type the quantity and cost");
+      const printSr = lineIdx !== undefined ? (all[lineIdx]?.sr?.trim() || String(lineIdx + 1)) : undefined;
       const D = { ...d, supplier: supplierId, rack: rackId, billNo: billNoIn };
       // a bill listing the same article twice: add identical lines together instead of refusing
       let merged = combineRepeatedRows(filled);
       if (merged.conflict) {
         const apart = keepRepeatsApart(filled);
         if (!confirm(`${merged.conflict.replace(/ One code is probably misread.*$/, "")}\n\nOK — they really are different: keep both (${apart.renamed.map(x => `Sr. ${x.sr} prints as ${x.to}`).join(", ")}).\nCancel — let me correct the code first.`)) throw new Error(merged.conflict);
-        set({ rows: apart.rows });
+        set({ rows: [...apart.rows, ...later] });
         merged = combineRepeatedRows(apart.rows);
       }
-      if (merged.combined) { set({ rows: merged.rows }); toast(`${merged.combined} repeated line${merged.combined === 1 ? "" : "s"} added together`); }
+      if (merged.combined) { set({ rows: [...merged.rows, ...later] }); toast(`${merged.combined} repeated line${merged.combined === 1 ? "" : "s"} added together`); }
       const cst = costingOf({ mult: d.mult, less: d.discount, extra: d.extra }), pct = cst.less;
       const rows = await preparePhotoRows(cst.extra ? spreadExtra(merged.rows, cst.extra) : merged.rows, D.supplier, packetDefault);
       const rule = await getRule(), current = await loadLabelCfg();
@@ -630,7 +635,12 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
       await setSetting(LAST, { id: p.id });
       // Financial saving succeeded. Any subsequent print failure is recovered
       // by printing this saved purchase, never by approving it a second time.
-      set({ rows: [], expectTo: undefined, supplier: D.supplier, billNo: "", total: "", discount: "", mult: "", extra: "", warnings: "", photoId: undefined });
+      if (later.length) {
+        // the bill stays open with its unfinished lines: finishing them and pressing Print/Approve again saves them
+        // as the next page of this same bill (the lines already saved are never saved twice)
+        set({ rows: later, warnings: "" });
+        toast(`${filled.length} finished line${filled.length === 1 ? "" : "s"} saved as ${p.no} · ${later.length} unfinished line${later.length === 1 ? " stays" : "s stay"} below to finish`);
+      } else set({ rows: [], expectTo: undefined, supplier: D.supplier, billNo: "", total: "", discount: "", mult: "", extra: "", warnings: "", photoId: undefined });
       setReviewed(false);
       const queue = await jobsFor(p);
       setJobs(queue);
@@ -639,7 +649,7 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
         toast(`Purchase ${p.no} saved · ${expandJobs(queue).length} stickers will print at the shop computer`);
         return;
       }
-      if (lineIdx !== undefined) { setAutoSr(filled[lineIdx]?.sr?.trim() || String(lineIdx + 1)); setShowCarton(true); return; }
+      if (printSr) { setAutoSr(printSr); setShowCarton(true); return; }
       if (cartonMode) { setShowCarton(true); toast(`Purchase ${p.no} saved · type the Sr. of the first carton's lines and press Enter`); return; }
       const how = await sendToPrinter(queue, true);
       toast(how === "none" ? `Purchase ${p.no} saved · no stickers requested` : how === "browser" ? `Purchase ${p.no} saved · opening the label print window` : `Purchase ${p.no} saved · starting label printing`);
@@ -743,7 +753,9 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
   const invented = autoArticleCount(d.rows);
   let total = "—", labelCount = 0, validation = "";
   try {
-    const rows = validatePhotoRows(fillGaps(d.rows, pricing));
+    const allRows = fillGaps(d.rows, pricing), fin = allRows.filter(r => !unfinishedRow(r));
+    if (!fin.length) throw new Error("No line is finished yet: type the quantity and cost");
+    const rows = validatePhotoRows(fin);
     total = (rows.reduce((n, r) => n + r.qty * r.cost, 0) / 100).toFixed(2);
     labelCount = labelCountFor(rows);
     if (labelCount > 5000) validation = "More than 5000 labels: reduce stickers or split this purchase into smaller batches.";
@@ -817,7 +829,8 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
         <button className="linkbtn" onClick={() => void doneAtShop(q.id)}>Remove</button>
       </div>)}
     </div>}
-    {saved && !d.rows.length && <div className="note stack saved-purchase" role="status" style={{ gap: 8 }}>
+    {/* the part of this bill already saved stays above its unfinished lines, with its Print buttons */}
+    {saved && (!d.rows.length || (!!d.billNo.trim() && d.billNo.trim().toUpperCase().replace(/ P\d+$/, "") === saved.supplier_bill.trim().toUpperCase().replace(/ P\d+$/, ""))) && <div className="note stack saved-purchase" role="status" style={{ gap: 8 }}>
       <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
         <b className="grow">Purchase {saved.no} saved{saved.supplier_name ? " · " + saved.supplier_name : ""} · {expandJobs(jobs).length} label{expandJobs(jobs).length === 1 ? "" : "s"} ready</b>
         {!!jobs.length && <button className={"btn" + (showCarton ? "" : " p")} disabled={printer.busy} onClick={reprint}>Print all {expandJobs(jobs).length} stickers</button>}
@@ -1038,7 +1051,8 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
       <label className="row"><input type="checkbox" checked={cartonMode} disabled={atShop} onChange={e => { setCartonMode(e.target.checked); setShowCarton(e.target.checked); void setSetting("carton_mode", e.target.checked); }} /> <b>Carton by carton</b> — save the bill, then print each carton's stickers as you open it</label>
       <label className="row"><input type="checkbox" checked={atShop} onChange={e => setAtShop(e.target.checked)} /> Print the stickers at the shop computer (not here)</label>
       <button className={"btn" + (ready4 ? " p" : "")} disabled={busy || !!photoUploads.size} onClick={() => { if (!ready4) { toast("To approve: " + (missing.join(" · ") || "wait a moment"), true); return; } void approve(); }}>
-        {busy ? "Working…" : `Approve: draft ${d.rows.length} product${d.rows.length === 1 ? "" : "s"}${labelCount ? ` & print ${labelCount} label${labelCount === 1 ? "" : "s"}` : " & save purchase"}`}
+        {busy ? "Working…" : (() => { const left = d.rows.filter(unfinishedRow).length, n = d.rows.length - left;
+          return `Approve: draft ${n} product${n === 1 ? "" : "s"}${labelCount ? ` & print ${labelCount} label${labelCount === 1 ? "" : "s"}` : " & save purchase"}${left ? ` · ${left} unfinished wait` : ""}`; })()}
       </button>
       {!busy && !!missing.length && <div className="sm bad-text" role="status">To approve: {missing.join(" · ")}</div>}
       </div>

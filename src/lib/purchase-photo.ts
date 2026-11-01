@@ -107,11 +107,15 @@ export function fillDownItems(rows: PhotoRow[]): PhotoRow[] {
     return { ...r, item: last.item, unit: r.unit || last.unit, ...(rebuilt ? { style: "", autoStyle: false } : {}) };
   });
 }
+/* Owner, 1 Nov: "43 to 75 are still to fill — I had to tick and delete them all to print the rest, and then type
+   them again". A line with no quantity or no cost is not finished: it waits on the screen, and never stops the
+   finished lines from being saved and printed. */
+export const unfinishedRow = (r: Pick<PhotoRow, "qty" | "cost">) => !(Number(String(r.qty).trim()) > 0) || !String(r.cost ?? "").trim();
 export function autoArticle(input: PhotoRow[]): PhotoRow[] {
   const rows = fillDownItems(input);
   const used = new Set(rows.map(r => r.style.trim().toUpperCase()).filter(Boolean));
   return rows.map(r => {
-    if (r.style.trim()) return r;
+    if (r.style.trim() || !r.cost.trim()) return r;   // a code is built from the cost, so only once the cost is there
     const name = r.item.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "").slice(0, 12) || "ITEM";
     const rupees = (() => { try { const c = moneyInput(r.cost); return c > 0 ? String(Math.round(c / 100)) : ""; } catch { return ""; } })();
     const stem = rupees ? `${name}-${rupees}` : name;
