@@ -131,3 +131,13 @@ describe("owner's TIKA/NATH bill: Total 18,336 · % −1,834 · Amount 16,502", 
     expect(c.addsUp).toBe(true); expect(c.less).toBe(47160);
   });
 });
+
+import { fillDownItems, autoArticle } from "../src/lib/purchase-photo";
+describe("owner, 1 Nov: item typed on the first line only", () => {
+  it("blank items take the item above, and ITEM-76 codes are made again from the real name", () => {
+    const R = (item: string, style: string, cost: string, autoStyle = false) => ({ item, style, color: "", unit: "PCS", hsn: "", qty: "12", pack: "1", stickers: "", cost, rate: "", autoStyle }) as any;
+    const rows = autoArticle([R("PENDANT SET", "", "61"), R("", "ITEM-76", "76", true), R("", "MR 101", "76"), R("EARING", "", "27"), R("", "", "23")]);
+    expect(rows.map(r => `${r.item}|${r.style}`)).toEqual(["PENDANT SET|PENDANTSET-61", "PENDANT SET|PENDANTSET-76", "PENDANT SET|MR 101", "EARING|EARING-27", "EARING|EARING-23"]);
+    expect(fillDownItems([R("", "X", "1")])[0].item).toBe("");   // nothing above: left for the owner
+  });
+});

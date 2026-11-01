@@ -95,7 +95,20 @@ export function repricePhotoRows(rows: PhotoRow[], rule: PricingRule): { rows: P
    article) get a -2, -3 suffix rather than being silently combined, so the owner decides.
 
    Only blank articles are filled; anything the bill actually printed is left exactly as read. */
-export function autoArticle(rows: PhotoRow[]): PhotoRow[] {
+/* Owner, 1 Nov (video): "PENDANT SET" typed on line 1 only, the other lines left blank — the app refused to print
+   and made codes like ITEM-76. A line with no item is the item of the line above (as on a handwritten bill), and a
+   code that was built from the missing name is built again from the real one. */
+export function fillDownItems(rows: PhotoRow[]): PhotoRow[] {
+  let last: PhotoRow | undefined;
+  return rows.map(r => {
+    if (r.item.trim()) { last = r; return r; }
+    if (!last) return r;
+    const rebuilt = r.autoStyle && /^ITEM(-|$)/.test(r.style.trim().toUpperCase());
+    return { ...r, item: last.item, unit: r.unit || last.unit, ...(rebuilt ? { style: "", autoStyle: false } : {}) };
+  });
+}
+export function autoArticle(input: PhotoRow[]): PhotoRow[] {
+  const rows = fillDownItems(input);
   const used = new Set(rows.map(r => r.style.trim().toUpperCase()).filter(Boolean));
   return rows.map(r => {
     if (r.style.trim()) return r;

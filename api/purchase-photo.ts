@@ -87,6 +87,8 @@ READING THE COLUMNS
 
 ARTICLE NUMBERS
 - style is ONLY an article/design/model code actually printed on the bill (e.g. 0705, R.74, K5208).
+- Bills with a "Design" (or "Design No.", "Art No.") column AND a "Particulars" (or "Description", "Item") column: the Design column is style, copied as printed ("YR 310", "MR 101", "YU 438 L", "YR 216 BOX"), and Particulars is item ("DOKIYA", "SET", "MANGALSUTR", "EARING", "Bali"). Every line has its own item — read it from that line, never leave it empty when the line shows a word. A word broken over two rows in one cell ("MANGALSU" / "TR") is one word: "MANGALSUTR".
+- "Pcs./Doz Per Box" or "Pcs per Box" is pack (pieces in one box); "Box" is box; "Loose" pieces are part of Qty. qty is the Qty column (e.g. Box 2 × 24 per box = Qty 48).
 - Copy each line's own code exactly, character for character, from THAT line: "SET - 3902" is item SET, style 3902; "TIKA - 19020 TO 19854" is item TIKA, style "19020 TO 19854"; "SET - 8500-1 TO 8500-12" is style "8500-1 TO 8500-12". Never copy a code from the line above or below. If a line's code is unreadable, leave its style empty and say which Sr. in warnings — an empty style is fixed in seconds, a wrong one costs a carton of wrong stickers.
 - The same code printed on two lines is rare. Before returning a code twice, look at both lines again.
 - Many of this shop's bills have no article column and simply repeat a plain description like "CHOTI", "SETS" or "Copper Set" on many lines at different rates. In that case leave style EMPTY — the app fills it in. Never invent an article number, and never copy the description into style.
