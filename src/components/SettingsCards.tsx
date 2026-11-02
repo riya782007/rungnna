@@ -53,7 +53,7 @@ export function PricingCard() {
   const cost = toPaise(sample) || 0, pk = Math.max(1, Math.floor(Number(pack)) || 1);
   const steps = cost > 0 ? priceSteps(cost, rule) : null;
   const code = cost > 0 && !(c.method === "letters" && keyErr) ? costCode(cost, rule, pk, "PCS") : "";
-  const sampleProduct: Product = useMemo(() => ({ ...blankProduct(""), item: "EARRINGS", style: "K5210", color: "", type: "PCS", rate: steps?.final || 0, cost, cost_code: code, pack: pk }), [steps?.final, cost, code, pk]);
+  const sampleProduct: Product = useMemo(() => ({ ...blankProduct(""), item: "EARRINGS", style: "K5210", color: "", type: "PCS", rate: steps?.final || 0, cost, cost_code: code, pack: pk, entry_code: "K021126" } as Product), [steps?.final, cost, code, pk]);
 
   const save = async () => {
     const err = c.method === "letters" ? validateKey(c.key) : null;

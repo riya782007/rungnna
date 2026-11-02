@@ -334,7 +334,9 @@ export default function Labels({ args }: { args: string[] }) {
               <button className="btn sm" onClick={() => setMe(null)}>Switch person</button></div>}
       </div>
   </>;
-  const previewJob: Job = oldCopy || (form.style.trim() || form.rate > 0 || (!lastJob && !jobs.length) ? { p: form, qtyOnLabel: parseInt(qty) || 1, copies: Number(copies) || 1 } : lastJob || jobs[jobs.length - 1]);
+  // the preview is the sticker as it will print: with the REF CODE and the bill Sr. (owner, 2 Nov: "the reference
+  // code prints, but the preview before printing doesn't show it")
+  const previewJob: Job = oldCopy || (form.style.trim() || form.rate > 0 || (!lastJob && !jobs.length) ? { p: { ...form, entry_code: refCode.trim() || undefined } as Product, qtyOnLabel: parseInt(qty) || 1, copies: Number(copies) || 1, line: billSr.trim() || jobs.length + 1 } : lastJob || jobs[jobs.length - 1]);
 
   return (
     <div className="label-counter">
@@ -457,7 +459,8 @@ function LabelSettings({ cfg, upd, sample, qty, onTest }: { cfg: LabelCfg; upd: 
   const num = (k: keyof LabelCfg, lab: string, step = 0.5) => (
     <label className="f">{lab}
       <input className="in mono" type="number" step={step} value={cfg[k] as number} onChange={e => upd({ [k]: Number(e.target.value) } as any)} /></label>);
-  const demo: Product = sample.item || sample.style ? sample : { ...sample, item: "F-RING", type: "PCS", style: "K5208/K-LT", color: "W/LP/B", rate: 2400, item_code: "202", pack: 12, ref: "183" };
+  // printer settings show a reference code too, so its place on the sticker can be set (owner, 2 Nov)
+  const demo = (sample.item || sample.style ? { entry_code: "K021126", ...sample } : { ...sample, item: "F-RING", type: "PCS", style: "K5208/K-LT", color: "W/LP/B", rate: 2400, item_code: "202", pack: 12, ref: "183", entry_code: "K021126" }) as Product;
   return (
     <div className="card label-settings">
       <header><h3>Label size &amp; layout</h3><span className="xs mut">saved on this device</span></header>
