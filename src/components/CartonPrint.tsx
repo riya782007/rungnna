@@ -25,7 +25,7 @@ const up = (v?: string) => (v || "").trim().toUpperCase();
    the line in place: item, code, rate, pieces per box and stickers. Save & print puts it right on the saved bill and
    on the product (stock and cost are not touched) and prints that line again. */
 export type LineFix = { item: string; style: string; rate: string; pack: string; stickers: string };
-export function CartonPrint({ purchase, jobs, print, busy, autoSr, onAutoDone, onFix }: { purchase: Purchase; jobs: Job[]; print: (queue: Job[]) => Promise<unknown>; busy?: boolean; autoSr?: string; onAutoDone?: () => void; onFix?: (index: number, fix: LineFix) => Promise<Job[]> }) {
+export function CartonPrint({ purchase, jobs, print, busy, autoSr, onAutoDone, onFix, times = 1 }: { purchase: Purchase; jobs: Job[]; print: (queue: Job[]) => Promise<unknown>; busy?: boolean; autoSr?: string; onAutoDone?: () => void; onFix?: (index: number, fix: LineFix) => Promise<Job[]>; times?: number }) {
   const [editing, setEditing] = useState<{ i: number; f: LineFix } | null>(null);
   const [prog, setProg] = useState<Progress>({ done: {} });
   const [ticked, setTicked] = useState<Set<string>>(new Set());
@@ -39,9 +39,9 @@ export function CartonPrint({ purchase, jobs, print, busy, autoSr, onAutoDone, o
   // one row per bill line, with the stickers that line prints
   const lines = useMemo(() => purchase.items.map((l, i) => {
     const sr = String(l.bill_sr?.trim() || i + 1);
-    const stickers = jobs.filter(j => String(j.line ?? "") === sr).reduce((n, j) => n + j.copies, 0);
+    const stickers = jobs.filter(j => String(j.line ?? "") === sr).reduce((n, j) => n + j.copies, 0) * times;
     return { i, sr, item: l.item, style: l.style, color: l.color, qty: l.qty, rate: l.rate, pack: l.label_pack ?? l.pack ?? 1, print_qty: l.print_qty, stickers };
-  }), [purchase, jobs]);
+  }), [purchase, jobs, times]);
   const carton = Math.max(0, ...Object.values(prog.done)) + 1;
   const left = lines.filter(l => !prog.done[l.sr] && l.stickers > 0);
   const sel = lines.filter(l => ticked.has(l.sr));
@@ -61,7 +61,7 @@ export function CartonPrint({ purchase, jobs, print, busy, autoSr, onAutoDone, o
       const done = { ...prog.done }; for (const l of which) done[l.sr] = carton;
       save({ done }); setTicked(new Set()); setText("");
       const rest = lines.filter(l => !done[l.sr] && l.stickers > 0).length;
-      toast(`${label}: ${queue.reduce((n, j) => n + j.copies, 0)} stickers sent · ${rest ? `${rest} line${rest === 1 ? "" : "s"} left` : "all lines done ✓"}`);
+      toast(`${label}: ${queue.reduce((n, j) => n + j.copies, 0) * times} stickers sent · ${rest ? `${rest} line${rest === 1 ? "" : "s"} left` : "all lines done ✓"}`);
     } catch (e: any) { toast(e?.message || "Printing did not start", true); }
     finally { setWorking(false); setTimeout(() => box.current?.focus(), 50); }
   };
@@ -93,7 +93,7 @@ export function CartonPrint({ purchase, jobs, print, busy, autoSr, onAutoDone, o
       const fresh = await onFix(editing.i, editing.f);
       setEditing(null);
       const queue = fresh.filter(j => String(j.line ?? "") === l.sr);
-      if (queue.length) { await print(queue); const done = { ...prog.done, [l.sr]: carton }; save({ done }); toast(`Sr. ${l.sr} corrected · ${queue.reduce((n, j) => n + j.copies, 0)} stickers sent`); }
+      if (queue.length) { await print(queue); const done = { ...prog.done, [l.sr]: carton }; save({ done }); toast(`Sr. ${l.sr} corrected · ${queue.reduce((n, j) => n + j.copies, 0) * times} stickers sent`); }
       else toast(`Sr. ${l.sr} corrected`);
     } catch (e: any) { toast(e?.message || "Could not save the correction", true); }
     finally { setWorking(false); }

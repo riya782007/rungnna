@@ -378,59 +378,72 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
       let current = adding ? d : { ...d, rows: [] as PhotoRow[], warnings: "", total: "", expectTo: undefined };
       /* One page per reading, sharper photos, and a page read short is read again (owner, 23 Oct: "a bill of
          30 lines reads only 15 or 20; Google Lens reads every line"). */
-      for (let at = 0; at < files.length; at += 1) {
+      /* Owner's ask (2 Nov): "10 minutes for one bill is too long". The pages of a bill are read side by side (three at
+         a time), a short page is read again AND in strips at the same moment instead of one after the other, and a
+         reading OpenAI made that already checks out is not proofread again (free readers always are). The lines are still
+         put in the bill's order, page by page. */
+      const rowsOf = (x: any): any[] => (Array.isArray(x?.rows) ? x.rows : []);
+      const readOne = async (at: number) => {
         const part = files.slice(at, at + 1);
         const images = [];
         for (const f of part) { const { blob } = await compress(f, 2800, 1050000); images.push({ data: await blobToB64(blob), mime: blob.type }); }
-        if (files.length > 1) toast(`Reading page ${at + 1} of ${files.length}…`);
         let out = await api<any>("purchase-photo", { images });
-        const rowsOf = (x: any): any[] => (Array.isArray(x?.rows) ? x.rows : []);
         let seen = Math.max(Number(out?.lines_on_bill) || 0, srSpan(rowsOf(out)));
         const first = rowsOf(out).length;
         if (seen > first) {
-          toast(`The AI read ${first} of about ${seen} lines — reading the page again…`);
-          const second = await api<any>("purchase-photo", { images, retry: { counted: seen, got: first } }).catch(() => null);
+          toast(`${files.length > 1 ? `Page ${at + 1}: ` : ""}the AI read ${first} of about ${seen} lines — reading it again, closer…`);
+          const n = Math.min(5, Math.max(2, Math.ceil(seen / 8)));
+          const stripReads = (async () => {
+            if (part.length !== 1) return [] as any[];
+            const strips = await splitPage(part[0], n).catch(() => null);
+            if (!strips) return [] as any[];
+            const whole = await compress(part[0], 1600, 420000);
+            const page = { data: await blobToB64(whole.blob), mime: whole.blob.type };
+            return Promise.all(strips.map(async (h, k) => { const { blob } = await compress(h, 2400, 800000); return api<any>("purchase-photo", { images: [page, { data: await blobToB64(blob), mime: blob.type }], part: { k: k + 1, n: strips.length } }).catch(() => null); }));
+          })();
+          const [second, reads] = await Promise.all([api<any>("purchase-photo", { images, retry: { counted: seen, got: first } }).catch(() => null), stripReads]);
           if (second && rowsOf(second).length > first) out = second;
           seen = Math.max(seen, Number(second?.lines_on_bill) || 0, srSpan(rowsOf(second)));
-          /* still short (owner, 24 Oct: "the bill was 25 lines, it read 18"): cut the page into strips of about 8
-             lines each, read them all at once, and put the lines together by their bill Sr. numbers */
           const got = rowsOf(out).length;
-          if (got < seen && part.length === 1) {
-            const n = Math.min(5, Math.max(2, Math.ceil(seen / 8)));
-            toast(`Still ${got} of ${seen} lines — reading the page in ${n} parts…`);
-            const strips = await splitPage(part[0], n).catch(() => null);
-            if (strips) {
-              const whole = await compress(part[0], 1600, 420000);
-              const page = { data: await blobToB64(whole.blob), mime: whole.blob.type };
-              const reads = await Promise.all(strips.map(async (h, k) => { const { blob } = await compress(h, 2400, 800000); return api<any>("purchase-photo", { images: [page, { data: await blobToB64(blob), mime: blob.type }], part: { k: k + 1, n: strips.length } }).catch(() => null); }));
-              const joined = joinParts([rowsOf(out), ...reads.map(rowsOf)]);
-              if (joined.length > got) out = { ...out, rows: joined, invoice_total: out.invoice_total || reads.map(x => x?.invoice_total).filter(Boolean).pop(), lines_on_bill: String(seen) };
-            }
+          if (got < seen && reads.length) {
+            const joined = joinParts([rowsOf(out), ...reads.map(rowsOf)]);
+            if (joined.length > got) out = { ...out, rows: joined, invoice_total: out.invoice_total || reads.map((x: any) => x?.invoice_total).filter(Boolean).pop(), lines_on_bill: String(seen) };
           }
         }
-        /* Owner, 29 Oct: "make sure the AI makes no mistakes" — the reading is proofread once against the photo; only
-           changes that make a line add up (or a corrected code, which is then marked on the line) are taken */
+        /* Owner, 29 Oct: "make sure the AI makes no mistakes" — a reading in doubt is proofread once against the photo;
+           only changes that make a line add up (or a corrected code, then marked on the line) are taken */
         let proofNotes: string[] = [];
-        /* 29 Oct, the OpenAI credit has to last: a reading OpenAI made whose lines add up to the bill's own total, with
-           no line short, no Sr. missing and no code twice, is not sent again */
         const pre = (() => {
           const rs = rowsOf(out).map((r: any) => ({ item: String(r?.item ?? ""), style: String(r?.style ?? ""), color: "", unit: "PCS", hsn: "", qty: readCount(r?.qty), pack: "", stickers: "", cost: String(r?.cost ?? ""), rate: "", amount: String(r?.amount ?? ""), sr: String(r?.sr ?? "") }));
           const c = checkBill(rs as any, String(out.invoice_total ?? ""), { amount: out.discount_amount, pct: out.discount_pct });
           const ns = rs.map(r => Number(r.sr)).filter(Number.isFinite);
           const gap = ns.length ? Math.max(...ns) - Math.min(...ns) + 1 > ns.length : false;
           const counted = Number(out.lines_on_bill) || 0;
-          return c.addsUp === true && !c.doubts.length && !c.fixes.length && !repeatedCodes(rs).length && !gap && (!counted || counted <= rs.length);
+          return c.addsUp !== false && !c.doubts.length && !repeatedCodes(rs).length && !gap && (!counted || counted <= rs.length);
         })();
-        // free readers (Gemini's daily quota, Groq) always proofread; the paid OpenAI credit only when something is off
+        // accuracy first (owner): free readers (Gemini, Groq) always proofread — a code misread never shows in the sums;
+        // the paid OpenAI credit only when something is off. Pages run side by side, so this costs one step, not one per page
         if ((!pre || out.read_by !== "openai") && rowsOf(out).length >= 3 && rowsOf(out).every((r: any) => String(r?.sr ?? "").trim())) {
-          toast(`Read ${rowsOf(out).length} lines — checking them against the photo…`);
+          toast(`${files.length > 1 ? `Page ${at + 1}: ` : ""}checking ${rowsOf(out).length} lines against the photo…`);
           const proof = await api<any>("purchase-photo", { images, verify: rowsOf(out) }).catch(() => null);
           if (proof && rowsOf(proof).length) {
-            const p = acceptProof(rowsOf(out), rowsOf(proof));
-            proofNotes = p.changes;
-            out = { ...out, rows: p.rows, discount_amount: out.discount_amount || proof.discount_amount, discount_pct: out.discount_pct || proof.discount_pct, invoice_total: out.invoice_total || proof.invoice_total };
+            const pr = acceptProof(rowsOf(out), rowsOf(proof));
+            proofNotes = pr.changes;
+            out = { ...out, rows: pr.rows, discount_amount: out.discount_amount || proof.discount_amount, discount_pct: out.discount_pct || proof.discount_pct, invoice_total: out.invoice_total || proof.invoice_total };
           }
         }
+        return { out, proofNotes, part };
+      };
+      // three pages at a time; each page's result is used in the bill's own order
+      const results: Promise<Awaited<ReturnType<typeof readOne>>>[] = [];
+      for (let at = 0; at < files.length; at++) {
+        const gate = at >= 3 ? results[at - 3].catch(() => null) : Promise.resolve();
+        results.push(gate.then(() => readOne(at)));
+      }
+      results.forEach(r => r.catch(() => {}));   // a failed page is reported once, when its turn comes
+      if (files.length > 1) toast(`Reading ${files.length} pages…`);
+      for (let at = 0; at < files.length; at += 1) {
+        const { out, proofNotes, part } = await results[at];
         const rule = await getRule(); setPricing(rule);
         const text = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v) : "");
         const raw = out.rows.map((r: any) => ({
@@ -704,10 +717,15 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
     return q;
   };
 
+  /* Owner, 2 Nov (voice): "some goods need double tags — one inside, one outside — and printing again didn't give me
+     the 9 and 9 again". Stickers each: 2 prints every sticker of the saved bill twice (3 for three); it is a printing
+     choice only: the saved bill and stock do not change. */
+  const [times, setTimes] = useState(1);
+  const timesJobs = (q: Job[]) => (times > 1 ? q.map(j => ({ ...j, copies: j.copies * times })) : q);
   const reprint = async () => {
     if (!jobs.length) return;
     setError("");
-    try { await sendToPrinter(jobs, true); }
+    try { await sendToPrinter(timesJobs(jobs), true); }
     catch (e: any) { setError(e.message || "Printing did not start. Check the printer settings."); }
   };
 
@@ -833,14 +851,16 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
     {saved && (!d.rows.length || (!!d.billNo.trim() && d.billNo.trim().toUpperCase().replace(/ P\d+$/, "") === saved.supplier_bill.trim().toUpperCase().replace(/ P\d+$/, ""))) && <div className="note stack saved-purchase" role="status" style={{ gap: 8 }}>
       <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
         <b className="grow">Purchase {saved.no} saved{saved.supplier_name ? " · " + saved.supplier_name : ""} · {expandJobs(jobs).length} label{expandJobs(jobs).length === 1 ? "" : "s"} ready</b>
-        {!!jobs.length && <button className={"btn" + (showCarton ? "" : " p")} disabled={printer.busy} onClick={reprint}>Print all {expandJobs(jobs).length} stickers</button>}
+        {!!jobs.length && <button className={"btn" + (showCarton ? "" : " p")} disabled={printer.busy} onClick={reprint}>Print all {expandJobs(jobs).length * times} stickers</button>}
+        {!!jobs.length && <span className="row xs" style={{ gap: 4 }} title="Two tags on each piece or packet — one inside, one outside">Stickers each:
+          {[1, 2, 3].map(n => <button key={n} type="button" className={"btn sm" + (times === n ? " p" : "")} onClick={() => setTimes(n)}>{n === 1 ? "1" : `${n} (double${n === 3 ? "+1" : ""})`}</button>)}</span>}
         {!!jobs.length && <button className={"btn" + (showCarton ? " p" : "")} onClick={() => setShowCarton(v => !v)}>{showCarton ? "Hide cartons" : "Carton by carton"}</button>}
         <a className="btn" href={"#/labels/purchase/" + saved.id}>Open in QR labels</a>
         <button type="button" className="linkbtn" onClick={() => { setSaved(null); setJobs([]); void setSetting(LAST, null); }}>Close</button>
       </div>
       <StickerQuickBar cfg={cfg} onChange={setCfg} />
       {showCarton && !!jobs.length
-        ? <CartonPrint purchase={saved} jobs={jobs} busy={printer.busy} autoSr={autoSr} onAutoDone={() => setAutoSr(undefined)} onFix={fixLine} print={async q => { setError(""); await sendToPrinter(q, true); }} />
+        ? <CartonPrint purchase={saved} jobs={jobs} busy={printer.busy} autoSr={autoSr} onAutoDone={() => setAutoSr(undefined)} onFix={fixLine} times={times} print={async q => { setError(""); await sendToPrinter(timesJobs(q), true); }} />
         : <>
           <div className="xs mut">Stays here until you close it. Printing again never adds stock again.</div>
           <div className="tw"><table className="pos-t"><thead><tr><th>Item</th><th>Style</th><th>Colour</th><th className="r">Qty</th><th className="r">Rate</th></tr></thead><tbody>
