@@ -141,3 +141,14 @@ describe("owner, 1 Nov: item typed on the first line only", () => {
     expect(fillDownItems([R("", "X", "1")])[0].item).toBe("");   // nothing above: left for the owner
   });
 });
+
+import { findRollNo } from "../src/components/SupplierNo";
+describe("owner, 3 Nov: a supplier's roll number is found however it is typed", () => {
+  it("ignores spaces, case and leading zeros; the most recently set one wins a clash", () => {
+    const S = (id: string, vendor_code: string, updated_at: string) => ({ id, name: id, vendor_code, updated_at });
+    const list = [S("old", "1", "2026-10-01"), S("new", "1", "2026-11-03"), S("three", "3A", "2026-10-01")];
+    expect(findRollNo(list, " 01 ")?.id).toBe("new");
+    expect(findRollNo(list, "3a")?.id).toBe("three");
+    expect(findRollNo(list, "9")).toBeUndefined();
+  });
+});

@@ -1,5 +1,5 @@
 import { askText } from "../components/AskHost";
-import { byRollNo } from "../components/SupplierNo";
+import { byRollNo, findRollNo } from "../components/SupplierNo";
 import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -35,7 +35,15 @@ function SupplierList() {
   return <div>
     <Head title="Suppliers" sub={`${suppliers.length} suppliers · ${rupees(total)} payable`}>
       <button className="btn" onClick={async () => { if (!confirm(`Load the shop vendor list (${parseVendorList(vendorText).length} vendors)? Vendors already loaded are updated, not duplicated.`)) return; const r = await importVendors(parseVendorList(vendorText)); toast(`Vendor list loaded · ${r.added} new, ${r.updated} already there`); }}>Load vendor list</button>
-      <button className="btn p" onClick={async () => { const n = await askText("Supplier name"); if (!n) return; const p = { ...newParty(n.toUpperCase()), kind: "supplier" as const }; await put("parties", p); go("suppliers/" + p.id); }}><Icon n="plus" size={18} />Add</button>
+      {/* Owner, 3 Nov: "after the supplier's name I can't put his roll number — only the name saves". Add asks the roll
+          number first (the shop finds suppliers by it), then the name; a roll number already in use is refused. */}
+      <button className="btn p" onClick={async () => {
+        const roll = ((await askText("Supplier roll no. (e.g. 51, 3A, M1)")) || "").trim().toUpperCase();
+        if (roll) { const same = findRollNo(suppliers, roll); if (same) { toast(`Roll no. ${roll} is already ${same.name} — open it from the list, or use another number`, true); return; } }
+        const n = await askText(roll ? `Name of supplier ${roll}` : "Supplier name"); if (!n?.trim()) return;
+        const p = { ...newParty(n.trim().toUpperCase()), kind: "supplier" as const, ...(roll ? { vendor_code: roll } : {}) };
+        await put("parties", p); toast(`${roll ? roll + " · " : ""}${p.name} added`); go("suppliers/" + p.id);
+      }}><Icon n="plus" size={18} />Add</button>
     </Head>
     <input className="in" style={{ marginBottom: 12 }} placeholder="Search supplier" value={q} onChange={e => setQ(e.target.value)} />
     <div className="list">{list.map(p => {
@@ -88,14 +96,29 @@ function SupplierView({ id }: { id: string }) {
 }
 
 /* Vendor code and terms, used by Purchase bill photos: printed cost ÷ divisor, then less %. */
+/* Owner, 3 Nov: "I wrote the roll number and saved, but the sticker screen doesn't pick it up". The box was called
+   "Vendor code" and kept only after "Save terms"; it is now "Roll no.", saves by itself when he leaves the box or
+   presses Enter, and refuses a number another supplier already has (which made the sticker screen find that one). */
 function VendorTerms({ p }: { p: Party }) {
   const [code, setCode] = useState(p.vendor_code || ""), [less, setLess] = useState(String(p.less_pct || 0)), [div, setDiv] = useState(String(p.rate_divisor || 1));
+  useEffect(() => { setCode(p.vendor_code || ""); }, [p.id, p.vendor_code]);
   const l = Number(less), d = Number(div), bad = !(l >= 0 && l < 100) || !(d > 0);
+  const others = useLiveQuery(() => db.parties.filter(x => !x.deleted && x.kind === "supplier" && x.id !== p.id).toArray(), [p.id], []);
+  const clash = code.trim() ? findRollNo(others, code) : undefined;
+  const save = async (quiet = false) => {
+    if (bad) return toast("Check less % and rate ÷", true);
+    if (clash) return toast(`Roll no. ${code.trim()} is already ${clash.name}`, true);
+    const fresh = (await db.parties.get(p.id)) || p;
+    if ((fresh.vendor_code || "") === code.trim() && (fresh.less_pct || 0) === l && (fresh.rate_divisor || 1) === d) { if (!quiet) toast("Saved"); return; }
+    await put("parties", { ...fresh, vendor_code: code.trim(), less_pct: l, rate_divisor: d, updated_at: now() });
+    toast(`Saved · roll no. ${code.trim() || "—"}`);
+  };
   return <div className="card row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-    <label className="f">Vendor code<input className="in" value={code} onChange={e => setCode(e.target.value.toUpperCase())} style={{ width: 90 }} /></label>
-    <label className="f">Less %<input className="in mono" inputMode="decimal" value={less} onChange={e => setLess(e.target.value)} style={{ width: 80 }} /></label>
-    <label className="f">Rate ÷<input className="in mono" inputMode="decimal" value={div} onChange={e => setDiv(e.target.value)} style={{ width: 80 }} /></label>
-    <button className="btn" disabled={bad} onClick={async () => { await put("parties", { ...p, vendor_code: code.trim(), less_pct: l, rate_divisor: d, updated_at: now() }); toast("Vendor terms saved"); }}>Save terms</button>
+    <label className="f">Roll no.<input className="in mono" value={code} onChange={e => setCode(e.target.value.toUpperCase())} onBlur={() => void save(true)} onKeyDown={e => { if (e.key === "Enter") void save(); }} style={{ width: 90 }} placeholder="e.g. 51" />
+      {clash && <span className="xs bad-text">Already {clash.name}</span>}</label>
+    <label className="f">Less %<input className="in mono" inputMode="decimal" value={less} onChange={e => setLess(e.target.value)} onBlur={() => void save(true)} style={{ width: 80 }} /></label>
+    <label className="f">Rate ÷<input className="in mono" inputMode="decimal" value={div} onChange={e => setDiv(e.target.value)} onBlur={() => void save(true)} style={{ width: 80 }} /></label>
+    <button className="btn" disabled={bad || !!clash} onClick={() => void save()}>Save</button>
   </div>;
 }
 

@@ -22,10 +22,17 @@ export const byRollNo = (a: Sup, z: Sup) => {
   return x.localeCompare(y, "en", { numeric: true, sensitivity: "base" }) || a.name.localeCompare(z.name);
 };
 
+/** "51", " 51 ", "051" and "3a" all find the same supplier. When two suppliers carry one roll number (a list loaded
+    twice, a name typed again), the one changed most recently wins — the one the owner just set it on. */
+const rollKey = (v: string) => v.trim().toUpperCase().replace(/\s+/g, "").replace(/^0+(?=\d)/, "");
 export const findRollNo = <T extends Sup>(suppliers: T[], typed: string): T | undefined => {
-  const k = typed.trim().toUpperCase();
-  return k ? suppliers.find(s => (s.vendor_code || "").trim().toUpperCase() === k) : undefined;
+  const k = rollKey(typed);
+  if (!k) return undefined;
+  const hits = suppliers.filter(s => rollKey(s.vendor_code || "") === k);
+  return hits.length > 1 ? [...hits].sort((a, z) => String((z as any).updated_at || "").localeCompare(String((a as any).updated_at || "")))[0] : hits[0];
 };
+/** How many suppliers carry this roll number (more than one is shown under the box). */
+export const rollCount = (suppliers: Sup[], typed: string) => { const k = rollKey(typed); return k ? suppliers.filter(s => rollKey(s.vendor_code || "") === k).length : 0; };
 
 export function supplierInfo(s: Sup) {
   return [s.name, s.city, s.rate_divisor && s.rate_divisor !== 1 ? `rate ÷ ${s.rate_divisor}` : "", s.less_pct ? `${s.less_pct}% less` : ""].filter(Boolean).join(" · ");
@@ -45,7 +52,7 @@ export function SupplierNo<T extends Sup>({ suppliers, id, onPick, label = "Supp
         onChange={e => { const t = e.target.value.toUpperCase(); setText(t); onPick(findRollNo(suppliers, t)); }} />
       <datalist id={listId}>{sorted.filter(s => s.vendor_code).map(s => <option key={s.id} value={s.vendor_code} />)}</datalist>
       {text.trim()
-        ? <span className={"xs " + (hit ? "mut" : "bad-text")}>{hit ? supplierInfo(hit) : `No supplier has roll number ${text.trim()}`}</span>
+        ? <span className={"xs " + (hit ? "mut" : "bad-text")}>{hit ? supplierInfo(hit) + (rollCount(suppliers, text) > 1 ? ` · ${rollCount(suppliers, text)} suppliers have roll no. ${text.trim()} — fix it on the Suppliers page` : "") : `No supplier has roll number ${text.trim()}`}</span>
         : cur ? <span className="xs mut">{supplierInfo(cur)} · no roll number yet (add it on the Suppliers page)</span> : null}
     </label>
   );
