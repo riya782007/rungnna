@@ -587,17 +587,20 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
       if (!filled.length) throw new Error("No line is finished yet: type the quantity and cost");
       const printSr = lineIdx !== undefined ? (all[lineIdx]?.sr?.trim() || String(lineIdx + 1)) : undefined;
       const D = { ...d, supplier: supplierId, rack: rackId, billNo: billNoIn };
-      // a bill listing the same article twice: add identical lines together instead of refusing
-      let merged = combineRepeatedRows(filled);
-      if (merged.conflict) {
+      /* a bill listing the same article twice. Owner, 3 Nov: "lines 9 and 22 were the same article and rate — they
+         were clubbed, the sticker said 9/22 and the stickers came out of order". Identical lines now stay two lines
+         of the bill (one product, two lines), each printing with its own Sr. in the bill's order; only lines with
+         the same code at different prices are asked about. */
+      let lines = filled;
+      const conflict = combineRepeatedRows(filled).conflict;
+      if (conflict) {
         const apart = keepRepeatsApart(filled);
-        if (!confirm(`${merged.conflict.replace(/ One code is probably misread.*$/, "")}\n\nOK — they really are different: keep both (${apart.renamed.map(x => `Sr. ${x.sr} prints as ${x.to}`).join(", ")}).\nCancel — let me correct the code first.`)) throw new Error(merged.conflict);
+        if (!confirm(`${conflict.replace(/ One code is probably misread.*$/, "")}\n\nOK — they really are different: keep both (${apart.renamed.map(x => `Sr. ${x.sr} prints as ${x.to}`).join(", ")}).\nCancel — let me correct the code first.`)) throw new Error(conflict);
         set({ rows: [...apart.rows, ...later] });
-        merged = combineRepeatedRows(apart.rows);
+        lines = apart.rows;
       }
-      if (merged.combined) { set({ rows: [...merged.rows, ...later] }); toast(`${merged.combined} repeated line${merged.combined === 1 ? "" : "s"} added together`); }
       const cst = costingOf({ mult: d.mult, less: d.discount, extra: d.extra }), pct = cst.less;
-      const rows = await preparePhotoRows(cst.extra ? spreadExtra(merged.rows, cst.extra) : merged.rows, D.supplier, packetDefault);
+      const rows = await preparePhotoRows(cst.extra ? spreadExtra(lines, cst.extra) : lines, D.supplier, packetDefault);
       const rule = await getRule(), current = await loadLabelCfg();
       const checked = validatePhotoRows(rows), products = draftLabelProducts(rows, by, rule, rows.length);
       const preflight = checked.flatMap((r, i) => {

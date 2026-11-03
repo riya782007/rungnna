@@ -267,11 +267,14 @@ export async function savePhotoPurchase(rows: PhotoRow[], input: { by: string; r
     if (await db.purchases.filter(p => !p.deleted && p.status === "final" && p.supplier_id === supplier.id && p.supplier_bill.trim().toUpperCase() === input.billNo.trim().toUpperCase()).count()) throw new Error("This supplier bill is already saved");
     const purchase = { ...newPurchase(input.by, input.rack), supplier_id: supplier.id, supplier_name: supplier.name, supplier_bill: input.billNo.trim(), photo_id: input.photoId, note: input.note, ...(invoice_total !== undefined ? { invoice_total } : {}) };
     const rule = await getRule();
-    const seen = new Set<string>();
+    const seen = new Map<string, (typeof checked)[number]>();
     for (const row of checked) {
       const key = [row.style.trim().toUpperCase(), row.color.trim().toUpperCase()].join("|");
-      if (seen.has(key)) throw new Error(`Article ${row.style}${row.color ? " · " + row.color : ""} is on two lines that differ in rate, cost, unit or packet. Make them match (they are then added together), or change one line's style/colour.`);
-      seen.add(key);
+      // the same article on two identical lines: two lines of the bill, one product (owner, 3 Nov)
+      const before = seen.get(key);
+      if (before && !(before.item.trim().toUpperCase() === row.item.trim().toUpperCase() && before.unit.trim().toUpperCase() === row.unit.trim().toUpperCase() && before.cost === row.cost && before.rate === row.rate && before.pack === row.pack))
+        throw new Error(`Article ${row.style}${row.color ? " · " + row.color : ""} is on two lines that differ in rate, cost, unit or packet. Make them match, or change one line's style/colour.`);
+      seen.set(key, row);
       const old = await findByKey({ model: row.style, style: row.style, color: row.color, vendor_id: supplier.id });
       if (old && old.type !== row.unit.toUpperCase()) throw new Error("Unit differs from the existing article. Review before saving.");
       const code = priceFromCost(row.cost, rule, row.pack, row.unit).cost_code;

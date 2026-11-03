@@ -136,7 +136,7 @@ export function InvoiceSheet({ b, shop, format, copy, feed = 0 }: { b: Bill; sho
           supplier's signature line, which CGST Rule 46 requires; its terms come from Settings. */}
       {taxDoc && <div className="inv-terms">{shop.terms}<span>For {shop.name}{!thermal ? <><br /><br />Authorised signatory</> : null}</span></div>}
       {/* blank paper so the last line has come out past the tear bar / cutter (Settings › Printing) */}
-      {thermal && feed > 0 && <div className="inv-feed" aria-hidden="true" style={{ height: feed + "mm" }} />}
+      {thermal && feed > 0 && <FeedTail mm={feed} />}
     </div>
   );
 }
@@ -189,7 +189,7 @@ function RollSlipSheet({ width, feed, className, children }: { width: number; fe
   return <div style={{ page: "rj-receipt" }} className={"inv thermal slip " + (width === 58 ? "narrow " : "") + className}>
     <style data-thermal-width={String(width)}>{"@page rj-receipt{size:auto;margin:2mm}"}</style>
     {children}
-    {feed > 0 && <div className="inv-feed" aria-hidden="true" style={{ height: feed + "mm" }} />}
+    {feed > 0 && <FeedTail mm={feed} />}
   </div>;
 }
 const slipDate = (at: string) => new Date(at).toLocaleString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -230,6 +230,13 @@ export function CashSlip({ b, shop, width = 80, feed = 0 }: { b: Bill; shop: Sho
   </RollSlipSheet>;
 }
 
+/* Owner, 3 Nov (voice): "the bill doesn't come all the way out — we press the feed button each time, and when it is
+   torn the bottom is cut off". Blank paper alone is dropped by many thermal printer drivers (they stop at the last
+   printed dot), so the blank space ends with a small printed mark: the printer must feed all of it, and the
+   torn edge falls below the totals. */
+function FeedTail({ mm }: { mm: number }) {
+  return <div className="inv-feed" aria-hidden="true" style={{ height: mm + "mm" }}><span className="inv-feed-end">·</span></div>;
+}
 /* Owner, 3 Nov (voice): "the printed bill's serial numbers go up and down — box 2 has 23 and 18 below". The lines
    print box by box, and the # runs 1, 2, 3… down the page in that same order. */
 export function byBox<T extends { box_no: number }>(items: T[]): T[] {

@@ -20,7 +20,7 @@ export function receiptCutSetup(cut: ReceiptCut) {
    totals). The print head sits behind the tear bar / cutter, so without this the last lines are still inside the
    printer when the slip is torn off. */
 export const RECEIPT_FEEDS = [0, 10, 15, 20, 25, 30, 40] as const;
-export const DEFAULT_RECEIPT_FEED = 15;
+export const DEFAULT_RECEIPT_FEED = 25;   // 3 Nov: 15 mm left the totals inside on his printer
 export function receiptFeed(value: unknown): number {
   const n = Number(value);
   return value !== null && value !== "" && (RECEIPT_FEEDS as readonly number[]).includes(n) ? n : DEFAULT_RECEIPT_FEED;

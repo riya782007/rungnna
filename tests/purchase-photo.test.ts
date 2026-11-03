@@ -104,9 +104,14 @@ describe("reviewed photo purchases", () => {
     expect(await db.outbox.count()).toBe(0); expect(await db.movements.count()).toBe(0);
     expect((await db.settings.toArray()).filter(s => s.key.startsWith("seq_PI"))).toHaveLength(0);
   });
-  it("rolls back the first article when a later article is duplicated", async () => {
-    await expect(savePhotoPurchase([row, row], input)).rejects.toThrow("is on two lines");
+  it("rolls back the first article when a later line repeats it at another price", async () => {
+    await expect(savePhotoPurchase([row, { ...row, cost: "30" }], input)).rejects.toThrow("is on two lines");
     expect(await db.products.count()).toBe(0); expect(await db.outbox.count()).toBe(0);
+  });
+  it("owner, 3 Nov: the same article on two identical lines stays two lines (own Sr., bill order), one product", async () => {
+    const p = await savePhotoPurchase([{ ...row, sr: "9" }, { ...row, style: "OTHER", sr: "10" }, { ...row, sr: "22" }], input);
+    expect(p.items.map(l => `${l.bill_sr}:${l.style}`)).toEqual(["9:K5209", "10:OTHER", "22:K5209"]);
+    expect(p.items[0].product_id).toBe(p.items[2].product_id);
   });
   it("does not guess missing prices or convert packaging quantities", () => {
     for (const patch of [{ item: "" }, { cost: "" }, { rate: "" }, { qty: "1.5" }, { unit: "GROSS" }, { hsn: "bad" }, { pack: "0" }, { pack: "1.5" }, { stickers: "-1" }, { stickers: "1.5" }, { stickers: "5001" }]) expect(() => validatePhotoRows([{ ...row, ...patch }])).toThrow();

@@ -330,7 +330,7 @@ tr.click{cursor:pointer}tr.click:hover td{background:var(--bg)}
 /* 68 mm, not 72: an 80 mm head prints only ~72 mm, and the 2 mm page margin pushed the right edge to 74 mm —
    the Amount column came out cut ("Amour", "230.0", owner's photo 26 Oct). 2 mm + 68 mm stays inside it. */
 .inv.thermal{width:68mm;font-size:10px}
-.inv-feed{display:block;border:0;margin:0;padding:0}
+.inv-feed{display:flex;align-items:flex-end;justify-content:center;border:0;margin:0;padding:0}.inv-feed-end{font-size:8px;line-height:1;color:#000}
 /* roll slips after the bill (owner, 26 Oct): bag tag + cash counter slip, each cut on its own */
 .inv.slip{font-size:12px;line-height:1.3}
 .inv.slip>*+*{margin-top:3px}
