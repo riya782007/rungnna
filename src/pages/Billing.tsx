@@ -618,6 +618,17 @@ export default function Billing({ args }: { args: string[] }) {
     } catch (e: any) { toast(e.message, true); } finally { setAiBusy(false); }
   }
 
+  /* Owner, 3 Nov (voice): "twice we pressed F6 instead of F7 and the bill got saved — make it ask us again".
+     A key that finishes the bill (F6 save, F9 save & print, F10 WhatsApp) must be pressed twice: the first press only
+     says "press F6 again to save"; a second press of the same key within 4 seconds saves. The buttons save at once. */
+  const armedKey = useRef<{ key: string; at: number } | null>(null);
+  const confirmKey = (key: string, what: string) => {
+    const a = armedKey.current;
+    if (a && a.key === key && Date.now() - a.at < 4000) { armedKey.current = null; return true; }
+    armedKey.current = { key, at: Date.now() };
+    toast(`Press ${key} again to ${what} — or carry on scanning`);
+    return false;
+  };
   /* function keys */
   useEffect(() => {
     const f = (e: KeyboardEvent) => {
@@ -629,11 +640,12 @@ export default function Billing({ args }: { args: string[] }) {
       if (k === "F3") doHold();
       if (k === "F4") setHeld(true);
       if (k === "F5") setCalculator(true);
-      if (k === "F6") doSave(false);
+      if (k !== "F6" && k !== "F9" && k !== "F10") armedKey.current = null;   // any other key cancels a pending save
+      if (k === "F6" && confirmKey("F6", "save this bill")) doSave(false);
       if (k === "F7") scanRef.current?.focus();
       if (k === "F8") { setEditorOpen(true); setEntryFocus(n => n + 1); }
-      if (k === "F9") doSave(true);
-      if (k === "F10") doSave(false, true);
+      if (k === "F9" && confirmKey("F9", "save and print this bill")) doSave(true);
+      if (k === "F10" && confirmKey("F10", "save and send this bill on WhatsApp")) doSave(false, true);
       if (k === "F11") boxSummaryRef.current?.focus({ preventScroll: true });
       if (k === "F12") { setMoneyMore(true); setTimeout(() => advanceRef.current?.focus(), 0); }
     };
