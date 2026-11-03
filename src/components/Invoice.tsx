@@ -91,8 +91,8 @@ export function InvoiceSheet({ b, shop, format, copy, feed = 0 }: { b: Bill; sho
         {/* the unit (PCS / PAIR / SET) has its own column before Qty, never a faint word under the item (owner, 22 Oct) */}
         <thead><tr><th>#</th><th>Box</th><th>{full && !thermal ? "Item / Style / Colour" : "Item"}</th><th className="r">Pkt</th><th>Unit</th><th className="r">Qty</th>{prices && <><th className="r">Rate</th><th className="r">Amount</th></>}</tr></thead>
         <tbody>
-          {thermal ? boxes.map(box => <ReceiptBox key={box} b={b} box={box} prices={prices} narrow={format === "58mm"} full={full} />) :
-          b.items.map((l, i) => (
+          {thermal ? boxes.map(box => <ReceiptBox key={box} b={b} box={box} prices={prices} narrow={format === "58mm"} full={full} start={byBox(b.items).findIndex(l => l.box_no === box)} />) :
+          byBox(b.items).map((l, i) => (
             <tr key={l.id}><td>{i + 1}</td><td>{l.box_no}</td>
               <td><b>{l.item}</b>{full && <> {l.style} <span className="inv-c">{l.color}</span></>}{l.disc && prices ? <span className="inv-c"> · disc {documentDiscount(b, l.disc)}</span> : null}</td>
               <td className="r">{l.pkts ? `${l.pkts}×${l.pack}` : ""}</td><td>{l.type || "PCS"}</td><td className="r">{l.qty}</td>
@@ -230,13 +230,18 @@ export function CashSlip({ b, shop, width = 80, feed = 0 }: { b: Bill; shop: Sho
   </RollSlipSheet>;
 }
 
-function ReceiptBox({ b, box, prices, narrow, full }: { b: Bill; box: number; prices: boolean; narrow: boolean; full: boolean }) {
+/* Owner, 3 Nov (voice): "the printed bill's serial numbers go up and down — box 2 has 23 and 18 below". The lines
+   print box by box, and the # runs 1, 2, 3… down the page in that same order. */
+export function byBox<T extends { box_no: number }>(items: T[]): T[] {
+  return items.map((l, i) => [l, i] as const).sort((a, z) => (a[0].box_no || 1) - (z[0].box_no || 1) || a[1] - z[1]).map(([l]) => l);
+}
+function ReceiptBox({ b, box, prices, narrow, full, start = 0 }: { b: Bill; box: number; prices: boolean; narrow: boolean; full: boolean; start?: number }) {
   const lines = b.items.filter(l => l.box_no === box);
   const columns = prices ? narrow ? 5 : 7 : narrow ? 3 : 5;   // the columns that show (Box is hidden on the roll; # and Pkt on 58 mm)
   /* Owner, 28 Oct (photo of a 117-line estimate): "Box No." above and "Box qty" below took two lines per box. The
      box's quantity now sits beside its number on the one line above it. */
   return <><tr className="receipt-box"><td colSpan={columns}>Box No.: {box} · Qty: {lines.reduce((n, l) => n + l.qty, 0)}</td></tr>
-    {lines.map(l => <tr key={l.id}><td>{b.items.indexOf(l) + 1}</td><td>{box}</td><td><b>{l.item}</b>{full && (l.style || l.color) ? <div className="inv-c">{[l.style, l.color].filter(Boolean).join(" · ")}</div> : null}{l.disc && prices ? <div className="inv-c">disc {documentDiscount(b, l.disc)}</div> : null}</td><td className="r">{l.pkts ? `${l.pkts}×${l.pack}` : ""}</td><td>{l.type || "PCS"}</td><td className="r">{l.qty}</td>{prices && <><td className="r">{documentAmount(b, l.rate)}</td><td className="r">{documentAmount(b, l.amount)}</td></>}</tr>)}
+    {lines.map((l, k) => <tr key={l.id}><td>{start + k + 1}</td><td>{box}</td><td><b>{l.item}</b>{full && (l.style || l.color) ? <div className="inv-c">{[l.style, l.color].filter(Boolean).join(" · ")}</div> : null}{l.disc && prices ? <div className="inv-c">disc {documentDiscount(b, l.disc)}</div> : null}</td><td className="r">{l.pkts ? `${l.pkts}×${l.pack}` : ""}</td><td>{l.type || "PCS"}</td><td className="r">{l.qty}</td>{prices && <><td className="r">{documentAmount(b, l.rate)}</td><td className="r">{documentAmount(b, l.amount)}</td></>}</tr>)}
 </>;
 }
 

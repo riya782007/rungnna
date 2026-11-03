@@ -33,7 +33,7 @@ import { qrSvg } from "../lib/qr";
 import { createPortal } from "react-dom";
 import { MicButton } from "../components/Voice";
 import { Modal, PhotoButton, Thumb, MoneyInput } from "../components/common";
-import { PrintBill, type PrintFormat, type RollSlips } from "../components/Invoice";
+import { PrintBill, byBox, type PrintFormat, type RollSlips } from "../components/Invoice";
 import { resolveBillingScan, withBillNames } from "../lib/billing-products";
 import { parseLabel } from "../lib/parse";
 import { BagLabels } from "../components/BagLabels";
@@ -439,7 +439,11 @@ export default function Billing({ args }: { args: string[] }) {
       } catch (error: any) { toast(error.message, true); return "Bag not found"; }
     }
     if (r.toLowerCase() === "bb") {
-      const next = ++boxCountRef.current; boxRef.current = next; setBox(next); set({ box_count: next }); setQ("");
+      /* Owner, 3 Nov: "pressing for box 2, it stayed on box 1 — only the second press moved it". A new bill counts 0
+         boxes while its lines go in box 1, so the first press gave box 1 again. The next box is always one more than
+         the highest box in use. */
+      const used = Math.max(boxCountRef.current, boxRef.current, ...(billRef.current?.items.map(l => l.box_no || 1) || []));
+      const next = used + 1; boxCountRef.current = next; boxRef.current = next; setBox(next); set({ box_count: next }); setQ("");
       beep(); toast("Box " + next); return "Box " + next;
     }
     if (r.startsWith("#") && r.length > 1 && companyKindNow() !== "gst") { // typed code in the scan box (not in the tax-invoice company)
@@ -641,7 +645,9 @@ export default function Billing({ args }: { args: string[] }) {
   const unnamed = unnamedCodes(t.items, id => (id ? pmap.get(id)?.item_code : undefined));
   const boxes = [...new Set([...t.items.map(l => l.box_no), box])].sort((a, z) => a - z);
   /* Owner, 26 Oct (voice): each box shows which bill line numbers (#) it holds — "box 4: 23 to 28" */
-  const boxLines = (n: number) => boxLineRange(t.items.map((l, i) => l.box_no === n ? i + 1 : 0).filter(Boolean));
+  // the # shown on screen is the # the printed bill gives the line: box by box, 1, 2, 3… (owner, 3 Nov)
+  const printNo = new Map(byBox(t.items).map((l, k) => [l.id, k + 1]));
+  const boxLines = (n: number) => boxLineRange(byBox(t.items).map((l, k) => l.box_no === n ? k + 1 : 0).filter(Boolean));
   const balance = due(t);
   const lastScan = t.items.find(l => l.id === lastScanId);
   const itemEditor = <Suspense fallback={<div className="pos-entry-loading" role="status">Loading items…</div>}><ManualItems key={b.id} inline persistent focusRequest={entryFocus} products={products} box={box} level={b.price_level || "wholesale"} canRates={can(me, "billing.rates")} codeDiv={cd} onClose={() => {}}
@@ -758,7 +764,7 @@ export default function Billing({ args }: { args: string[] }) {
               <tbody>
                 {displayOrder(t.items).map(l => [l, t.items.indexOf(l)] as const).map(([l, i]) => (
                   <tr key={l.id} className={"ln" + (lastScanId === l.id ? " scanned" : "") + (flashId === l.id ? " flash" : "") + (noQty(l) ? (qtyProblem.includes(l.id) ? " noqty stop" : " noqty") : "")} aria-current={lastScanId === l.id ? "true" : undefined} ref={row => { if (row) rowRefs.current.set(l.id, row); else rowRefs.current.delete(l.id); }}>
-                    <td className="mut" data-l="#"><span className="line-no">{i + 1}</span></td>
+                    <td className="mut" data-l="#"><span className="line-no">{printNo.get(l.id) ?? i + 1}</span></td>
                     <td data-l="Box"><input className="cell" style={{ width: 38 }} inputMode="numeric" value={l.box_no} onChange={e => setLine(l.id, { box_no: Math.max(1, parseInt(e.target.value) || 1) })}
                       onBlur={() => setB(x => x ? { ...x, items: mergeBoxLine(x.items, l.id) } : x)} /></td>
                     <td data-l=""><input className="cell" style={{ width: "100%", fontWeight: 700 }} title={l.item} aria-label={`Product name for line ${i + 1}`} placeholder="Product name" value={/^ITEM\s+\d+$/i.test(l.item || "") ? "" : l.item || ""} onChange={e => setLine(l.id, { item: e.target.value })} />{!l.product_id && <span className="pill">Custom</span>}{l.product_id && pmap.get(l.product_id)?.tk?.trim() ? <span className="pill warn" style={{ marginLeft: 6 }}>dead stock</span> : null}</td>

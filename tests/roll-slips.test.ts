@@ -41,3 +41,11 @@ describe("roll printer slips after the bill (owner, 26 Oct)", () => {
     expect(renderToStaticMarkup(createElement(InvoiceSheet, { b: saved({ carry_bags: 2 }), shop: DEFAULT_SHOP, format: "80mm" }))).toContain("Carry bags:");
   });
 });
+
+import { byBox } from "../src/components/Invoice";
+describe("owner, 3 Nov: the bill's # runs 1, 2, 3 box by box", () => {
+  it("lines are put box by box, keeping their order inside a box", () => {
+    const L = (id: string, box_no: number) => ({ id, box_no });
+    expect(byBox([L("a", 2), L("b", 1), L("c", 2), L("d", 1)]).map(l => l.id)).toEqual(["b", "d", "a", "c"]);
+  });
+});
