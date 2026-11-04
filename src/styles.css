@@ -1524,7 +1524,7 @@ tr.act-estimate td { background: #fde8e8; }
 
 /* Owner, 28 Oct (photo, 117-line estimate): the item heading printed again in the middle of the roll at a page
    break, and its grey fill came out as dots. One heading at the top only, no grey fill on thermal paper. */
-#printroot .inv.thermal .inv-t thead{display:table-row-group}
+.inv.thermal .inv-t thead{display:table-row-group}
 .inv.thermal .inv-t th{background:none!important}
 .bill-gaps{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 /* Owner, 29 Oct: "these light-coloured words I can't read". On the bill → stickers screen the small grey notes are
