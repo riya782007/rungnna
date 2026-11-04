@@ -6,8 +6,8 @@ import { newBill, DEFAULT_SHOP } from "../src/lib/billing";
 import { manualLine } from "../src/lib/pos";
 import { preparePrint, thermalPage, receiptCut, receiptCutSetup } from "../src/lib/printing";
 describe("thermal invoices", () => {
-  it("bounds long receipts and gives both default and named pages the roll width", () => {
-    expect(thermalPage(80, 20000)).toBe("@page{size:80mm 280mm;margin:2mm 1mm}@page rj-receipt{size:80mm 280mm;margin:2mm 1mm}");
+  it("fits the entire long receipt on one page at the roll width", () => {
+    expect(thermalPage(80, 2400)).toBe("@page{size:80mm 643mm;margin:2mm 1mm}@page rj-receipt{size:80mm 643mm;margin:2mm 1mm}");
     expect(thermalPage(58, 100)).toContain("size:58mm 35mm");
   });
   it("defaults to the confirmed half-cut profile without accepting invalid settings", () => {
@@ -37,18 +37,18 @@ describe("thermal invoices", () => {
   });
   it("uses valid measured thermal dimensions instead of width plus auto", () => {
     expect(thermalPage(80, 960)).toBe("@page{size:80mm 262mm;margin:2mm 1mm}@page rj-receipt{size:80mm 262mm;margin:2mm 1mm}");
-    expect(thermalPage(80, 6000)).toBe("@page{size:80mm 280mm;margin:2mm 1mm}@page rj-receipt{size:80mm 280mm;margin:2mm 1mm}");
+    expect(thermalPage(80, 6000)).toBe("@page{size:80mm 1596mm;margin:2mm 1mm}@page rj-receipt{size:80mm 1596mm;margin:2mm 1mm}");
     expect(() => thermalPage(90, 100)).toThrow();
     expect(() => thermalPage(80, 0)).toThrow();
     expect(() => thermalPage(58, NaN)).toThrow();
   });
   it("measures the receipt's overflowing content and restores the hidden root", async () => {
     const page = { dataset: { thermalWidth: "80" }, textContent: "@page{size:auto}" };
-    const receipt = { getBoundingClientRect: () => ({ height: 400 }), scrollHeight: 960 };
+    const receipt = { getBoundingClientRect: () => ({ height: 400 }), scrollHeight: 2400 };
     const root = { style: { cssText: "display:none" }, querySelector: (s: string) => s === ".inv" ? receipt : page };
     const doc = { getElementById: () => root, querySelectorAll: () => [] } as unknown as Document;
     await preparePrint(doc, async () => {});
-    expect(page.textContent).toBe(thermalPage(80, 960));
+    expect(page.textContent).toBe(thermalPage(80, 2400));
     expect(root.style.cssText).toBe("display:none");
   });
   it("refuses a blank thermal job instead of printing an automatic-length page", async () => {
