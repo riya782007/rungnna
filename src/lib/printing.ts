@@ -124,11 +124,19 @@ export async function preparePrint(doc: Document, frame: () => Promise<void>) {
   }
 }
 
+/** The longest roll page drivers print at full size, in mm. */
+export const MAX_ROLL_PAGE = 280;
+
 export function thermalPage(width: number, heightPx: number) {
   if (![58, 80].includes(width) || !Number.isFinite(heightPx) || heightPx <= 0) throw new Error("Invalid receipt dimensions");
-  // Use one roll page for the whole receipt, including the final feed.
-  // Allow 4 mm for page margins and 4 mm for layout differences in print.
-  const height = Math.max(30, Math.ceil(heightPx * 25.4 / 96 + 8));
+  /* Owner, 5 Nov (video: "Print out is very small"): one page over a metre long is shrunk by the printer driver to
+     fit its longest paper, so every letter came out tiny. Keep each page within MAX_ROLL_PAGE (the length that has
+     always printed at full size) and split a long bill into EQUAL pages sized to the bill, so the last page is not a
+     full blank one (4 Nov: the reason the cap had been removed). Each page keeps 4 mm for its margins and 10 mm so a
+     line that does not fit moves whole to the next page instead of pushing out one more page. */
+  const content = heightPx * 25.4 / 96;
+  const pages = content + 8 <= MAX_ROLL_PAGE ? 1 : Math.ceil(content / (MAX_ROLL_PAGE - 14));
+  const height = pages === 1 ? Math.max(30, Math.ceil(content + 8)) : Math.ceil(content / pages + 14);
   return `@page{size:${width}mm ${height}mm;margin:2mm 1mm}@page rj-receipt{size:${width}mm ${height}mm;margin:2mm 1mm}`;
 }
 
