@@ -14,7 +14,7 @@ import { appendPosLine, repeatedPosLine, validatePosLines } from "../lib/pos";
 import type { CalcTarget } from "../components/PosTools";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, type Bill, type BillLine, type Party, type Payment, type Product } from "../lib/db";
-import { findByScan, fillFromItemCode, label, readItemMap, codeInfo } from "../lib/products";
+import { findByScan, fillFromItemCode, label, readItemMap, codeInfo, nameItemCode, hasProductName } from "../lib/products";
 import { noteMiss, clearMiss, learnFromPick } from "../lib/scan-learn";
 import { ShopDetailsAsk, shopNeedsTaxDetails } from "../components/ShopDetailsAsk";
 import { NameItemCodes, unnamedCodes } from "../components/NameItemCodes";
@@ -34,7 +34,7 @@ import { createPortal } from "react-dom";
 import { MicButton } from "../components/Voice";
 import { Modal, PhotoButton, Thumb, MoneyInput } from "../components/common";
 import { PrintBill, byBox, type PrintFormat, type RollSlips } from "../components/Invoice";
-import { resolveBillingScan, withBillNames } from "../lib/billing-products";
+import { resolveBillingScan, withBillNames, unnamedGroups } from "../lib/billing-products";
 import { parseLabel } from "../lib/parse";
 import { BagLabels } from "../components/BagLabels";
 import { BAG_PREFIX, parseBagPayload } from "../lib/bag-labels";
@@ -575,9 +575,32 @@ export default function Billing({ args }: { args: string[] }) {
     }
     // never stop a sale over a setting: warn, and save the bill
     if (b.bill_type === "gst" && !shop.gstin?.trim()) toast("Add the shop's GSTIN in Settings → Shop profile: tax invoices should carry it.", true);
-    const missing = t.items.find(l => !l.item?.trim() || /^ITEM\s+\d+$/i.test(l.item.trim()));
-    if (missing) return toast("Add the product name before saving: " + (missing.style || missing.code), true);
-    const done = await finalize(t, shop.state, b.party_name);
+    let ready = t;
+    const unnamed = unnamedGroups(t.items, products);
+    if (unnamed.length) {
+      // ask the name here, on top of the bill — the line may be 100 rows away (owner, 5 Nov)
+      const lineNos = new Map(byBox(t.items).map((l, k) => [l.id, k + 1]));
+      const names = new Map<string, string>();
+      for (const g of unnamed) {
+        const first = g.lines[0], more = g.lines.length - 1;
+        const where = `line ${lineNos.get(first.id) ?? "?"} · box ${first.box_no || "-"} · ${g.style || first.code}${g.code ? ` (item no. ${g.code})` : ""} · ${first.qty} pcs${more ? ` · +${more} more line${more > 1 ? "s" : ""}` : ""}`;
+        const typed = await askText(`No product name on ${where}. Type its name (e.g. BRACELET) — remembered for next time:`, g.guess);
+        const name = typed?.trim().toUpperCase();
+        if (!name) { toast("Not saved — give the product a name, or remove that line.", true); return; }
+        for (const l of g.lines) names.set(l.id, name);
+        try {   // remember it, so the next label / bill already has the name; never stop the sale over this
+          if (g.code) await nameItemCode(g.code, name, first.type || "PCS");
+          else for (const id of new Set(g.lines.map(l => l.product_id).filter(Boolean) as string[])) {
+            const prod = await db.products.get(id);
+            if (prod && !prod.deleted && !hasProductName(prod.item)) await put("products", { ...prod, item: name });
+          }
+        } catch { /* named on this bill only */ }
+      }
+      const named = { ...b, items: b.items.map(l => names.has(l.id) ? { ...l, item: names.get(l.id)! } : l) };
+      setB(named);
+      ready = totals(withBillNames(named, products, readItemMap(itemNames?.value)), shop.state, shop.gstin);
+    }
+    const done = await finalize(ready, shop.state, b.party_name);
     beep("saved");
     setLastSaved(done);
     toast(`Saved ${done.bill_type === "estimate" ? "estimate" : done.bill_type === "gst" ? "tax invoice" : "challan"} ${done.no} in Bills · ${billAmount(done.net)}`);
