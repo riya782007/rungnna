@@ -1,4 +1,5 @@
 import { companyKindNow, typeForCompany, estimatesOnly } from "../lib/scope";
+import { upiAccounts, qrAccount, NO_QR, type UpiAccount } from "../lib/upi";
 import { askText } from "../components/AskHost";
 import { parkBillingDraft, resumeBillingDraft } from "../lib/billing-drafts";
 import { publicOrigin } from "../lib/platform";
@@ -888,7 +889,8 @@ export default function Billing({ args }: { args: string[] }) {
           {b.bill_type === "challan" ? <div className="note sm">A challan sends the goods out with no money taken. Convert it to an invoice from Bills when the customer is billed.</div> : <>
           {(moneyMore || !!b.advance) ? <div className="sumrow"><span>Advance</span><MoneyInput inputRef={advanceRef} className="cell r" style={{ width: 80 }} paise={b.advance} onPaise={v => set({ advance: v })} /></div>
             : <button type="button" className="linkbtn xs" style={{ alignSelf: "flex-end" }} onClick={() => setMoneyMore(true)}>+ Packing / advance</button>}
-          <Payments pays={b.payments} left={t.net - b.advance} onChange={payments => set({ payments })} />
+          <Payments pays={b.payments} left={t.net - b.advance} onChange={payments => set({ payments })}
+            accounts={b.bill_type === "return" ? [] : upiAccounts(shop)} qr={qrAccount(b, shop)?.name || NO_QR} onQr={pay_to => set({ pay_to })} />
           <div className={"sumrow " + (balance > 0 ? "due" : "")}><span>{balance > 0 ? "Balance (credit)" : balance < 0 ? "Return to customer" : "Balance"}</span><b className="mono">{billAmount(Math.abs(balance))}</b></div></>}
           </div>
         </aside>
@@ -928,7 +930,7 @@ function boxLineRange(nums: number[]): string {
   return runs.join(", ");
 }
 
-function Payments({ pays, left, onChange }: { pays: Payment[]; left: number; onChange: (p: Payment[]) => void }) {
+function Payments({ pays, left, onChange, accounts = [], qr = NO_QR, onQr }: { pays: Payment[]; left: number; onChange: (p: Payment[]) => void; accounts?: UpiAccount[]; qr?: string; onQr?: (name: string) => void }) {
   const paymentInputs = useRef<HTMLDivElement>(null);
   const focusNew = useRef(false);
   useEffect(() => {
@@ -939,7 +941,9 @@ function Payments({ pays, left, onChange }: { pays: Payment[]; left: number; onC
   }, [pays.length]);
   const paid = pays.reduce((a, p) => a + (p.mode === "credit" ? 0 : p.amount), 0);
   const rest = Math.max(0, left - paid);
-  const add = (mode: Payment["mode"]) => { focusNew.current = true; onChange([...pays, { mode, amount: 0, at: new Date().toISOString() }]); };
+  // a UPI payment is tagged with the account whose QR is on the bill; one tap changes it (owner, 5 Nov)
+  const add = (mode: Payment["mode"]) => { focusNew.current = true; onChange([...pays, { mode, amount: 0, at: new Date().toISOString(), ...(mode === "upi" && qr !== NO_QR ? { recipient: qr } : {}) }]); };
+  const setPay = (i: number, patch: Partial<Payment>) => onChange(pays.map((x, j) => j === i ? { ...x, ...patch } : x));
   return (
     <div ref={paymentInputs} className="stack" style={{ gap: 4 }}>
       {pays.map((p, i) => (
@@ -947,10 +951,16 @@ function Payments({ pays, left, onChange }: { pays: Payment[]; left: number; onC
           <span className="row" style={{ gap: 4, flexWrap: "nowrap" }}>
             <MoneyInput className="cell r" aria-label={`${p.mode.toUpperCase()} payment ${i + 1} amount`} style={{ width: 90 }} paise={p.amount} onPaise={v => onChange(pays.map((x, j) => j === i ? { ...x, amount: v } : x))} />
             <DeleteButton className="x" aria-label="Remove payment" onDelete={async () => { if (await confirmDelete("Remove this payment from the bill?")) onChange(pays.filter((_, j) => j !== i)); }}>✕</DeleteButton></span></div>
-          {p.mode === "upi" && <input className="in payment-recipient" aria-label={`UPI payment ${i + 1} received by`} placeholder="Received by / UPI name" value={p.recipient || ""} onChange={e => onChange(pays.map((x, j) => j === i ? { ...x, recipient: e.target.value } : x))} />}
+          {p.mode === "upi" && accounts.length > 0 && <div className="chips upi-to" role="group" aria-label={`UPI payment ${i + 1} went to`}>
+            <span className="xs mut">Went to</span>
+            {accounts.map(a => <button key={a.name} type="button" className={"chip" + (p.recipient === a.name ? " on" : "")} aria-pressed={p.recipient === a.name} onClick={() => setPay(i, { recipient: a.name })}>{a.name}</button>)}</div>}
+          {p.mode === "upi" && <input className="in payment-recipient" aria-label={`UPI payment ${i + 1} received by`} placeholder="Received by / UPI name" value={p.recipient || ""} onChange={e => setPay(i, { recipient: e.target.value })} />}
           {!p.amount && rest > 0 && <button type="button" className="linkbtn xs" onClick={() => onChange(pays.map((x, j) => j === i ? { ...x, amount: rest } : x))}>Use balance {billAmount(rest)}</button>}
         </div>))}
       <div className="chips">{(["cash", "upi", "card", "bank"] as const).map(m => <button key={m} className="chip" onClick={() => add(m)} disabled={!rest}>+ {m.toUpperCase()}</button>)}</div>
+      {accounts.length > 0 && onQr && <div className="chips qr-on-bill" role="group" aria-label="Pay QR printed on the bill">
+        <span className="xs mut">QR on bill</span>
+        {[...accounts.map(a => a.name), NO_QR].map(n => <button key={n} type="button" className={"chip" + (qr === n ? " on" : "")} aria-pressed={qr === n} title={accounts.find(a => a.name === n)?.upi || "No pay-QR on this bill"} onClick={() => onQr(n)}>{n === NO_QR ? "No QR" : n}</button>)}</div>}
     </div>
   );
 }

@@ -586,7 +586,8 @@ function ShopProfile() {
           {f("phone", "Phone")}{f("whatsapp", "WhatsApp number")}
           {f("email", "Company email", "Company contact email")}
           {f("gstin", "GSTIN", "07ABCDE1234F1Z5")}{f("state", "State", "Delhi")}
-          {f("upi", "UPI ID (for pay-QR on bills)", "rungnna@okaxis")}{f("hsn", "HSN code", "7117")}
+          {f("upi", "Shop's UPI ID (pay-QR on bills)", "rungnna@okaxis")}
+          {f("upi2", "Second UPI ID — e.g. karigar (pay-QR on estimates)", "name@ybl")}{f("upi2_name", "Name for the second UPI", "Karigar")}{f("hsn", "HSN code", "7117")}
           {f("gst_rate", "GST %", "3")}
           <label className="f">Max discount without PIN (%)<input className="in" inputMode="decimal" value={s.max_disc ?? 10} onChange={e => setS({ ...s, max_disc: Number(e.target.value) || 0 })} /></label>
           {/* Owner, 27 Oct: "the discount didn't come by itself like we were used to, so the boy didn't give it" */}

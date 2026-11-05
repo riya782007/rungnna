@@ -61,6 +61,8 @@ export function EndOfDay({ onClose }: { onClose: () => void }) {
         {r.cashOut ? <tr><td>− Cash refunds</td><td className="r mono">{rupees(r.cashOut)}</td></tr> : null}
         <tr className="inv-net"><td><b>Closing cash</b></td><td className="r mono"><b>{rupees(r.closing)}</b></td></tr>
         <tr><td>All money in today</td><td className="r mono">{rupees(r.collected)}</td></tr>
+        {Object.keys(r.upiBy).length > 0 && Object.entries(r.upiBy).sort((a, z) => z[1] - a[1]).map(([who, amt]) =>
+          <tr key={who} className="eod-upi"><td>UPI to {who}</td><td className="r mono">{rupees(amt)}</td></tr>)}
       </tbody></table>
       {print && <div className="inv-terms">Printed {new Date().toLocaleString("en-IN")}<span>Checked by ____________</span></div>}
     </div>

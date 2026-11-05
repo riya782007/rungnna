@@ -1,4 +1,5 @@
 import { documentAmount, documentDiscount } from "./estimate-display";
+import { qrAccount, upiLink } from "./upi";
 import { allocate } from "./allocate";
 import { billNarration } from "./payment-narration";
 import { trackCustomLines, unassignedRack } from "./stock-adjustment";
@@ -18,7 +19,7 @@ import { purgeEstimates } from "./estimatePurge";
 export interface Shop {
   name: string; tagline: string; address: string; phone: string; whatsapp: string; gstin: string;
   email?: string;
-  state: string; upi: string; bank: string; terms: string; hsn: string; gst_rate: number; gst_mode: "exclusive" | "inclusive"; max_disc: number;
+  state: string; upi: string; upi2?: string; upi2_name?: string; bank: string; terms: string; hsn: string; gst_rate: number; gst_mode: "exclusive" | "inclusive"; max_disc: number;
   /** what a bill line shows: just the item name (default, owner 22 Oct: bills of 100–150 lines stay short) or item + style + colour */
   bill_lines?: "item" | "full";
   /** Owner, 27 Oct: every new estimate starts with the shop's usual discount (e.g. 50%) and less (e.g. 3%), as the
@@ -422,7 +423,8 @@ export function billText(b: Bill, shop: Shop) {
   if (isSale(b) && d < 0) L.push(`Excess received: ${billAmount(-d)}`);
   if (isSale(b) && b.prev_due) L.push(`Previous balance: ${billAmount(b.prev_due)}`, `Total due: ${billAmount(b.prev_due + d)}`);
   if (billNarration(b, billAmount)) L.push(`Remarks: ${billNarration(b, billAmount)}`);
-  if (b.bill_type !== "estimate" && shop.upi && d > 0) L.push(`Pay by UPI: upi://pay?pa=${encodeURIComponent(shop.upi)}&pn=${encodeURIComponent(shop.name)}&am=${(d / 100).toFixed(2)}&cu=INR`);
+  const qr = isSale(b) && d > 0 ? qrAccount(b, shop) : undefined;
+  if (qr) L.push(`Pay by UPI: ${upiLink(qr, shop.name, d, b.no)}`);
   L.push("", "Thank you! 🙏");
   return L.join("\n");
 }

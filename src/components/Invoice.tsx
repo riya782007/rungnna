@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { qrAccount, upiLink } from "../lib/upi";
 import { bagPayload, carryBags } from "../lib/bag-labels";
 import { getSetting } from "../lib/db";
 import { usePrintJob, receiptFeed, receiptCut, slipFeed, DEFAULT_RECEIPT_FEED } from "../lib/printing";
@@ -39,7 +40,8 @@ export function InvoiceSheet({ b, shop, format, copy, feed = 0 }: { b: Bill; sho
   const billAmount = (value: number) => documentAmount(b, value);
   const d = due(b);
   const money = b.bill_type !== "challan" && b.bill_type !== "return"; // no "pay now" on a challan or credit note
-  const upi = b.bill_type !== "estimate" && money && shop.upi && d > 0 ? qrSvg(`upi://pay?pa=${shop.upi}&pn=${encodeURIComponent(shop.name)}&am=${(d / 100).toFixed(2)}&cu=INR&tn=${encodeURIComponent(b.no)}`).svg : "";
+  const payTo = money && d > 0 ? qrAccount(b, shop) : undefined;   // shop's or karigar's UPI (owner, 5 Nov)
+  const upi = payTo ? qrSvg(upiLink(payTo, shop.name, d, b.no)).svg : "";
   const prices = format !== "packing";
   const narration = prices ? billNarration(b, billAmount) : b.remarks;
   const estimate = prices && b.bill_type === "estimate";
@@ -110,7 +112,7 @@ export function InvoiceSheet({ b, shop, format, copy, feed = 0 }: { b: Bill; sho
             : <div className="inv-sub">HSN {byHsn[0]?.hsn || shop.hsn} · GST {pct(byRate[0]?.rate ?? b.gst_rate)}% {b.gst_mode === "inclusive" ? "(included in rates)" : ""} · Reverse charge: No</div>)}
           {narration && <div style={{ whiteSpace: "pre-wrap" }}><b>Remarks:</b> {narration}</div>}
           {shop.bank && prices && <div className="inv-sub">Bank: {shop.bank}</div>}
-          {upi && prices && <div className="row" style={{ gap: 6, alignItems: "center" }}><span className="inv-qr" dangerouslySetInnerHTML={{ __html: upi }} /><span className="inv-sub">Scan to pay {billAmount(d)}<br />UPI: {shop.upi}</span></div>}
+          {upi && prices && <div className="row" style={{ gap: 6, alignItems: "center" }}><span className="inv-qr" dangerouslySetInnerHTML={{ __html: upi }} /><span className="inv-sub">Scan to pay {billAmount(d)}<br />UPI: {payTo!.upi}</span></div>}
         </div>
         {prices && <table className="inv-sum"><tbody>
           <tr><td>Gross</td><td className="r">{billAmount(b.gross)}</td></tr>
