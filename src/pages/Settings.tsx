@@ -102,9 +102,11 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
         {can(me, "printers.manage") && <PrintingCard />}
         {boss && <GstCard />}
         {canShop && <OperationsCard by={me?.id || ""} />}
-        {(can(me, "bank.reconcile") || can(me, "stores.transfer")) && <div className="card"><header><h3>Elsewhere</h3></header><div className="pad stack">
+        {(can(me, "bank.reconcile") || master || owner) && <div className="card"><header><h3>Elsewhere</h3></header><div className="pad stack">
           {can(me, "bank.reconcile") && <a className="btn" href="#/bank">Bank reconciliation →</a>}
-          {can(me, "stores.transfer") && <a className="btn" href="#/stores">{owner ? "Store setup & transfers →" : "Stock transfers →"}</a>}
+          {/* the companies screen opens only in the owner's master view (27 Oct); a button that led nowhere is gone (6 Nov) */}
+          {master && <a className="btn" href="#/stores">Companies & transfers →</a>}
+          {owner && !master && <div className="xs mut">Companies &amp; transfers: sign in again (Switch person) with your master code — or the shop's entry code if you have not set a master code — then your name and PIN.</div>}
         </div></div>}
       </div>}
 

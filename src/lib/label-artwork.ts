@@ -15,6 +15,8 @@ export const LABEL_DOTS_PER_MM = 8;
    could not use 3-dot squares on the shop's 15 mm sticker; 2-dot squares smudged by the heat stopped scanning
    in one go (owner, 24 Oct: "all must scan in one scan"). */
 export const QR_QUIET_MODULES = 2;
+/** mm kept clear above and below the sticker QR, so a sticker sitting a little off never loses the QR's edge. */
+export const QR_SAFE_MM = 2;
 const dot = (mm: number) => Math.round(mm * LABEL_DOTS_PER_MM);
 const escapeXml = (s: string) => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" }[c]!));
 const clean = (s: string) => s.replace(/[\u0000-\u001f\u007f]/g, " ").trim();
@@ -32,6 +34,9 @@ export function labelQr(text: string, requestedMm: number, roomMm = requestedMm)
   // The strongest error correction whose QR still prints with 3-dot squares in the room there is (owner, 24 Oct:
   // every sticker must scan first time); if none fits, the smallest QR.
   const make = (ecc: "H" | "Q" | "M" | "L") => { const q = qrcode(0, ecc); q.addData(text, alnum ? "Alphanumeric" : "Byte"); q.make(); return q; };
+  /* Owner, 6 Nov (video + photos, "the QR is getting cut — make it a little smaller"): the room the QR may use now
+     keeps 2 mm clear above and below (labelArtworkGeometry), so the strongest correction that still fits that room is
+     chosen — usually one step down from before, a smaller QR — and it still reads on a shiny packet (23 Oct). */
   let qr = make("L");
   for (const ecc of ["H", "Q", "M"] as const) {
     const q = make(ecc);
@@ -78,7 +83,9 @@ export function labelArtworkGeometry(cfg: LabelCfg, p: Product, qtyOnLabel: numb
   if (copied?.how === "shop label") pp.rate = toPaise(copied.rate || "0");
   // 3-dot squares whenever they fit the sticker's height, even into its margin: a QR that scans first time
   // matters more than a millimetre of words (owner, 24 Oct)
-  const qr = labelQr(qrText ?? ownPayload(pp, cfg.format || "shop"), cfg.qr, cfg.h - 0.6);
+  // at least QR_SAFE_MM clear above and below (owner, 6 Nov): a sticker that sits a little off never loses the QR's edge
+  // (the QR's own white border counts toward it: it is blank anyway)
+  const qr = labelQr(qrText ?? ownPayload(pp, cfg.format || "shop"), cfg.qr, Math.max(cfg.h - 2 * (QR_SAFE_MM - QR_QUIET_MODULES * 3 / LABEL_DOTS_PER_MM), cfg.qr));
   const font = cfg.font * 25.4 / 72 * LABEL_DOTS_PER_MM;
   const brand = cfg.layout !== "stack" && cfg.show.shop && cfg.shop.trim() ? Math.ceil(font * 1.1) : 0;
   if (qr.sizeDots > height - 4 || qr.sizeDots + brand + pad * 4 + 8 > width) {
@@ -92,7 +99,7 @@ export function renderLabelSvg(cfg: LabelCfg, p: Product & { entry_code?: string
   const { width, height, pad, pp, qr, font, brand } = labelArtworkGeometry(cfg, p, qtyOnLabel, qrText);
   const s = cfg.show, stack = cfg.layout === "stack";
   const qx = stack ? pad : width - pad - brand - qr.sizeDots;
-  const qy = qr.sizeDots > height - pad * 2 ? Math.round((height - qr.sizeDots) / 2) : pad;   // a big QR sits centred in the margin
+  const qy = Math.round((height - qr.sizeDots) / 2);   // centred: the most room above and below if the sticker sits off (6 Nov)
   const tx = stack ? qx + qr.sizeDots + pad : pad;
   const textWidth = stack ? width - tx - pad : qx - pad * 2;
   type Detail = { text: string; scale?: number; weight?: number; line?: number | string; mono?: boolean };

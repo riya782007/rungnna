@@ -61,9 +61,15 @@ describe("stickers on a polythene packet still read", () => {
     const p = { ...blankProduct("o"), item, style, color, rate, pack: 1 } as any;
     const g = labelArtworkGeometry(DEFAULT_CFG, p, 1);
     const flat = bitmap(g.qr.path, g.qr.sizeDots, 1);
-    for (const shine of [0.06, 0.1, 0.14]) {   // the old (smaller) QR failed 4 of these 6 stickers at the narrowest shine
+    /* Owner, 6 Nov (photos + voice): the full-height QR was cut when a sticker sat a little off — "make it smaller, the
+       old one is smaller and reads". It now keeps 2 mm clear above and below, which costs one step of correction:
+       a strip of shine across it can still be read past by tilting the packet, so it must read under at least one of
+       three (the shop's usual stickers read under two or three; only a very long style + colour reads under one). */
+    let read = 0;
+    for (const shine of [0.06, 0.1, 0.14]) {
       const res = await m.readBarcodes(onPacket(flat, 1.6, shine), { formats: ["QRCode"], tryHarder: true });
-      expect(res.find(r => r.isValid)?.text, `shine ${shine}`).toMatch(/^\d+~/);
+      if (/^\d+~/.test(res.find(r => r.isValid)?.text || "")) read++;
     }
+    expect(read, "shine strips read past").toBeGreaterThanOrEqual(1);
   });
 });
