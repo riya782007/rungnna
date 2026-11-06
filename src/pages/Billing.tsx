@@ -971,14 +971,55 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
   const parties = useLiveQuery(() => db.parties.filter(p => !p.deleted && p.kind !== "supplier").toArray(), [], []);
   const list = useMemo(() => { const x = q.trim().toLowerCase(); return x ? parties.filter(p => (p.name + " " + p.phone + " " + p.city).toLowerCase().includes(x)).slice(0, 12) : parties.slice(0, 12); }, [q, parties]);
   const pick = (p: Party) => onPick({ party_id: p.id, party_name: p.name, party_phone: p.phone, party_gstin: p.gstin, party_state: p.state, party_address: [p.address, p.city, p.pin].filter(Boolean).join(", "), price_level: p.tier });
-  const create = async () => {
+  /* Owner, 5 Nov (voice): a new customer stands at the counter and tells everything at once — the whole profile opens
+     here, not just name and number. Enter goes to the next box; the bill stays as it is underneath. */
+  const [form, setForm] = useState<Party | null>(null);
+  const create = () => {
     const isPhone = /^\+?\d[\d\s]{7,}$/.test(q.trim());
-    const name = isPhone ? await askText("Customer name") || "" : q.trim();
-    const phone = isPhone ? q.replace(/\D/g, "") : (await askText("Mobile number (for WhatsApp)", "", { numeric: true }))?.replace(/\D/g, "") || "";
-    if (!name) return;
-    const p = { ...newParty(name.toUpperCase(), phone), photo_id: photo };
+    setForm({ ...newParty(isPhone ? "" : q.trim().toUpperCase(), isPhone ? q.replace(/\D/g, "") : ""), photo_id: photo, state: "Delhi" } as Party);
+  };
+  const saveNew = async () => {
+    if (!form) return;
+    if (!form.name.trim()) return toast("Write the customer's name", true);
+    const phone = form.phone.replace(/\D/g, "").replace(/^91(?=\d{10}$)/, "");
+    if (phone && phone.length !== 10) return toast("Mobile number should have 10 digits", true);
+    const same = phone ? parties.find(p => p.phone.replace(/\D/g, "").endsWith(phone)) : undefined;
+    if (same) { toast(`${same.name} already has ${phone} — picked them`); return pick(same); }
+    const p = { ...form, name: form.name.trim().toUpperCase(), phone, gstin: form.gstin.trim().toUpperCase() };
     await put("parties", p); pick(p);
   };
+  if (form) {
+    const f = <K extends keyof Party>(k: K, v: Party[K]) => setForm({ ...form, [k]: v });
+    const next = (e: React.KeyboardEvent<HTMLElement>) => {
+      if (e.key !== "Enter" || (e.target as HTMLElement).tagName === "TEXTAREA" && !e.ctrlKey) return;
+      e.preventDefault();
+      if (e.ctrlKey) return void saveNew();
+      const boxes = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>("input,select,textarea")];
+      const i = boxes.indexOf(e.target as HTMLElement);
+      if (i >= 0 && i < boxes.length - 1) boxes[i + 1].focus(); else void saveNew();
+    };
+    return <Modal title="New customer" onClose={onClose}>
+      <div className="stack new-customer" onKeyDown={next}>
+        <div className="grid g2">
+          <label className="f">Mobile / WhatsApp<input className="in mono" inputMode="tel" autoFocus={!form.phone} value={form.phone} onChange={e => f("phone", e.target.value.replace(/[^\d+]/g, ""))} /></label>
+          <label className="f">Name<input className="in" autoFocus={!!form.phone} value={form.name} onChange={e => f("name", e.target.value.toUpperCase())} /></label>
+          <label className="f">Shop / firm name<input className="in" value={form.alt_name} onChange={e => f("alt_name", e.target.value.toUpperCase())} /></label>
+          <label className="f">City / area<input className="in" value={form.city} onChange={e => f("city", e.target.value.toUpperCase())} /></label>
+          <label className="f">Address<input className="in" value={form.address} onChange={e => f("address", e.target.value)} /></label>
+          <label className="f">PIN code<input className="in mono" inputMode="numeric" maxLength={6} value={form.pin} onChange={e => f("pin", e.target.value.replace(/\D/g, ""))} /></label>
+          <label className="f">State<input className="in" value={form.state} onChange={e => f("state", e.target.value)} /></label>
+          <label className="f">GSTIN<input className="in mono" value={form.gstin} onChange={e => f("gstin", e.target.value.toUpperCase())} placeholder="if they have one" /></label>
+          <label className="f">Type<select className="in" value={form.kind} onChange={e => f("kind", e.target.value as Party["kind"])}><option value="customer">Customer</option><option value="dealer">Dealer</option></select></label>
+          <label className="f">Price<select className="in" value={form.tier} onChange={e => f("tier", e.target.value as Party["tier"])}><option value="retail">Retail</option><option value="wholesale">Wholesale</option><option value="dealer">Dealer</option></select></label>
+        </div>
+        <label className="f">Notes<input className="in" value={form.notes} onChange={e => f("notes", e.target.value)} placeholder="Likes kundan sets, pays on Saturdays…" /></label>
+        <PhotoButton webcam value={form.photo_id} onChange={v => f("photo_id", v)} label="Customer photo" />
+        <div className="row"><button className="btn p" onClick={saveNew}>Save & use on this bill</button>
+          <button className="btn" onClick={() => setForm(null)}>Back</button>
+          <span className="xs mut">Enter → next box · Ctrl + Enter saves</span></div>
+      </div>
+    </Modal>;
+  }
   return (
     <Modal title="Customer" onClose={onClose}>
       <div className="stack">

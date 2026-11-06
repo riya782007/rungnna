@@ -5,7 +5,7 @@ import { db, type Product } from "../lib/db";
 import { Modal } from "./common";
 import { api } from "../lib/ai";
 import { useApp, toast } from "../lib/app";
-import { can, roleName } from "../lib/roles";
+import { can } from "../lib/roles";
 import {
   writePages, pickForListing, planPublish, publishAll, describePlan,
   type BulkProgress, type BulkResult, type BulkTarget,
@@ -31,7 +31,7 @@ const HAS_READER = ["labels", "stockin"];
 =========================================================================== */
 
 export default function StockAI({ route = "" }: { route?: string }) {
-  const { me, setMe } = useApp();
+  const { me } = useApp();
   const [bill, setBill] = useState<false | "upload" | "camera">(false);
   /* the reader already on this page (Labels, Stock in): open its box and its camera there, not a second copy */
   const cameraHere = () => {
@@ -97,11 +97,7 @@ export default function StockAI({ route = "" }: { route?: string }) {
   }
 
   const pct = prog && prog.total ? Math.round((prog.done / prog.total) * 100) : 0;
-
-  const Locked = () => <span className="row" style={{ gap: 8 }}>
-    <span className="xs mut">Not allowed for {roleName(me) || "this person"}</span>
-    <button className="btn sm" onClick={() => setMe(null)}>Switch person</button>
-  </span>;
+  if (!mayBill && !mayWrite && !busy) return null;   // nothing this person may use here: show nothing (owner, 5 Nov)
 
   return (
     <div className="stock-ai">
@@ -121,16 +117,15 @@ export default function StockAI({ route = "" }: { route?: string }) {
         </div>}
 
         {!busy && <>
-          <div className="row">
+          {/* Owner, 5 Nov: an option this person is not allowed is not shown at all */}
+          {mayBill && <div className="row">
             <span className="sm grow">Read a purchase bill from its photo: labels print and product pages are drafted</span>
-            {!mayBill ? <Locked />
-              : HAS_READER.includes(route)
+            {HAS_READER.includes(route)
                 ? <button className="btn p" onClick={cameraHere}><Camera size={15} />Take photo of bill</button>
                 : <><button className="btn p" onClick={() => setBill("camera")}><Camera size={15} />Take photo of bill</button>
                   <button className="btn" onClick={() => setBill("upload")}>Upload photo</button></>}
-          </div>
+          </div>}
 
-          {!mayWrite && <div className="row"><span className="sm grow">Write product pages with AI</span><Locked /></div>}
           {mayWrite && <div className="row">
             <label className="f" style={{ margin: 0 }}>Write pages for
               <select className="in" value={target} onChange={e => setTarget(e.target.value as BulkTarget)}>

@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, now, type Party, type PurchaseReturnLine, type MoneyMode } from "../lib/db";
 import vendorText from "../data/vendors.txt?raw";
-import { parseVendorList, importVendors } from "../lib/vendors";
+import { parseVendorList, importVendors, duplicateSupplierGroups, mergeDuplicateSuppliers } from "../lib/vendors";
 import { newParty, getShop, waLink, DEFAULT_SHOP, type Shop } from "../lib/billing";
 import { supplierAging, supplierBalances, supplierLedger, savePurchaseReturn, supplierStatementText, supplierStatementPdf, type SupplierEntry } from "../lib/suppliers";
 import { saveVoucher } from "../lib/vouchers";
@@ -29,6 +29,12 @@ function SupplierList() {
   const [bal, setBal] = useState(new Map<string, number>());
   const [age, setAge] = useState(new Map<string, { d0_30: number; d31_60: number; d60: number; total: number }>());
   useEffect(() => { supplierBalances().then(setBal); supplierAging().then(setAge); }, [stamp, suppliers.length]);
+  /* Owner, 5 Nov ("Vendor list still duplicate"): the same roll no. + name twice is one supplier — merged by itself */
+  const dupes = duplicateSupplierGroups(suppliers).length;
+  useEffect(() => {
+    if (!dupes || !can(me, "suppliers.manage")) return;
+    mergeDuplicateSuppliers().then(n => n && toast(`${n} duplicate supplier${n > 1 ? "s" : ""} merged — bills and payments kept together`)).catch(e => toast(e.message, true));
+  }, [dupes]);
   const list = useMemo(() => suppliers.filter(p => !q || ((p.vendor_code || "") + " " + p.name + " " + p.phone + " " + p.city).toLowerCase().includes(q.toLowerCase()))
     .sort(byRollNo), [suppliers, q, bal]);   // roll numbers ascending, as on the shop's vendor list
   const total = [...bal.values()].reduce((a, v) => a + Math.max(0, v), 0);

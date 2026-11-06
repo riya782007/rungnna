@@ -17,7 +17,7 @@ import { SupplierNo } from "../components/SupplierNo";
 import { WedgeInput } from "../components/Scanner";
 import { useApp, toast, go as navigate } from "../lib/app";
 import { entryReference, checkedEntryReference } from "../lib/entry-reference";
-import { can, roleName } from "../lib/roles";
+import { can } from "../lib/roles";
 import { inStore } from "../lib/scope";
 import { purchaseLabelJobs, productForLabel } from "../lib/purchase-labels";
 import { toPaise } from "../lib/format";
@@ -181,7 +181,7 @@ export function validateLabelPrint(cfg: LabelCfg, jobs: Job[]) {
 }
 
 export default function Labels({ args }: { args: string[] }) {
-  const { me, setMe } = useApp();
+  const { me } = useApp();
   const [cfg, setCfg] = useState<LabelCfg>(DEFAULT_CFG);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [oldCopy, setOldCopy] = useState<Job | null>(null);
@@ -329,9 +329,8 @@ export default function Labels({ args }: { args: string[] }) {
               <Suspense fallback={<div role="status">Loading bill reader…</div>}><PurchasePhoto by={me?.id || ""} typed={args[0] === "bill" && args[1] === "type"} /></Suspense>
             </div>
           </details>
-          /* shown even when not allowed, so the owner can see it exists and how to reach it */
-          : <div className="card pad row"><span className="grow sm"><b>From a purchase bill</b> — needs “Read purchase bill photos”, which {roleName(me) || "this person"} does not have.</span>
-              <button className="btn sm" onClick={() => setMe(null)}>Switch person</button></div>}
+          /* Owner, 5 Nov (voice, said "2–3 times"): what a person is not allowed to do is not shown to them at all */
+          : null}
       </div>
   </>;
   // the preview is the sticker as it will print: with the REF CODE and the bill Sr. (owner, 2 Nov: "the reference
