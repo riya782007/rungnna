@@ -17,6 +17,8 @@ it("counts a checked row once, then prints the remaining labels", () => {
 it("requires another check after changing printer or alignment", () => {
   const key = printerSig(DEFAULT_CFG);
   expect(printerSig({ ...DEFAULT_CFG, offX: DEFAULT_CFG.offX + 0.5 })).not.toBe(key);
+  // owner, 6 Nov: the daily ½ mm up/down move (the roll sits differently) needs no new test row
+  expect(printerSig({ ...DEFAULT_CFG, offY: DEFAULT_CFG.offY + 0.5 })).toBe(key);
   expect(printerSig({ ...DEFAULT_CFG, output: "qz", qzPrinter: "TSC" })).not.toBe(key);
   expect(printerSig({ ...DEFAULT_CFG, output: "qz", qzPrinter: "TSC2" })).not.toBe(printerSig({ ...DEFAULT_CFG, output: "qz", qzPrinter: "TSC" }));
 });

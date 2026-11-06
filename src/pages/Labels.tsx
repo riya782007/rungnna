@@ -357,6 +357,14 @@ export default function Labels({ args }: { args: string[] }) {
           <div className="card label-manual">
             <header><h3 className="grow">Barcode print</h3><div className="row"><button className="btn p" disabled={queueBusy || printer.busy || photoBusy} onClick={() => addJob(true)}>Print barcode</button><button className="btn" disabled={queueBusy || printer.busy || photoBusy} onClick={() => addJob()}>Add to queue</button>{can(me, "purchases.photo") && <button className="btn" title="A whole supplier slip at once: each Enter on the last line adds the next line already filled in from the one above, then one button (Ctrl+Enter) prints every sticker" onClick={() => navigate("labels/bill/type")}>Many lines: type the bill</button>}</div></header>
             <div className="pad stack">
+              {/* Owner, 6 Nov 20:44 + 20:54 (voice): "the barcode was cutting on top — every other day it goes up, down".
+                  The roll sits a little differently from day to day; one tap moves every sticker's print up or down. */}
+              <div className="row print-nudge" style={{ gap: 6, flexWrap: "wrap" }} role="group" aria-label="Move the print on the sticker">
+                <span className="sm b">Print cut at top or bottom?</span>
+                <button type="button" className="btn sm" onClick={() => { const v = Math.round((cfg.offY + 0.5) * 100) / 100; if (Math.abs(v) >= cfg.h / 3) return toast("That is as far as it goes — reload the roll straight and press the printer's FEED button once", true); upd({ offY: v }); toast(`Print moves down: ${v} mm`); }}>Move print down ↓</button>
+                <button type="button" className="btn sm" onClick={() => { const v = Math.round((cfg.offY - 0.5) * 100) / 100; if (Math.abs(v) >= cfg.h / 3) return toast("That is as far as it goes — reload the roll straight and press the printer's FEED button once", true); upd({ offY: v }); toast(`Print moves up: ${-v} mm`); }}>Move print up ↑</button>
+                <span className="xs mut">{cfg.offY ? `now ${Math.abs(cfg.offY)} mm ${cfg.offY > 0 ? "down" : "up"}` : "centred"} · cut at the top → down, at the bottom → up · each tap ½ mm, kept on this computer</span>
+              </div>
               <WedgeInput autoFocus={false} placeholder="Scan an old label to pre-fill (optional)" onCode={async raw => {
                 const parsed = parseLabel(raw);
                 try {
@@ -562,7 +570,9 @@ const STALE_MS = 45_000;
 export const blocksNextPrint = (r: { phase: "print" | "wait"; at?: number } | null, now = Date.now()) => !!r && r.phase === "print" && now - (r.at || now) < STALE_MS;
 
 /* A printer or geometry change requires one fresh, accepted check row. */
-export const printerSig = (c: LabelCfg) => [c.output || "browser", c.qzPrinter || "", c.preset, c.mode, c.w, c.h, c.cols, c.gapX, c.gapY, c.offX, c.offY, c.driverPaper ? 1 : 0, c.edgeR ?? "", c.sheetW, c.sheetH, c.rows, c.left, c.top, c.qr, c.font, c.pad, c.rateScale ?? "", c.layout, c.format, c.density ?? DEFAULT_LABEL_DENSITY, c.speed ?? DEFAULT_LABEL_SPEED, c.compactCostCode ? 1 : 0, c.fakeLetters ?? "Z"].join("|");
+/* the up/down nudge is left out (6 Nov): moving the print ½ mm on a day the roll sits differently must not ask for a
+   whole test row again — it changes where the ink goes, not the paper, gap or scale the check is for */
+export const printerSig = (c: LabelCfg) => [c.output || "browser", c.qzPrinter || "", c.preset, c.mode, c.w, c.h, c.cols, c.gapX, c.gapY, c.offX, c.driverPaper ? 1 : 0, c.edgeR ?? "", c.sheetW, c.sheetH, c.rows, c.left, c.top, c.qr, c.font, c.pad, c.rateScale ?? "", c.layout, c.format, c.density ?? DEFAULT_LABEL_DENSITY, c.speed ?? DEFAULT_LABEL_SPEED, c.compactCostCode ? 1 : 0, c.fakeLetters ?? "Z"].join("|");
 
 export function runBatches(total: number, unit: number, perBatch: number, testFirst: boolean, verified: boolean): LabelBatch[] {
   // once this computer's setup is confirmed, no more test rows: the whole run just prints
