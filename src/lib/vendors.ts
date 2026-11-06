@@ -48,16 +48,22 @@ export function duplicateSupplierGroups<T extends Pick<Party, "id" | "name" | "v
   return [...groups.values()].filter(g => g.length > 1);
 }
 
-export async function mergeDuplicateSuppliers(): Promise<number> {
+let merging: Promise<number> | null = null;
+/** One merge at a time on this counter; the list can re-render while it runs. */
+export function mergeDuplicateSuppliers(): Promise<number> {
+  return merging ||= runMerge().finally(() => { merging = null; });
+}
+async function runMerge(): Promise<number> {
   const groups = duplicateSupplierGroups(await db.parties.toArray());
   if (!groups.length) return 0;
   const [purchases, returns, vouchers, products] = await Promise.all([
     db.purchases.toArray(), db.purchase_returns.toArray(), db.vouchers.toArray(), db.products.toArray()]);
-  const uses = (id: string) => purchases.filter(x => x.supplier_id === id).length + returns.filter(x => x.supplier_id === id).length
-    + vouchers.filter(x => x.party_id === id).length + products.filter(x => x.vendor_id === id).length;
   let merged = 0;
   for (const g of groups) {
-    const ranked = [...g].sort((a, z) => uses(z.id) - uses(a.id) || String(a.updated_at || "").localeCompare(String(z.updated_at || "")));
+    /* The copy kept is chosen the same way on every counter (lowest id), never by what this counter happens to have
+       synced: two counters merging before they sync must keep the same copy, or each would hide the other's. Every
+       bill and payment moves to it, so which copy stays makes no difference to the account. */
+    const ranked = [...g].sort((a, z) => (a.id < z.id ? -1 : a.id > z.id ? 1 : 0));
     const keep = { ...ranked[0] } as Party;
     const extra = ranked.slice(1);
     for (const o of extra) for (const k of ["phone", "gstin", "address", "city", "state", "pin", "notes", "alt_name"] as const)

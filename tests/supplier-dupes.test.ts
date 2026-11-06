@@ -22,19 +22,28 @@ describe("merging the copies", () => {
   beforeEach(async () => { setScope(MAIN_STORE, "owner"); await Promise.all(db.tables.map(t => t.clear())); });
   it("moves bills, payments and stickers to one copy, fills its blanks, hides the other", async () => {
     await db.parties.bulkPut([
-      { ...sup("keep", "33", "NIKHIL BHAI"), phone: "", city: "" } as any,
-      { ...sup("copy", "33", "NIKHIL BHAI"), phone: "9811111111", city: "Delhi", less_pct: 5 } as any,
+      { ...sup("a-keep", "33", "NIKHIL BHAI"), phone: "", city: "" } as any,
+      { ...sup("b-copy", "33", "NIKHIL BHAI"), phone: "9811111111", city: "Delhi", less_pct: 5 } as any,
     ]);
-    await db.purchases.bulkPut([{ id: "p1", supplier_id: "keep" }, { id: "p2", supplier_id: "keep" }, { id: "p4", supplier_id: "keep" }, { id: "p5", supplier_id: "keep" }, { id: "p3", supplier_id: "copy" }] as any);
-    await db.vouchers.put({ id: "v1", party_id: "copy" } as any);
-    await db.products.put({ id: "x1", vendor_id: "copy" } as any);
+    await db.purchases.bulkPut([{ id: "p1", supplier_id: "a-keep" }, { id: "p2", supplier_id: "a-keep" }, { id: "p4", supplier_id: "a-keep" }, { id: "p5", supplier_id: "a-keep" }, { id: "p3", supplier_id: "b-copy" }] as any);
+    await db.vouchers.put({ id: "v1", party_id: "b-copy" } as any);
+    await db.products.put({ id: "x1", vendor_id: "b-copy" } as any);
     expect(await mergeDuplicateSuppliers()).toBe(1);
-    expect((await db.purchases.toArray()).every(p => p.supplier_id === "keep")).toBe(true);
-    expect((await db.vouchers.get("v1"))?.party_id).toBe("keep");
-    expect((await db.products.get("x1"))?.vendor_id).toBe("keep");
-    const keep = await db.parties.get("keep");
+    expect((await db.purchases.toArray()).every(p => p.supplier_id === "a-keep")).toBe(true);
+    expect((await db.vouchers.get("v1"))?.party_id).toBe("a-keep");
+    expect((await db.products.get("x1"))?.vendor_id).toBe("a-keep");
+    const keep = await db.parties.get("a-keep");
     expect([keep?.phone, keep?.city, keep?.less_pct, keep?.deleted]).toEqual(["9811111111", "Delhi", 5, undefined]);
-    expect((await db.parties.get("copy"))?.deleted).toBe(1);
+    expect((await db.parties.get("b-copy"))?.deleted).toBe(1);
     expect(await mergeDuplicateSuppliers()).toBe(0);
+  });
+  it("keeps the same copy whatever this counter has synced, and runs once at a time", async () => {
+    await db.parties.bulkPut([sup("z9", "1", "UP"), sup("a1", "1", "UP")] as any);
+    await db.purchases.bulkPut([{ id: "p1", supplier_id: "z9" }, { id: "p2", supplier_id: "z9" }] as any);
+    const [x, y] = await Promise.all([mergeDuplicateSuppliers(), mergeDuplicateSuppliers()]);
+    expect(x + y).toBe(2);   // the same single run answered both calls
+    expect((await db.parties.get("a1"))?.deleted).toBeUndefined();
+    expect((await db.parties.get("z9"))?.deleted).toBe(1);
+    expect((await db.purchases.toArray()).every(p => p.supplier_id === "a1")).toBe(true);
   });
 });
