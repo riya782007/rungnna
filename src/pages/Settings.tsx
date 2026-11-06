@@ -58,8 +58,12 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
      private estimates unless that was given to them". Each tab shows only when this person's ticks allow it;
      everyone keeps "My account" (their name, their own PIN, switch person). */
   const owner = me?.role === "owner";
-  const shopTab = admin || boss || can(me, "printers.manage");
-  const tabs = TABS.filter(t => t.key === "me" ? !boss : t.key === "people" ? boss : t.key === "shop" ? shopTab : admin);
+  const shopTab = admin || boss || can(me, "printers.manage") || can(me, "settings.shop");
+  // one permission per tab (owner, 6 Nov); "Settings — every tab" opens them all
+  const tabOk = (k: TabKey) => k === "me" ? !boss : k === "people" ? boss : k === "shop" ? shopTab : admin || can(me, "settings." + k);
+  const tabs = TABS.filter(t => tabOk(t.key));
+  const canShop = admin || can(me, "settings.shop"), canPrices = admin || can(me, "settings.prices");
+  const canSuppliers = admin || can(me, "settings.suppliers"), canBackup = admin || can(me, "settings.backup");
   const tab: TabKey = (tabs.find(t => t.key === tabArg)?.key) || tabs[0].key;
   const cur = TABS.find(t => t.key === tab)!;
 
@@ -94,17 +98,17 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
       {tab === "me" && <div className="set-grid">{meCard}</div>}
 
       {tab === "shop" && <div className="set-grid">
-        {admin && <ShopProfile />}
+        {canShop && <ShopProfile />}
         {can(me, "printers.manage") && <PrintingCard />}
         {boss && <GstCard />}
-        {admin && <OperationsCard by={me?.id || ""} />}
+        {canShop && <OperationsCard by={me?.id || ""} />}
         {(can(me, "bank.reconcile") || can(me, "stores.transfer")) && <div className="card"><header><h3>Elsewhere</h3></header><div className="pad stack">
           {can(me, "bank.reconcile") && <a className="btn" href="#/bank">Bank reconciliation →</a>}
           {can(me, "stores.transfer") && <a className="btn" href="#/stores">{owner ? "Store setup & transfers →" : "Stock transfers →"}</a>}
         </div></div>}
       </div>}
 
-      {tab === "prices" && admin && <div className="set-grid">
+      {tab === "prices" && canPrices && <div className="set-grid">
         <PricingCard />
         <NoLessCard />
         {owner && <TradeCodeCard />}
@@ -113,7 +117,7 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
         <TaxonomyCard />
       </div>}
 
-      {tab === "suppliers" && admin && <div className="set-grid set-grid-1">
+      {tab === "suppliers" && canSuppliers && <div className="set-grid set-grid-1">
         <SupplierTermsCard />
       </div>}
 
@@ -161,7 +165,7 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
         {boss && <SecuritySettings />}
       </div>}
 
-      {tab === "backup" && admin && <div className="set-grid">
+      {tab === "backup" && canBackup && <div className="set-grid">
         <div className="card"><header><h3>Cloud backup</h3><span className="grow" />
           <span className={"pill " + (!sync?.cloudEnabled || !sync?.user ? "warn" : sync?.status === "idle" && !sync.pending ? "ok" : sync?.status === "error" ? "bad" : "warn")}>{!sync?.cloudEnabled ? "offline mode" : !sync?.user ? "not connected" : sync?.status === "idle" && !sync.pending ? "✓ all saved" : sync?.status}</span></header>
           <div className="pad stack">
@@ -179,11 +183,11 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
             <div className="row">
               <button className="btn" onClick={async () => { const b = await exportAll(); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `rungnna-backup-${new Date().toISOString().slice(0, 10)}.json`; a.click(); }}>Download backup</button>
               <input ref={file} type="file" accept="application/json" hidden onChange={async e => { const f = e.target.files?.[0]; if (!f) return; try { await importAll(f); toast("Backup restored"); } catch (x: any) { toast(x.message, true); } }} />
-              {admin && <button className="btn" onClick={() => file.current?.click()}>Restore from file</button>}
+              {canBackup && <button className="btn" onClick={() => file.current?.click()}>Restore from file</button>}
             </div>
           </div></div>}
-        {admin && <Keys />}
-        {admin && <div className="card"><header><h3>Label layouts learnt</h3></header>
+        {canBackup && <Keys />}
+        {canBackup && <div className="card"><header><h3>Label layouts learnt</h3></header>
           <div className="pad stack">
             <div className="set-intro">Supplier labels the scan screen has learnt to read.</div>
             {!pats.length && <div className="mut sm">None yet. When a label isn't understood, the scan screen asks once which piece is which.</div>}

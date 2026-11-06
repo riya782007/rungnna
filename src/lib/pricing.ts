@@ -1,6 +1,6 @@
 import { db, getSetting, setSetting, type Config } from "./db";
 import { now } from "./db";
-import { requirePerm, currentStore, MAIN_STORE } from "./scope";
+import { requireAnyPerm, currentStore, MAIN_STORE } from "./scope";
 
 /* ===========================================================================
    Consistent cost-code + price engine.
@@ -85,7 +85,7 @@ export async function getRule(): Promise<PricingRule> {
 }
 
 export async function saveRule(rule: PricingRule) {
-  requirePerm("settings.manage", "changing the pricing rule");
+  requireAnyPerm(["settings.manage", "settings.prices"], "changing the pricing rule");
   const r = normalizeRule(rule);
   r.updated_at = now();
   // config table syncs to all devices via put(); also keep a device-local copy for instant offline reads.

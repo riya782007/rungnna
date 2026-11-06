@@ -113,7 +113,7 @@ export default function Catalogue() {
                   <button className="btn sm bad" onClick={async () => { const v = { ...portal, enabled: false }; await saveTradePortal(v); setPortal(v); toast("Trade portal switched off"); }}>Switch off</button>
                 </div>}
               </> : admin ? <button className="btn p" onClick={async () => { const v = { token: portal?.token || randomKey(), enabled: true, created_at: portal?.created_at || new Date().toISOString() }; await saveTradePortal(v); setPortal(v); toast("Trade portal is on"); }}>Switch on trade portal</button>
-                : <div className="xs mut">Ask the owner to switch it on.</div>}
+                : null}
             </div>
           </div>
 

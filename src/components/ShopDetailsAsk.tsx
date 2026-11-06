@@ -14,7 +14,7 @@ export function ShopDetailsAsk({ shop, onSaved }: { shop: Shop; onSaved: (s: Sho
   const { me } = useApp();
   const [open, setOpen] = useState(false);
   const [v, setV] = useState({ address: shop.address || LISTED_ADDRESS, state: shop.state || "DELHI", gstin: shop.gstin || "", phone: shop.phone || "" });
-  if (!can(me, "settings.manage")) return <div className="note warn sm">Tax invoices need the shop's address and GSTIN. Ask the owner to fill them once (Settings → Shop profile).</div>;
+  if (!can(me, "settings.manage") && !can(me, "settings.shop")) return null;   // only those who can fill it see it (owner, 6 Nov)
   if (!open) return <div className="note warn sm row" style={{ gap: 8, flexWrap: "wrap" }}><span className="grow">Tax invoices print without the shop's {[!shop.address?.trim() && "address", !shop.gstin?.trim() && "GSTIN", !shop.state?.trim() && "state"].filter(Boolean).join(", ")}.</span>
     <button className="btn sm p" onClick={() => setOpen(true)}>Fill once</button></div>;
   const gstin = v.gstin.trim().toUpperCase();

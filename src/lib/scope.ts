@@ -26,6 +26,8 @@ export function setScope(store: string, staffRole = role, p?: Set<string>) {
 export function inStore(row: { store_id?: string | null }, store = selected) { return (row.store_id || MAIN_STORE) === store; }
 export function ownerOnly() { if (role !== "owner") throw new Error("Owner only"); }
 export function setScopePerms(p: Set<string>) { perms = p; }
+/** Any one of these keys is enough (e.g. "settings.manage" or the one Settings tab). */
+export function requireAnyPerm(keys: string[], what = "this") { if (role === "owner" || keys.some(k => perms.has(k))) return; requirePerm(keys[0], what); }
 export function requirePerm(key: string, what = "this") { if (role !== "owner" && !perms.has(key) && !estimateBilling(key, k => perms.has(k))) throw new Error(`Your role doesn't allow ${what}. Ask the owner.`); }
 
 import { companyKindNow, setCompanyKind, estimateBilling, estimatesOnly } from "./company-kind";

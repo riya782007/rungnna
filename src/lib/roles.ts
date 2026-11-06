@@ -76,7 +76,13 @@ export const PERMISSION_GROUPS: PermGroup[] = [
     { key: "search.use", label: "Search bar (Ctrl K)", desc: "finds only the screens, products, customers and bills this person may open" },
   ]},
   { key: "control", label: "Control (sensitive)", perms: [
-    { key: "settings.manage", label: "Shop settings", desc: "bills, prices, GST, people's PINs" },
+    { key: "settings.manage", label: "Settings — every tab", desc: "all of Shop & bills, Prices & stickers, Suppliers, Backup & devices" },
+    /* Owner, 6 Nov (voice): "inside Settings, a permission for each item — whether they may go in, and what is
+       allowed there". Tick only the tabs this person may open; they see nothing of the others. */
+    { key: "settings.shop", label: "Settings › Shop & bills", desc: "shop details on bills, bill printing, GST, financial year" },
+    { key: "settings.prices", label: "Settings › Prices & stickers", desc: "selling rate rule, cost code, sticker look" },
+    { key: "settings.suppliers", label: "Settings › Suppliers", desc: "each supplier's rate ÷ and less %" },
+    { key: "settings.backup", label: "Settings › Backup & devices", desc: "cloud saving, backup file, AI / WhatsApp keys" },
     { key: "printers.manage", label: "Printer & sticker settings", desc: "label size, position, what prints — kept apart from shop settings (owner, 22 Oct)" },
     { key: "staff.manage", label: "Staff, roles & permissions" },
     { key: "ai.use", label: "Ask the shop (AI)" },

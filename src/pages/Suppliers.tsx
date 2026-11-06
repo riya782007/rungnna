@@ -22,7 +22,7 @@ export default function Suppliers({ args }: { args: string[] }) {
 
 function SupplierList() {
   const { me } = useApp();
-  if (!can(me, "rates")) return <div className="card empty"><b>Not available for your role</b>Supplier dues include cost.</div>;
+  if (!can(me, "rates")) return null;   // not theirs: nothing shown (owner, 6 Nov)
   const [q, setQ] = useState("");
   const suppliers = useLiveQuery(() => db.parties.filter(p => !p.deleted && p.kind === "supplier").toArray(), [], []);
   const stamp = useLiveQuery(async () => (await db.purchases.count()) + ":" + (await db.vouchers.count()) + ":" + (await db.purchase_returns.count()), [], "");

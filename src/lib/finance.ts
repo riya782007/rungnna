@@ -2,7 +2,7 @@ import { db, put, uid, now, deviceId, type FiscalYearClose, type Party } from ".
 import { fy } from "./billing";
 import { balances } from "./ledger";
 import { supplierBalances } from "./suppliers";
-import { ownerOnly, requirePerm } from "./scope";
+import { ownerOnly, requireAnyPerm } from "./scope";
 
 export const dayOf = (iso: string) => iso.slice(0, 10);
 
@@ -16,7 +16,7 @@ export async function assertUnlocked(at?: string) {
 }
 
 export async function setVoucherLock(date: string) {
-  requirePerm("settings.manage", "locking past entries");
+  requireAnyPerm(["settings.manage", "settings.shop"], "locking past entries");
   await put("config", { id: "voucher_lock", value: { date }, updated_at: now() } as any);
 }
 

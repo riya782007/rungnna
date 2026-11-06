@@ -278,8 +278,11 @@ function UpdateBar() {
   return <div className="updatebar">New version ready<button className="btn sm" onClick={() => { setReady(false); void applyUpdate(); }}>Update</button></div>;
 }
 
+/* Owner, 6 Nov (voice): what a person may not use, they should not know about — no "ask the owner". A screen they
+   reach by an old link simply takes them home. */
 function NoAccess() {
-  return <div className="card empty"><b>Not available for your role</b>Ask the owner to open Settings → People → Roles &amp; permissions and grant this screen.</div>;
+  useEffect(() => { if (location.hash && location.hash !== "#/") location.hash = "#/"; }, []);
+  return null;
 }
 
 export default function App() {

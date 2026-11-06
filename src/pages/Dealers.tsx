@@ -24,7 +24,7 @@ export default function Dealers() {
   useEffect(() => { orders.filter(o => o.bill_id && o.status !== "billed" && o.status !== "cancelled").forEach(o => void refreshOrderStatus(o)); }, [orders.length]);
   const pending = dealers.filter(d => d.status === "pending"), fresh = orders.filter(o => o.status === "new");
   const act = (f: () => Promise<unknown>, ok: string) => f().then(() => toast(ok)).catch((e: any) => toast(e.message, true));
-  if (!can(me, "dealers.manage")) return <div className="card empty"><b>Not available for your role</b>Ask the owner for “Approve dealers & handle trade orders”.</div>;
+  if (!can(me, "dealers.manage")) return null;   // not theirs: nothing shown (owner, 6 Nov)
 
   return <div>
     <Head eyebrow="Trade portal" title="Dealers & trade orders" sub="Retailers register on your portal with their mobile and a PIN. Approve them, and their orders arrive here priced at your trade rates.">

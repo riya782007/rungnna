@@ -12,7 +12,7 @@ import { currentStore, inStore, assertStoreRow, storeLocations } from "./stores"
 import { fillBillNames } from "./billing-products";
 import { validatePosLines } from "./pos";
 import { isInterState } from "./states";
-import { requirePerm, typeForCompany, MAIN_STORE } from "./scope";
+import { requirePerm, requireAnyPerm, typeForCompany, MAIN_STORE } from "./scope";
 import { purgeEstimates } from "./estimatePurge";
 
 /* ---------------- shop profile (synced to every device) ---------------- */
@@ -47,7 +47,7 @@ export async function getShop(store = currentStore()): Promise<Shop> {
   return { ...v, state: v.state || DEFAULT_SHOP.state };
 }
 export async function saveShop(v: Shop) {
-  requirePerm("settings.manage", "changing shop settings");
+  requireAnyPerm(["settings.manage", "settings.shop"], "changing shop settings");
   const store = currentStore();
   await put("config", { id: await shopConfigKey(store, true), value: v, updated_at: now() } as Config);
 }
