@@ -23,8 +23,10 @@ export function pickExternal(cams: Pick<MediaDeviceInfo, "deviceId" | "label">[]
   return best.deviceId === act ? "" : best.deviceId;
 }
 const NO_CAMERA = new Set(["OverconstrainedError", "NotFoundError"]);
-export default function CustomerCamera({ onPhoto, onBlob, onClose, title = "Customer photo", facing = "user", settingKey = "customer_camera", preferExternal = false }:
-  { onPhoto?: (id: string) => void; onBlob?: (b: Blob) => void; onClose: () => void; title?: string; facing?: "user" | "environment"; settingKey?: string; preferExternal?: boolean }) {
+/* `stay` (owner, 6 Nov: "putting a picture takes a lot of time"): the camera stays open after a photo, for the next
+   one — opening a camera is the slow part. `caption` says what the next photo is of; `onSkip` moves past it. */
+export default function CustomerCamera({ onPhoto, onBlob, onClose, title = "Customer photo", facing = "user", settingKey = "customer_camera", preferExternal = false, stay = false, caption, onSkip }:
+  { onPhoto?: (id: string) => void | Promise<void>; onBlob?: (b: Blob) => void; onClose: () => void; title?: string; facing?: "user" | "environment"; settingKey?: string; preferExternal?: boolean; stay?: boolean; caption?: React.ReactNode; onSkip?: () => void }) {
   const video = useRef<HTMLVideoElement>(null);
   const [device, setDevice] = useState<string | null>(null), [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   // auto: move to the plug-in camera by itself; off once "Use default camera" is pressed. tryNo opens the camera again.
@@ -87,14 +89,20 @@ export default function CustomerCamera({ onPhoto, onBlob, onClose, title = "Cust
       c.getContext("2d")!.drawImage(v, 0, 0);
       const blob = await new Promise<Blob | null>(r => c.toBlob(r, "image/jpeg", 0.9));
       if (!blob) throw new Error("Could not capture photo");
-      if (onBlob) onBlob(blob); else onPhoto?.(await savePhoto(blob));
-      onClose();
+      if (onBlob) onBlob(blob); else await onPhoto?.(await savePhoto(blob));
+      if (!stay) onClose();
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   };
   return <Modal title={title} onClose={onClose}><div className="stack">
     <video ref={video} autoPlay muted playsInline className="customer-camera" onLoadedData={() => setReady(true)} />
     <label className="f">Camera<select className="in" value={device || ""} onChange={e => { setAuto(true); setDevice(e.target.value); setSetting(settingKey, e.target.value); }}><option value="">{preferExternal ? "Automatic (USB camera if plugged in)" : "Default camera"}</option>{devices.map((d, i) => <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${i + 1}`}</option>)}</select></label>
     {error && <div role="alert" className="note warn">{error}<button className="btn sm" onClick={() => { setAuto(false); setDevice(""); setSetting(settingKey, ""); setTryNo(n => n + 1); }}>Use default camera</button></div>}
-    <button className="btn p" disabled={!ready || busy || !!error} onClick={capture}><Camera size={18} />{busy ? "Saving…" : "Take photo"}</button>
+    {caption && <div className="camera-caption">{caption}</div>}
+    <div className="row" style={{ gap: 8 }}>
+      <button className="btn p grow" autoFocus disabled={!ready || busy || !!error} onClick={capture}><Camera size={18} />{busy ? "Saving…" : "Take photo"}</button>
+      {onSkip && <button className="btn" disabled={busy} onClick={onSkip}>Skip</button>}
+      {stay && <button className="btn" onClick={onClose}>Done</button>}
+    </div>
+    {stay && <div className="xs mut">The camera stays open: each photo goes on the line shown, then it moves to the next. Space or Enter takes the photo.</div>}
   </div></Modal>;
 }

@@ -1,5 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { getSetting, setSetting, type Purchase } from "../lib/db";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useLiveQuery } from "dexie-react-hooks";
+import { db, getSetting, setSetting, type Purchase } from "../lib/db";
+import { saveProduct } from "../lib/products";
+import { savePhoto } from "../lib/image";
+import { Thumb } from "./common";
+const CustomerCamera = lazy(() => import("./CustomerCamera"));
 import type { Job } from "../pages/Labels";
 import { parseSrList } from "../lib/quick-line";
 import { toast } from "../lib/app";
@@ -32,6 +37,13 @@ export function CartonPrint({ purchase, jobs, print, busy, autoSr, onAutoDone, o
   const [text, setText] = useState("");
   const [working, setWorking] = useState(false);
   const box = useRef<HTMLInputElement>(null);
+  /* Owner, 6 Nov (photo of this screen + voice): a photo of each line's goods as the carton is opened — taken with the
+     camera (a plugged-in USB camera is used by itself; the choice is remembered) or uploaded (a file on the computer;
+     on a phone, its camera or gallery). The camera stays open and moves down the lines, so it opens once a carton. */
+  const [shoot, setShoot] = useState<number | null>(null);   // index in `lines` the open camera is taking
+  const file = useRef<HTMLInputElement>(null), fileFor = useRef<number>(-1);
+  const pids = useMemo(() => purchase.items.map(l => l.product_id).filter(Boolean), [purchase]);
+  const pics = useLiveQuery(async () => new Map((await db.products.bulkGet(pids)).filter(Boolean).map(p => [p!.id, p!])), [pids.join()], new Map());
   const [loaded, setLoaded] = useState("");
   useEffect(() => { void getSetting<Progress>(keyOf(purchase.id), { done: {} }).then(p => { setProg(p && p.done ? p : { done: {} }); setLoaded(purchase.id); }); setTicked(new Set()); }, [purchase.id]);
   useEffect(() => { if (!autoSr) setTimeout(() => box.current?.focus(), 50); }, [purchase.id]);
@@ -40,7 +52,7 @@ export function CartonPrint({ purchase, jobs, print, busy, autoSr, onAutoDone, o
   const lines = useMemo(() => purchase.items.map((l, i) => {
     const sr = String(l.bill_sr?.trim() || i + 1);
     const stickers = jobs.filter(j => String(j.line ?? "") === sr).reduce((n, j) => n + j.copies, 0) * times;
-    return { i, sr, item: l.item, style: l.style, color: l.color, qty: l.qty, rate: l.rate, pack: l.label_pack ?? l.pack ?? 1, print_qty: l.print_qty, stickers };
+    return { i, sr, item: l.item, style: l.style, color: l.color, qty: l.qty, rate: l.rate, pack: l.label_pack ?? l.pack ?? 1, print_qty: l.print_qty, stickers, product_id: l.product_id };
   }), [purchase, jobs, times]);
   const carton = Math.max(0, ...Object.values(prog.done)) + 1;
   const left = lines.filter(l => !prog.done[l.sr] && l.stickers > 0);
@@ -49,6 +61,20 @@ export function CartonPrint({ purchase, jobs, print, busy, autoSr, onAutoDone, o
 
   const save = (p: Progress) => { setProg(p); void setSetting(keyOf(purchase.id), p); };
   const tick = (srs: string[], on = true) => setTicked(old => { const n = new Set(old); for (const s of srs) on ? n.add(s) : n.delete(s); return n; });
+
+  const putPhoto = async (k: number, photo_id: string) => {
+    const l = lines[k], p = l?.product_id ? await db.products.get(l.product_id) : undefined;
+    if (!p) { toast(`Sr. ${l?.sr}: this line has no product to put the photo on`, true); return; }
+    await saveProduct({ ...p, photo_id, photo_url: undefined }, true);
+    toast(`Photo saved · Sr. ${l.sr} ${l.item}`);
+  };
+  const nextShot = (k: number) => { const n = k + 1 < lines.length ? k + 1 : null; setShoot(n); if (n === null) toast("Photos done for every line ✓"); };
+  const upload = async (files: FileList | null) => {
+    const k = fileFor.current; if (!files?.length || k < 0) return;
+    try { for (const [j, f] of [...files].entries()) { if (k + j >= lines.length) break; await putPhoto(k + j, await savePhoto(f)); } }
+    catch (e: any) { toast(e.message || "Could not save the photo", true); }
+    if (file.current) file.current.value = "";
+  };
 
   const run = async (which: typeof lines, label: string) => {
     if (!which.length || working) return;
@@ -131,7 +157,7 @@ export function CartonPrint({ purchase, jobs, print, busy, autoSr, onAutoDone, o
         {working ? "Printing…" : sel.length ? `Print carton ${carton} · ${selStickers} sticker${selStickers === 1 ? "" : "s"}` : `Tick the lines of carton ${carton}`}</button>
       {!!left.length && <button type="button" className="btn" disabled={working} onClick={() => void run(left, "All left")}>Print all left ({left.reduce((n, l) => n + l.stickers, 0)})</button>}
     </div>
-    <div className="tw"><table className="pos-t carton-t"><thead><tr><th></th><th>Sr.</th><th>Item</th><th>Code</th><th className="r">Qty</th><th className="r">Rate</th><th className="r">X</th><th className="r">Stickers</th><th>Carton</th><th></th></tr></thead><tbody>
+    <div className="tw"><table className="pos-t carton-t"><thead><tr><th></th><th>Sr.</th><th>Item</th><th>Code</th><th className="r">Qty</th><th className="r">Rate</th><th className="r">X</th><th className="r">Stickers</th><th>Carton</th><th>Photo</th><th></th></tr></thead><tbody>
       {lines.map(l => editing?.i === l.i ? <tr key={l.sr} className="fixing" onClick={e => e.stopPropagation()}>
         <td></td><td className="mono b">{l.sr}</td>
         <td><input className="in" aria-label="Fix item" value={editing.f.item} onChange={e => setEditing({ ...editing, f: { ...editing.f, item: e.target.value } })} /></td>
@@ -146,6 +172,11 @@ export function CartonPrint({ purchase, jobs, print, busy, autoSr, onAutoDone, o
         <td className="mono b">{l.sr}</td><td>{l.item}</td><td className="mono">{l.style}{l.color ? " · " + l.color : ""}</td>
         <td className="r">{l.qty}</td><td className="r">{l.rate ? (l.rate / 100).toFixed(2) : "—"}</td><td className="r">{l.pack}</td><td className="r">{l.stickers}</td>
         <td>{prog.done[l.sr] ? <span className="ok-text b">✓ {prog.done[l.sr]}</span> : ""}</td>
+        <td onClick={e => e.stopPropagation()}><div className="row carton-photo" style={{ gap: 4, flexWrap: "nowrap" }}>
+          {(() => { const p = l.product_id ? pics.get(l.product_id) : undefined; return p?.photo_id || p?.photo_url ? <Thumb photo_id={p.photo_id} url={p.photo_url} size={34} /> : null; })()}
+          <button type="button" className="btn sm" disabled={!l.product_id} title="Camera — a plugged-in USB camera is used; it stays open for the next lines" aria-label={`Camera photo for Sr. ${l.sr}`} onClick={() => setShoot(lines.indexOf(l))}>📷</button>
+          <button type="button" className="btn sm" disabled={!l.product_id} title="Upload a photo (several at once go on this line and the ones below)" aria-label={`Upload photo for Sr. ${l.sr}`} onClick={() => { fileFor.current = lines.indexOf(l); file.current?.click(); }}>📁</button>
+        </div></td>
         <td><div className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
           {/* never greyed out while another print runs: a press always answers, if only to say "wait a moment" */}
           <button type="button" data-sr={l.sr} className={"btn sm" + (prog.done[l.sr] ? "" : " p")} disabled={working || !l.stickers}
@@ -155,5 +186,13 @@ export function CartonPrint({ purchase, jobs, print, busy, autoSr, onAutoDone, o
         </div></td>
       </tr>)}
     </tbody></table></div>
+    <input ref={file} type="file" accept="image/*" multiple hidden onChange={e => void upload(e.target.files)} />
+    {shoot !== null && lines[shoot] && <Suspense fallback={<div role="status">Opening camera…</div>}>
+      <CustomerCamera title="Photos of this carton" facing="environment" settingKey="photo_camera" preferExternal stay
+        caption={<><b className="mono">Sr. {lines[shoot].sr}</b> · {lines[shoot].item} <span className="mono">{lines[shoot].style}</span>{lines[shoot].color ? " · " + lines[shoot].color : ""}
+          {(() => { const p = lines[shoot].product_id ? pics.get(lines[shoot].product_id!) : undefined; return p?.photo_id || p?.photo_url ? <span className="xs mut"> · has a photo — a new one replaces it</span> : null; })()}</>}
+        onPhoto={async id => { const k = shoot; await putPhoto(k, id); nextShot(k); }}
+        onSkip={() => nextShot(shoot)} onClose={() => setShoot(null)} />
+    </Suspense>}
   </div>;
 }

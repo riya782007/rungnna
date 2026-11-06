@@ -1558,3 +1558,8 @@ html[data-company="gst"] .purchase-photo .note.warn{color:var(--warn)} html[data
   .purchase-photo .purchase-lines th:nth-child(2){min-width:0}
   .purchase-photo .purchase-lines th{font-size:13px}
 }
+/* carton photos (owner, 6 Nov): what the open camera is taking now */
+.camera-caption{padding:8px 10px;border-radius:10px;background:var(--gold-l);border:1px solid #E3CF9E;font-size:15px}
+.carton-t .carton-photo .btn{padding-inline:8px}
+/* the camera window sits above the print panel, so its Take photo / Skip / Done are never covered (6 Nov) */
+.modal:has(.customer-camera){z-index:95}
