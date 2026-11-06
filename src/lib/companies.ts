@@ -2,7 +2,8 @@ import { db, put, now, type Config, type Staff, type Store } from "./db";
 import { MAIN_STORE, ownerOnly } from "./scope";
 import { createStore } from "./stores";
 import { codeMatches, getOpenCode, normCode } from "./openCode";
-import { setCompanyFeatures } from "./roles";
+import { setCompanyFeatures, companyAllows } from "./roles";
+import { lockNow, setOwnerOpen } from "./privacy";
 
 /* Companies (owner, 27 Oct; see docs/companies.md). One master owner makes as many companies as he wants. Each
    company has its own entry code; after it the person signs in with their own name and PIN, and only that
@@ -102,6 +103,7 @@ export async function createCompany(name: string, code: string, entryCode: strin
 export async function applyCompany(id: string): Promise<number> {
   const c = await companyCfg(id);
   setCompanyFeatures(Array.isArray(c.features) ? c.features : null);
+  if (!companyAllows("estimates.open")) { setOwnerOpen(false); lockNow(); }   // a company without estimates: closed on arrival
   return c.idle_minutes || 0;
 }
 

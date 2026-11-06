@@ -4,7 +4,7 @@ import { db, put, uid, now, getSetting, setSetting, deviceId, type Staff, type L
 import { initStores, isEstimateCompany } from "./stores";
 import { setScope, setScopePerms, currentStore, MAIN_STORE } from "./scope";
 import { resetCounterAccess } from "./entryAuth";
-import { setRolesCache, setBuiltinCache, permsOf, sessionAllowed } from "./roles";
+import { setRolesCache, setBuiltinCache, permsOf, sessionAllowed, companyAllows } from "./roles";
 import { applyCompany, mayOpen, watchIdle, type Entry } from "./companies";
 import { useLiveQuery } from "dexie-react-hooks";
 
@@ -135,7 +135,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   /* Role AND permissions move together, synchronously. If the permission set were left to the
      effect below, there would be one commit where `role` is the new person and `perms` are still
      the previous person's — reachable on a shared counter when someone switches and scans at once. */
-  useEffect(() => { setOwnerOpen(me?.role === "owner"); }, [me?.role, me?.id]);
+  useEffect(() => { setOwnerOpen(me?.role === "owner" && companyAllows("estimates.open")); }, [me?.role, me?.id]);
   // one company again (owner, 26 Oct): a counter or person still set to the old estimate company works in the main one
   useEffect(() => { void isEstimateCompany(store).then(est => {
     if (!est) return;
@@ -167,7 +167,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   /* The open company's features and auto-logout (Settings › Companies) follow its config row as soon as it syncs in. */
   const companyRow = useLiveQuery(() => db.config.get("company_" + store), [store]);
   const [idle, setIdle] = useState(0);
-  useEffect(() => { let live = true; void applyCompany(store).then(m => { if (!live) return; setIdle(m); setScopePerms(permsOf(me)); bump(n => n + 1); }); return () => { live = false; }; }, [store, companyRow?.updated_at, me?.id]);
+  useEffect(() => { let live = true; void applyCompany(store).then(m => { if (!live) return; setIdle(m); setScopePerms(permsOf(me)); setOwnerOpen(me?.role === "owner" && companyAllows("estimates.open")); bump(n => n + 1); }); return () => { live = false; }; }, [store, companyRow?.updated_at, me?.id]);
   useEffect(() => {
     if (!me || !idle) return;
     return watchIdle(idle, () => { lockNow(); setOwnerOpen(false); setMe(null); toast(`Signed out after ${idle} idle minute${idle > 1 ? "s" : ""}. Sign in again.`); });

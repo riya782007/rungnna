@@ -176,11 +176,15 @@ export const customRoles = () => ROLES;
    company allow. null = the company has every feature. The owner always keeps everything. */
 let COMPANY_FEATURES: Set<string> | null = null;
 export function setCompanyFeatures(f: string[] | null) { COMPANY_FEATURES = f ? new Set(f) : null; }
+/** Is this feature switched on for the company open now (every feature when the company has no list)? */
+export const companyAllows = (k: string) => !COMPANY_FEATURES || COMPANY_FEATURES.has(k);
 export const companyHas = (k: string) => !COMPANY_FEATURES || COMPANY_FEATURES.has(k);
 
 export function permsOf(me: Pick<Staff, "role"> & { role_id?: string; perms?: string[] } | null | undefined): Set<string> {
   if (!me) return new Set();
-  if (me.role === "owner") return new Set(ALL_PERMS);
+  /* Owner, 5–6 Nov (voice): "when we open the GST company it should be only GST — after shifting, no trace". The owner
+     keeps every feature, except estimates in a company whose estimates are switched off: there they do not exist. */
+  if (me.role === "owner") return new Set(companyAllows("estimates.open") ? ALL_PERMS : ALL_PERMS.filter(k => !k.startsWith("estimates.")));
   const out = rolePerms(me);
   if (COMPANY_FEATURES) for (const k of [...out]) if (!COMPANY_FEATURES.has(k)) out.delete(k);
   return out;
