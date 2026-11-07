@@ -244,7 +244,10 @@ function Shell() {
       </div>
       <nav className="tabbar">
         {[visible.find(s => s.key === "home"), visible.find(s => s.key === "sell")].filter(Boolean).map(s => <a key={s!.key} href={hrefOf(s!)} className={sec === s!.key ? "on" : ""}><Icon n={s!.icon} size={22} />{t(s!.label)}</a>)}
-        <a href={ok("stockin") ? "#/stockin" : "#/"} className="fab"><span className="c"><Icon n="scan" size={24} sw={2} /></span></a>
+        {/* Owner, 7 Nov (phone photo): "the mobile won't make an estimate — it says enter stock first". The big middle button
+            opened Stock in, so scanning there received goods instead of billing them. It opens the bill now (scan into the
+            bill / estimate); Stock in stays under Stock. Someone who cannot bill still gets Stock in. */}
+        <a href={ok("bill") ? "#/bill" : ok("stockin") ? "#/stockin" : "#/"} className={"fab" + (route === "bill" ? " on" : "")} aria-label={ok("bill") ? "New bill — scan items" : "Stock in"}><span className="c"><Icon n="scan" size={24} sw={2} /></span></a>
         {[visible.find(s => s.key === "stock"), visible.find(s => s.key === "reports") || visible.find(s => s.key === "ask") || visible.find(s => s.key === "settings")].filter(Boolean).map(s => <a key={s!.key} href={hrefOf(s!)} className={sec === s!.key ? "on" : ""}><Icon n={s!.icon} size={22} />{t(s!.label)}</a>)}
       </nav>
       {pal && canSearch && <SearchPalette onClose={() => setPal(false)} />}
