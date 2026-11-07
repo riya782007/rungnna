@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import { fillBillNames } from "../lib/billing-products";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, type Bill, type BillType, type Payment } from "../lib/db";
-import { BagLabels } from "../components/BagLabels";
+import { BagLabels, ManyBagLabels } from "../components/BagLabels";
 import { GstBill } from "../components/GstBill";
 import { inStore } from "../lib/scope";
 import { due, getShop, voidBill, convertToGst, shareBill, billText, waLink, deleteEstimates, totals, gstLabel, isSale, docName, docShort, DEFAULT_SHOP, type Shop } from "../lib/billing";
@@ -58,7 +58,11 @@ function BillList() {
   const selEsts = selected.filter(b => b.bill_type === "estimate");
   const allChallans = selected.length > 0 && selected.every(b => b.bill_type === "challan");
   const why = selected.length ? canMerge(selected) : null;
-  const tickable = (b: Bill) => (canBill && mergeable(b)) || (manage && b.bill_type === "estimate");
+  const slipBills = selected.filter(b => b.status === "final" && !b.deleted && !!b.no && !!b.party_name?.trim() && b.bill_type !== "return");
+  const [slips, setSlips] = useState<Bill[] | null>(null);
+  // a saved bill with a customer can be ticked for its parcel slips (owner, 6 Nov), besides merging
+  const slipable = (b: Bill) => b.status === "final" && !b.deleted && !!b.no && !!b.party_name?.trim() && b.bill_type !== "return";
+  const tickable = (b: Bill) => (canBill && (mergeable(b) || slipable(b))) || (manage && b.bill_type === "estimate");
   useEffect(() => { setSel(new Set()); }, [range, type, status, q]);
   const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   return (
@@ -84,10 +88,11 @@ function BillList() {
         </div>
         {canBill && <div className="row"><SelectAll ids={list.filter(tickable).map(b => b.id)} selected={sel} onChange={setSel} label="Select all eligible bills shown" />
           <span className="sm mut grow">{selected.length
-            ? `${selected.length} selected${why && !(manage && selEsts.length === selected.length) ? " — " + why : ""}`
+            ? `${selected.length} selected${why && selected.every(mergeable) && !(manage && selEsts.length === selected.length) ? " — " + why : ""}`
             : `Tick ${open ? "estimates, " : ""}held orders or challans of one customer to merge them into one invoice${manage ? ", or estimates to delete them" : ""}.`}</span>
           {selected.length > 0 && !why && <button className="btn sm p" onClick={() => setMerge(selected)}>{allChallans ? `Convert ${selected.length > 1 ? selected.length + " challans" : "challan"} to invoice` : "Merge into one invoice"}</button>}
           {manage && selEsts.length > 0 && selEsts.length === selected.length && <DeleteButton className="btn sm bad" onDelete={() => setDel(selEsts)}>Delete selected</DeleteButton>}
+          {slipBills.length > 0 && <button className="btn sm p" onClick={() => setSlips([...slipBills].sort((a, z) => (a.at < z.at ? -1 : 1)))}>Print parcel slips ({slipBills.length})</button>}
           {selected.length > 0 && <button className="btn sm" onClick={() => setSel(new Set())}>Clear</button>}
           {manage && ests.length > 0 && !selected.length && <DeleteButton className="btn sm bad" onDelete={() => setDel(ests)}>Delete all {ests.length} estimates shown</DeleteButton>}
         </div>}
@@ -108,6 +113,7 @@ function BillList() {
         </tbody></table></div>
       {del && <DeleteEstimates bills={del} onClose={() => { setDel(null); setSel(new Set()); }} />}
       {delAll && <DeleteEstimates all onClose={() => { setDelAll(false); setSel(new Set()); }} />}
+      {slips && <ManyBagLabels bills={slips} onClose={() => { setSlips(null); setSel(new Set()); }} />}
       {merge && <MergeDialog sources={merge} onClose={() => setMerge(null)} onDone={b => { setMerge(null); setSel(new Set()); go("bills/" + b.id); }} />}
     </div>
   );
