@@ -10,7 +10,7 @@ import { db, put, getSetting, type Bill, type BillType, type Payment } from "../
 import { BagLabels, ManyBagLabels } from "../components/BagLabels";
 import { GstBill } from "../components/GstBill";
 import { inStore } from "../lib/scope";
-import { due, getShop, voidBill, convertToGst, shareBill, billText, waLink, deleteEstimates, totals, gstLabel, isSale, docName, docShort, DEFAULT_SHOP, type Shop } from "../lib/billing";
+import { due, getShop, voidBill, convertToGst, shareBill, PASTE_HINT, billText, waLink, deleteEstimates, totals, gstLabel, isSale, docName, docShort, DEFAULT_SHOP, type Shop } from "../lib/billing";
 import { canMerge, mergeable, mergeBills, mergeLines, splitBill, splittable, returnable, returnableBill, buildReturn, saveReturn } from "../lib/docs";
 import { usePrivate, visibleBill, lockNow, isEstimate } from "../lib/privacy";
 import { Icon } from "../components/Icon";
@@ -190,7 +190,7 @@ function BillView({ id }: { id: string }) {
         <button className="btn" onClick={async () => setPrinting(await getSetting<PrintFormat>("thermal_width", "80mm"))}>Thermal</button>
         <button className="btn" onClick={() => setPrinting("packing")}>Packing slip</button>
         {b.status === "final" && <button className="btn" onClick={() => setBags(true)}>Bag labels</button>}
-        <button className="btn g" onClick={() => shareBill(b, shop)}>WhatsApp</button>
+        <button className="btn g" onClick={async () => { if (await shareBill(b, shop) === "pasted") toast(PASTE_HINT); }}>WhatsApp</button>
       </Head>
       <div className="split">
         <div className="card pad" style={{ overflow: "auto" }}><div className="inv-preview"><InvoiceSheet b={b} shop={shop} format="a5" /></div></div>

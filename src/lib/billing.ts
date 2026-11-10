@@ -425,8 +425,35 @@ export function billText(b: Bill, shop: Shop) {
   if (billNarration(b, billAmount)) L.push(`Remarks: ${billNarration(b, billAmount)}`);
   const qr = isSale(b) && d > 0 ? qrAccount(b, shop) : undefined;
   if (qr) L.push(`Pay by UPI: ${upiLink(qr, shop.name, d, b.no)}`);
-  L.push("", "Thank you! 🙏");
+  // plain words: the folded-hands emoji came out as "�" in WhatsApp on the shop's computer (owner's photo, 10 Nov)
+  L.push("", "Thank you!");
   return L.join("\n");
+}
+/* Owner, 10 Nov (voice): "in this format nobody understands the bill — so many lines are confusing". When the bill
+   goes as a picture, the message itself only says what the customer needs: which bill, how much, how to pay. */
+export function billSummary(b: Bill, shop: Shop) {
+  const billAmount = (value: number) => documentAmount(b, value);
+  const d = isSale(b) ? due(b) : 0;
+  const L = [`*${shop.name}*`, `${docName(b)} ${b.no} · ${new Date(b.at).toLocaleDateString("en-IN")}`,
+    `${b.items.length} items · ${b.total_qty} pcs · ${b.box_count} box${b.box_count === 1 ? "" : "es"}`,
+    b.bill_type === "return" ? `*Credit: ${billAmount(b.net)}*` : `*Total: ${billAmount(b.net)}*`];
+  if (b.paid) L.push(`Paid: ${billAmount(b.paid)}`);
+  if (d > 0) L.push(`*Balance due: ${billAmount(d)}*`);
+  if (isSale(b) && b.prev_due) L.push(`Total due with old balance: ${billAmount(b.prev_due + d)}`);
+  const qr = isSale(b) && d > 0 ? qrAccount(b, shop) : undefined;
+  if (qr) L.push(`Pay by UPI: ${upiLink(qr, shop.name, d, b.no)}`);
+  L.push("", "Full bill in the picture. Thank you!");
+  return L.join("\n");
+}
+export const PASTE_HINT = "Bill picture copied — in the WhatsApp chat press Ctrl + V, then Enter to send it";
+/** Puts the bill picture on this computer's clipboard (Ctrl+V pastes it into the WhatsApp chat). */
+async function copyPicture(blob: Blob): Promise<boolean> {
+  try {
+    const C = (window as any).ClipboardItem;
+    if (!C || !navigator.clipboard?.write) return false;
+    await navigator.clipboard.write([new C({ "image/png": blob })]);
+    return true;
+  } catch { return false; }
 }
 export function waLink(phone: string, text: string) {
   const n = normPhone(phone);
@@ -523,15 +550,20 @@ export async function billImage(b: Bill, shop: Shop): Promise<Blob> {
 
 /* Android/iPhone: opens the share sheet with the bill picture attached (pick WhatsApp).
    Computers: opens WhatsApp Web with the bill text. */
-export async function shareBill(b: Bill, shop: Shop) {
-  const text = billText(b, shop);
+export async function shareBill(b: Bill, shop: Shop): Promise<"shared" | "cancelled" | "pasted" | "wa"> {
+  let blob: Blob | undefined;
   try {
-    const blob = await billImage(b, shop);
+    blob = await billImage(b, shop);
     const file = new File([blob], `${b.no.replace(/\//g, "-") || "bill"}.png`, { type: "image/png" });
     const nav = navigator as any;
-    if (nav.canShare?.({ files: [file] })) { await nav.share({ files: [file], text }); return "shared"; }
+    if (nav.canShare?.({ files: [file] })) { await nav.share({ files: [file], text: billSummary(b, shop) }); return "shared"; }
   } catch (e: any) { if (e?.name === "AbortError") return "cancelled"; }
-  window.open(waLink(b.party_phone, text), "_blank");
+  // a computer: the bill picture goes on the clipboard and the chat opens with the short message; Ctrl+V adds the picture
+  if (blob && await copyPicture(blob)) {
+    window.open(waLink(b.party_phone, billSummary(b, shop)), "_blank");
+    return "pasted";
+  }
+  window.open(waLink(b.party_phone, billText(b, shop)), "_blank");
   return "wa";
 }
 

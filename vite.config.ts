@@ -27,6 +27,9 @@ export default defineConfig({
         // public web pages are server-rendered; never let the installed app swallow them
         navigateFallbackDenylist: [/^\/api\//, /^\/(shop|trade)(\/|\?|$)/, /^\/(p|c)\//, /^\/(sitemap\.xml|robots\.txt)$/],
         runtimeCaching: [
+          // every post office's PIN code (customer forms): kept after the first load, so it also works offline
+          { urlPattern: ({ url }) => url.pathname === "/pincodes.txt", handler: "CacheFirst",
+            options: { cacheName: "pincodes", expiration: { maxEntries: 1, maxAgeSeconds: 31536000 } } },
           { urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/, handler: "CacheFirst",
             options: { cacheName: "fonts", expiration: { maxEntries: 20, maxAgeSeconds: 31536000 } } },
           { urlPattern: /^https:\/\/res\.cloudinary\.com\/.*/, handler: "CacheFirst",

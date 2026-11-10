@@ -4,7 +4,7 @@ import { askText } from "../components/AskHost";
 import { parkBillingDraft, resumeBillingDraft } from "../lib/billing-drafts";
 import { publicOrigin } from "../lib/platform";
 import { DeleteButton } from "../components/DeleteButton";
-import { confirmDelete } from "../lib/confirm-delete";
+import { confirmDelete, confirmAsk } from "../lib/confirm-delete";
 import { SelectAll } from "../components/SelectAll";
 import { placeCode } from "../lib/states";
 import { selectedBox, mergeBoxLine, mergeBillLines, type BillingDraft } from "../lib/billingBox";
@@ -20,7 +20,8 @@ import { noteMiss, clearMiss, learnFromPick } from "../lib/scan-learn";
 import { ShopDetailsAsk, shopNeedsTaxDetails } from "../components/ShopDetailsAsk";
 import { NameItemCodes, unnamedCodes } from "../components/NameItemCodes";
 import { isRfidTag, normTag, soldBill, TagSet, Recent } from "../lib/rfid";
-import { discError, newBill, withEstimateDiscount, lineFrom, priceFor, totals, gstLabel, fixLine, finalize, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
+import { PinField, pinCity } from "../components/PinField";
+import { discError, newBill, withEstimateDiscount, lineFrom, priceFor, totals, gstLabel, fixLine, finalize, due, getShop, newParty, partyDue, shareBill, PASTE_HINT, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
 import { voiceBill } from "../lib/ai";
 import { useApp, toast, beep, go } from "../lib/app";
 import { can } from "../lib/roles";
@@ -321,6 +322,7 @@ export default function Billing({ args }: { args: string[] }) {
   useEffect(() => { b?.party_id ? partyDue(b.party_id).then(setDue0) : setDue0(0); }, [b?.party_id, priv]);
 
   const t = useMemo(() => (b ? totals(withBillNames(b, products, readItemMap(itemNames?.value)), shop.state, shop.gstin) : null), [b, shop.state, products, itemNames]);
+  const billNow = b, totalsNow = t;   // doSave may be handed a bill just corrected (the usual estimate discount)
   const [askCode, setAskCode] = useState(false);
   useEffect(() => {
     if (priv || !b || b.bill_type !== "estimate") return;
@@ -538,7 +540,8 @@ export default function Billing({ args }: { args: string[] }) {
     const roll = fmt === "80mm" || fmt === "58mm";
     setPrinting({ bill, fmt, bags: !roll && bagWithBill && !!bill.party_name.trim(), slips: roll ? { tags: tagWithRoll, cash: cashWithBill } : undefined });
   }
-  async function doSave(print = false, share = false, bags = false) {
+  async function doSave(print = false, share = false, bags = false, fixed?: { b: Bill; t: Bill }) {
+    const b = fixed?.b ?? billNow, t = fixed?.t ?? totalsNow;
     if (!b || !t) return;
     if (b.bill_type !== "challan" && b.payments.some(p => p.mode !== "credit" && p.amount <= 0)) {
       toast("Enter the amount received, or remove the unused payment row. No payment is assumed.", true);
@@ -552,8 +555,20 @@ export default function Billing({ args }: { args: string[] }) {
       const saved = await db.bills.get(b.id);
       if (saved && bags) setBagBill(saved);
       if (saved && print) printWithSlips(saved);
-      if (saved && share) await shareBill(saved, shop);
+      if (saved && share && await shareBill(saved, shop) === "pasted") toast(PASTE_HINT);
       return;
+    }
+    /* Owner, 10 Nov (voice): "I sent the bill and printed it, and the 50% discount was left off — I wrote it by hand."
+       An estimate with no discount at all, in a shop whose estimates always carry one, asks once before saving. */
+    if (!fixed && b.bill_type === "estimate" && !t.discount && !b.discount_pct && !b.less_pct && t.items.length
+      && ((shop.est_disc_pct || 0) > 0 || (shop.est_less_pct || 0) > 0)) {
+      const usual = [shop.est_disc_pct ? shop.est_disc_pct + "%" : "", shop.est_less_pct ? shop.est_less_pct + "% less" : ""].filter(Boolean).join(" + ");
+      if (await confirmAsk(`This estimate has no discount. Put the usual ${usual} on it before saving?`,
+        { title: "Usual discount", yes: `Yes, ${usual}`, no: "No, save without", startYes: true })) {
+        const nb = withEstimateDiscount(b, shop);
+        setB(nb);
+        return doSave(print, share, bags, { b: nb, t: totals(withBillNames(nb, products, readItemMap(itemNames?.value)), shop.state, shop.gstin) });
+      }
     }
     savingRef.current = true; setSaving(true);
     try {
@@ -609,7 +624,7 @@ export default function Billing({ args }: { args: string[] }) {
     await setSetting("draft_bill", null);
     if (bags) setBagBill(done);
     if (print) printWithSlips(done);
-    if (share) await shareBill(done, shop);
+    if (share && await shareBill(done, shop) === "pasted") toast(PASTE_HINT);
     setB(withEstimateDiscount(newBill(me?.id || "", shop, b.bill_type), shop)); setBox(1);
     setNextNo("");
     } catch (e: any) { toast(e.message || "Could not save bill", true); }
@@ -1010,7 +1025,8 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
           <label className="f">Shop / firm name<input className="in" value={form.alt_name} onChange={e => f("alt_name", e.target.value.toUpperCase())} /></label>
           <label className="f">City / area<input className="in" value={form.city} onChange={e => f("city", e.target.value.toUpperCase())} /></label>
           <label className="f">Address<input className="in" value={form.address} onChange={e => f("address", e.target.value)} /></label>
-          <label className="f">PIN code<input className="in mono" inputMode="numeric" maxLength={6} value={form.pin} onChange={e => f("pin", e.target.value.replace(/\D/g, ""))} /></label>
+          <PinField pin={form.pin} address={[form.address, form.city, form.state].join(" ")} onPin={v => setForm(x => x && { ...x, pin: v })}
+            onPlace={pl => setForm(x => x && { ...x, city: x.city || pinCity(pl), state: x.state || pl.state })} />
           <label className="f">State<input className="in" value={form.state} onChange={e => f("state", e.target.value)} /></label>
           <label className="f">GSTIN<input className="in mono" value={form.gstin} onChange={e => f("gstin", e.target.value.toUpperCase())} placeholder="if they have one" /></label>
           <label className="f">Type<select className="in" value={form.kind} onChange={e => f("kind", e.target.value as Party["kind"])}><option value="customer">Customer</option><option value="dealer">Dealer</option></select></label>

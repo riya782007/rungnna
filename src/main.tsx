@@ -16,6 +16,8 @@ import { finishEmailLink } from "./lib/sync";
 
 startUpdates();
 setTimeout(() => sessionStorage.removeItem("rj_reloaded"), 15000);
+// keep the PIN code list on this computer for the customer forms, so it is there when the internet is not
+setTimeout(() => { if (navigator.onLine) fetch("/pincodes.txt").catch(() => {}); }, 60_000);
 const pr = document.createElement("div"); pr.id = "printroot"; document.body.appendChild(pr);
 const start = () => createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);
 // an emailed sign-in link brings the login in the address: take it before the screens read the address
