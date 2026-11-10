@@ -406,6 +406,17 @@ let pendingCode = "";
 let refetch = false;   // the company changed while a sync may have been running: start its tables again before the next run
 async function restartCompanyTables() { for (const t of COMPANY_TABLES) await setSetting("cursor_" + t, "1970-01-01T00:00:00Z"); }
 /** null: the cloud says the code is wrong. undefined: the cloud could not be asked (offline, no cloud, not set up yet). */
+export const ENTRY_CODE_NEEDED = "This computer needs the shop's entry code once more before it can sync. Press “Type entry code” below.";
+/** Asks for the shop's entry code and lets the cloud check it, so an unnamed shop device may sync. */
+export async function enterShopCode(ask: (q: string) => Promise<string | null>): Promise<boolean> {
+  const code = await ask("The shop's entry code (the one typed when the app opens)");
+  if (!code) return false;
+  const e = await joinCompany(code);
+  if (e === null) throw new Error("That entry code is not right");
+  if (e === undefined) throw new Error(navigator.onLine ? "The cloud did not answer — try again in a minute" : "No internet — try again when it is back");
+  void syncNow();
+  return true;
+}
 export async function joinCompany(code: string, ms = 8000): Promise<CloudEntry | null | undefined> {
   pendingCode = code;
   if (!navigator.onLine || !await cloudSyncEnabled()) return undefined;
@@ -452,6 +463,10 @@ async function runSync() {
     let { data } = await c.auth.getSession();
     if (!data.session && await ensureSession()) data = (await c.auth.getSession()).data;
     if (!data.session) { emit({ status: "idle", error: "Sign in to sync", user: undefined }); return; }
+    // an unnamed shop device gets the shop's data only after the cloud has checked its entry code (10 Nov)
+    if (data.session.user.is_anonymous && !await getSetting<CloudEntry | null>("company_binding", null)) {
+      emit({ status: "error", error: ENTRY_CODE_NEEDED, user: deviceLabel(data.session.user) }); return;
+    }
     emit({ status: "syncing", error: undefined, user: deviceLabel(data.session.user) });
     await assertCloudSyncEnabled();
     await uploadPhotos(c);

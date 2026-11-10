@@ -9,7 +9,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, deviceId, uid, type Staff } from "../lib/db";
 import { Head } from "../components/common";
 import { useApp, toast, newStaff, SEED_OWNER, logoutEveryone } from "../lib/app";
-import { onSync, signIn, signOut, syncNow, exportAll, importAll, createShopLogin, sb, ensureSession, markShopDevice, refreshPeople, joinCompany, rememberedEmail, sendLoginCode, signInWithCode, changePassword, type SyncState } from "../lib/sync";
+import { onSync, signIn, signOut, syncNow, exportAll, importAll, createShopLogin, sb, ensureSession, markShopDevice, refreshPeople, joinCompany, rememberedEmail, sendLoginCode, signInWithCode, changePassword, enterShopCode, ENTRY_CODE_NEEDED, type SyncState } from "../lib/sync";
 import type { Pattern } from "../lib/parse";
 import { when } from "../lib/format";
 import { getShop, saveShop, counterCode, DEFAULT_SHOP, type Shop } from "../lib/billing";
@@ -175,6 +175,9 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
             <CloudSyncControl />
             <div className="sm mut">{sync?.pending || 0} changes waiting{sync?.last ? ` · last saved ${when(sync.last)}` : ""}</div>
             {sync?.error && <div className="note bad">{sync.error}</div>}
+            {sync?.error === ENTRY_CODE_NEEDED && <button className="btn p" onClick={() => enterShopCode(q => askText(q, "", { secret: true }))
+              .then(ok => { if (ok) toast("Entry code checked — this computer is syncing"); })
+              .catch((x: any) => toast(x?.message || "Could not check the code", true))}>Type entry code</button>}
             <StuckChanges />
             {sync?.user ? <><div className="row"><span className="sm grow">Connected as <b>{sync.user}</b></span><button className="btn sm" disabled={!sync.cloudEnabled} onClick={() => syncNow()}>Sync now</button>{admin && /@/.test(sync.user) && <ChangePassword email={sync.user} />}{admin && <button className="btn sm" onClick={signOut}>Disconnect</button>}</div>
               {admin && /@/.test(sync.user) && <div className="xs mut">Another computer asks for this email's password? Press “Change password” here and set a new one — the old one is not needed — or use “Forgot password?” there to get a code on {sync.user}.</div>}</>
@@ -281,7 +284,15 @@ export function ShopLogin({ onDone, emailOnly }: { onDone?: () => void; emailOnl
     setJoining(true);
     try {
       await markShopDevice();
-      if (await ensureSession()) { await syncNow(); toast("This computer is connected — stock, bills and the bill reader are on"); onDone?.(); }
+      if (await ensureSession()) {
+        // a new unnamed device: the cloud checks the shop's entry code before it shares anything
+        const c = await sb(); const u = (await c?.auth.getSession())?.data.session?.user;
+        if (u?.is_anonymous && !await getSetting("company_binding", null)) {
+          try { if (!await enterShopCode(q => askText(q, "", { secret: true }))) return; }
+          catch (x: any) { toast(x?.message || "Could not check the code", true); return; }
+        }
+        await syncNow(); toast("This computer is connected — stock, bills and the bill reader are on"); onDone?.();
+      }
       else toast(!navigator.onLine ? "No internet — it will connect by itself when the internet is back" : "The cloud did not let this computer in by itself. Use the owner's email login below.", true);
     } finally { setJoining(false); }
   };
