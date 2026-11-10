@@ -736,6 +736,10 @@ export default function Billing({ args }: { args: string[] }) {
         <label className="f" style={{ minWidth: 130 }}>Salesman
           <input className="in" list="pos-names-salesman" autoComplete="off" placeholder="Type or pick" value={b.salesman || ""} onChange={e => set({ salesman: e.target.value.toUpperCase().slice(0, 60) })} />
           <datalist id="pos-names-salesman">{staff.map(s => <option key={s.id} value={s.name} />)}</datalist></label>
+        {/* Owner, 10 Nov (voice): "on the mobile there is no place to write the narration" — on a phone the box at the foot
+            of the bill sits under the Save bar and the bottom tabs. Phones get it here, under the customer. */}
+        {small && <label className="f pos-remarks-top">Remarks / narration
+          <textarea ref={remarksRef} className="in" rows={2} aria-label="Remarks (phone)" value={b.remarks} onChange={e => set({ remarks: e.target.value })} placeholder="Narration, reason, what is pending…" /></label>}
         {/* Owner, 25 Oct (voice): "after 3–4 scans the lines go below and I scroll up and down — at least 8–10 lines
             must be in front of me". The rarely-changed fields fold away under "More" so the lines get the screen. */}
         <button type="button" className="linkbtn sm" aria-expanded={moreOpen} onClick={() => { setMoreOpen(o => !o); void setSetting("bill_more_open", !moreOpen); }}>{moreOpen ? "Less ▴" : `More ▾${[b.helper, b.packed_by, b.checked_by].filter(Boolean).length ? " (" + [b.helper, b.packed_by, b.checked_by].filter(Boolean).length + ")" : ""}`}</button>
@@ -852,8 +856,8 @@ export default function Billing({ args }: { args: string[] }) {
             </span>
             {lastSaved && (priv || !isEstimate(lastSaved)) && <button className="linkbtn sm" onClick={() => go("bills/" + lastSaved.id)}>View saved {lastSaved.bill_type === "estimate" ? "estimate" : lastSaved.bill_type === "gst" ? "tax invoice" : "challan"} {lastSaved.no}</button>}
           </div></div>
-          <div className="counter-box-tools stack">          <div className="pos-notes">
-            <label className="f"><textarea ref={remarksRef} className="in" rows={2} aria-label="Remarks" value={b.remarks} onChange={e => set({ remarks: e.target.value })} placeholder="Remarks / narration — required before Hold" /></label>
+          <div className="counter-box-tools stack">          <div className={"pos-notes" + (small ? " pos-notes-phone" : "")}>
+            <label className="f"><textarea ref={small ? undefined : remarksRef} className="in" rows={2} aria-label="Remarks" value={b.remarks} onChange={e => set({ remarks: e.target.value })} placeholder="Remarks / narration — required before Hold" /></label>
             {paymentNarration(b.payments) && <div className="xs payment-narration" aria-label="Automatic payment narration">{paymentNarration(b.payments)}</div>}
           </div>
 

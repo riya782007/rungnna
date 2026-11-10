@@ -5,10 +5,11 @@ import { startSync, onSync, type SyncState } from "./lib/sync";
 import { warmScanner } from "./components/Scanner";
 import { SearchPalette } from "./components/Search";
 import { Icon } from "./components/Icon";
-import { AskHost } from "./components/AskHost";
+import { AskHost, askText } from "./components/AskHost";
 import { ViewCodeGate } from "./components/ViewCodeGate";
 import { companiesFor, companyKind } from "./lib/stores";
-import { setCompanyKind } from "./lib/scope";
+import { setCompanyKind, MAIN_STORE } from "./lib/scope";
+import { hasMasterCode, entryFor, applyCompany } from "./lib/companies";
 import { setCompanyOpen } from "./lib/privacy";
 import { useShopQueue, isPhoneLike } from "./lib/print-queue";
 import { setEstimatesOnly } from "./lib/company-kind";
@@ -156,6 +157,18 @@ function Shell() {
   if (!me) return <WhoAreYou />;
 
   const ok = (r: string) => routeOk(me, r);
+  const openMaster = async () => {
+    if (!me || me.role !== "owner") return;
+    if (await hasMasterCode()) {
+      const code = await askText("Master code — opens Companies & transfers", "", { secret: true });
+      if (!code) return;
+      const e = await entryFor(code);
+      if (!e?.master) return toast("That is not the master code", true);
+    }
+    await applyCompany(MAIN_STORE);
+    setMe(me, { store: MAIN_STORE, master: true });
+    go("stores");
+  };
   /* Owner, 27 Oct: "search bar option to be allowed or not" — search shows only for people given it (Roles / person ticks). */
   const canSearch = can(me, "search.use");
   const visible = SECTIONS.filter(s => s.tabs ? s.tabs.some(([k]) => ok(k)) : ok(s.key));
@@ -211,6 +224,10 @@ function Shell() {
         {visible.map(s => <a key={s.key} href={hrefOf(s)} title={t(s.label)} aria-label={t(s.label) + (s.key === "sell" && waiting ? ` · ${waiting} waiting` : "")} className={"nav" + (sec === s.key ? " on" : "")}><Icon n={s.icon} /><span className="grow">{t(s.label)}</span>{s.key === "sell" && waiting > 0 && <span className="navbadge" title={`${waiting} trade order${waiting > 1 ? "s" : ""} / dealer sign-up${waiting > 1 ? "s" : ""} waiting`}>{waiting > 9 ? "9+" : waiting}</span>}</a>)}
         {companies.length > 1 && <label className="f store-switch">Company<select className="in" value={store} onChange={e => void switchStore(e.target.value)}>{companies.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>}
         {master && <a className="nav" href="#/stores" title="Companies and transfers" aria-label="Companies and transfers"><Icon n="stock" /><span>Companies &amp; transfers</span></a>}
+        {/* Owner, 10 Nov (photo, "Company and Transfers?"): it showed only after signing in again with the master code, so it
+            was never there. The owner always has it: one tap asks the master code (none set yet: opens straight away) and
+            the master view opens without signing out. Nobody else sees it. */}
+        {!master && me?.role === "owner" && <button type="button" className="nav" title="Companies and transfers" aria-label="Companies and transfers" onClick={() => void openMaster()}><Icon n="stock" /><span>Companies &amp; transfers</span></button>}
         {can(me, "bank.reconcile") && <a className="nav" href="#/bank" title="Bank reconciliation" aria-label="Bank reconciliation"><Icon n="sales" /><span>Bank reconciliation</span></a>}
         <div className="railfoot">
           <Status />

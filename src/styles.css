@@ -1563,3 +1563,8 @@ html[data-company="gst"] .purchase-photo .note.warn{color:var(--warn)} html[data
 .carton-t .carton-photo .btn{padding-inline:8px}
 /* the camera window sits above the print panel, so its Take photo / Skip / Done are never covered (6 Nov) */
 .modal:has(.customer-camera){z-index:95}
+/* phone (10 Nov): narration sits under the customer at the top; the foot box keeps only the automatic UPI narration */
+.pos-remarks-top{width:100%;flex:1 1 100%;min-width:100%;order:9}
+.pos-remarks-top textarea.in{width:100%;min-height:52px;resize:vertical}
+.pos-notes-phone label.f{display:none}
+button.nav{border:0;background:none;font:inherit;cursor:pointer;width:100%;text-align:left}
