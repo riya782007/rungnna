@@ -12,8 +12,12 @@ import "@fontsource/roboto-condensed/latin-500.css";
 import "@fontsource/roboto-condensed/latin-700.css";
 import "./styles.css";
 import { startUpdates } from "./lib/update";
+import { finishEmailLink } from "./lib/sync";
 
 startUpdates();
 setTimeout(() => sessionStorage.removeItem("rj_reloaded"), 15000);
 const pr = document.createElement("div"); pr.id = "printroot"; document.body.appendChild(pr);
-createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);
+const start = () => createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);
+// an emailed sign-in link brings the login in the address: take it before the screens read the address
+if (/access_token=|error_description=/.test(location.hash)) finishEmailLink().catch(() => {}).finally(start);
+else start();

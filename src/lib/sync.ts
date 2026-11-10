@@ -56,8 +56,68 @@ export async function signIn(email: string, password: string) {
   const c = await sb(); if (!c) throw new Error("Cloud is not connected yet");
   const { error } = await c.auth.signInWithPassword({ email, password });
   if (error) throw new Error(authHelp(error.message) || error.message);
+  await rememberEmail(email);
   syncNow();
 }
+/* Owner, 10 Nov (voice + photo): "it asks for the password — I type it from memory and it says email and password
+   are not right". A second computer (DIWUJE) could not connect because nobody remembered the shop login's password.
+   Now he never needs to remember it:
+   - on a computer that is already connected, "Change password" sets a new one (the old one is not asked);
+   - on a computer that is not, "Forgot password?" emails a sign-in code (or link) to the shop's email.
+   The email used last is remembered on the computer, so it is filled in by itself. */
+const LOGIN_EMAIL = "shop_login_email";
+export const rememberedEmail = () => getSetting<string>(LOGIN_EMAIL, "");
+const rememberEmail = (email?: string | null) => email ? setSetting(LOGIN_EMAIL, email) : Promise.resolve();
+
+/** Supabase's email-sending refusals, in words for the shop. */
+export function codeHelp(msg: string): string {
+  const m = msg || "";
+  if (/not authori[sz]ed|email_address_not_authorized/i.test(m))
+    return "The cloud is not allowed to send email to this address yet (Riya switches email sending on once). Until then: on the computer that is already connected, open Settings › Backup › Change password, set a new one, and use it here.";
+  if (/signups? not allowed|user not found|otp_disabled/i.test(m))
+    return "There is no shop login with this email. Use the same email as on the connected computer (it is shown there under Settings › Backup).";
+  if (/rate limit|over_email_send_rate_limit|security purposes|seconds/i.test(m))
+    return "An email was sent a moment ago — wait a minute, check the inbox (and Spam), then try again.";
+  if (/expired|invalid/i.test(m)) return "That code is not right or has expired. Press “Send code” again and use the newest email.";
+  return authHelp(m) || m;
+}
+
+/** Emails a one-time sign-in code (and link) to an existing shop login. Never makes a new login. */
+export async function sendLoginCode(email: string) {
+  const c = await sb(); if (!c) throw new Error("Cloud is not connected yet");
+  const { error } = await c.auth.signInWithOtp({ email, options: { shouldCreateUser: false, emailRedirectTo: location.origin + location.pathname } });
+  if (error) throw new Error(codeHelp(error.message));
+}
+/** Signs in with the code from that email. */
+export async function signInWithCode(email: string, code: string) {
+  const c = await sb(); if (!c) throw new Error("Cloud is not connected yet");
+  const { error } = await c.auth.verifyOtp({ email, token: code.replace(/\s+/g, ""), type: "email" });
+  if (error) throw new Error(codeHelp(error.message));
+  await rememberEmail(email); await markShopDevice();
+  syncNow();
+}
+/** On a connected computer: a new password for the shop login, without the old one. */
+export async function changePassword(password: string) {
+  const c = await sb(); if (!c) throw new Error("Cloud is not connected yet");
+  if (password.length < 8) throw new Error("Use at least 8 characters");
+  const { error } = await c.auth.updateUser({ password });
+  if (!error) return;
+  if (/reauthenticat|nonce/i.test(error.message))
+    throw new Error("The cloud wants a fresh sign-in before changing the password. Use “Forgot password?” on this computer once, then change it.");
+  if (/same|different from the old/i.test(error.message)) return;   // already this password
+  throw new Error(authHelp(error.message) || error.message);
+}
+/** The cloud sent the browser back from an emailed sign-in link (#access_token=… in the address). */
+export async function finishEmailLink(): Promise<boolean> {
+  if (!/access_token=|error_description=/.test(location.hash)) return false;
+  const c = await sb(); if (!c) return false;
+  const { data } = await c.auth.getSession();          // reads and clears the address
+  if (/access_token=|error_description=/.test(location.hash)) history.replaceState(null, "", location.pathname + location.search + "#/settings");
+  if (!data.session) return false;
+  await rememberEmail(data.session.user.email); await markShopDevice();
+  return true;
+}
+
 export async function signOut() { const c = await sb(); await setSetting("shop_device", false); await c?.auth.signOut(); emit({ user: undefined }); }
 
 /* Owner, 22 Oct (voice note): "it keeps asking me to create the company again and again — three times now".

@@ -9,7 +9,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, setSetting, deviceId, uid, type Staff } from "../lib/db";
 import { Head } from "../components/common";
 import { useApp, toast, newStaff, SEED_OWNER, logoutEveryone } from "../lib/app";
-import { onSync, signIn, signOut, syncNow, exportAll, importAll, createShopLogin, sb, ensureSession, markShopDevice, refreshPeople, joinCompany, type SyncState } from "../lib/sync";
+import { onSync, signIn, signOut, syncNow, exportAll, importAll, createShopLogin, sb, ensureSession, markShopDevice, refreshPeople, joinCompany, rememberedEmail, sendLoginCode, signInWithCode, changePassword, type SyncState } from "../lib/sync";
 import type { Pattern } from "../lib/parse";
 import { when } from "../lib/format";
 import { getShop, saveShop, counterCode, DEFAULT_SHOP, type Shop } from "../lib/billing";
@@ -176,7 +176,8 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
             <div className="sm mut">{sync?.pending || 0} changes waiting{sync?.last ? ` · last saved ${when(sync.last)}` : ""}</div>
             {sync?.error && <div className="note bad">{sync.error}</div>}
             <StuckChanges />
-            {sync?.user ? <div className="row"><span className="sm grow">Connected as <b>{sync.user}</b></span><button className="btn sm" disabled={!sync.cloudEnabled} onClick={() => syncNow()}>Sync now</button>{admin && <button className="btn sm" onClick={signOut}>Disconnect</button>}</div>
+            {sync?.user ? <><div className="row"><span className="sm grow">Connected as <b>{sync.user}</b></span><button className="btn sm" disabled={!sync.cloudEnabled} onClick={() => syncNow()}>Sync now</button>{admin && /@/.test(sync.user) && <ChangePassword email={sync.user} />}{admin && <button className="btn sm" onClick={signOut}>Disconnect</button>}</div>
+              {admin && /@/.test(sync.user) && <div className="xs mut">Another computer asks for this email's password? Press “Change password” here and set a new one — the old one is not needed — or use “Forgot password?” there to get a code on {sync.user}.</div>}</>
               : <ShopLogin />}
           </div></div>
         {boss && <div className="card"><header><h3>Backup file</h3></header>
@@ -231,6 +232,23 @@ function OperationsCard({ by }: { by: string }) {
   );
 }
 
+/* On a connected computer: a new password for the shop login, the old one not asked (owner, 10 Nov). */
+function ChangePassword({ email }: { email: string }) {
+  const [busy, setBusy] = useState(false);
+  return <button className="btn sm" disabled={busy} onClick={async () => {
+    const pw = await askText(`New password for ${email} (at least 8 letters/numbers)`, "", { secret: true });
+    if (!pw) return;
+    if (pw.length < 8) return toast("Use at least 8 characters", true);
+    const again = await askText("Type the new password once more", "", { secret: true });
+    if (again === null || again === undefined || again === "") return;
+    if (again !== pw) return toast("The two passwords are not the same — nothing changed", true);
+    setBusy(true);
+    try { await changePassword(pw); toast("Password changed. Use it on the other computers with " + email); }
+    catch (x: any) { toast(!navigator.onLine ? "No internet — try again when it is back" : x?.message || "Could not change the password", true); }
+    finally { setBusy(false); }
+  }}>{busy ? "Saving…" : "Change password"}</button>;
+}
+
 export function ShopLogin({ onDone, emailOnly }: { onDone?: () => void; emailOnly?: boolean }) {
   // no made-up default: Supabase only accepts an address that can really receive mail
   const [email, setEmail] = useState("");
@@ -238,6 +256,23 @@ export function ShopLogin({ onDone, emailOnly }: { onDone?: () => void; emailOnl
   const [busy, setBusy] = useState(false);
   const [joining, setJoining] = useState(false);
   const [first, setFirst] = useState(false);
+  const [codeSent, setCodeSent] = useState(false);
+  const [code, setCode] = useState("");
+  useEffect(() => { rememberedEmail().then(e => { if (e) setEmail(v => v || e); }).catch(() => {}); }, []);
+  const emailOk = /^\S+@\S+\.\S+$/.test(email.trim());
+  const sendCode = async () => {
+    if (!emailOk) return toast("Type the shop's email first", true);
+    setBusy(true);
+    try { await sendLoginCode(email.trim()); setCodeSent(true); toast("Code sent — open the email on your phone and type the code here"); }
+    catch (x: any) { toast(!navigator.onLine ? "No internet — try again when it is back" : x?.message || "Could not send the code", true); }
+    finally { setBusy(false); }
+  };
+  const useCode = async () => {
+    setBusy(true);
+    try { await signInWithCode(email.trim(), code); toast("Computer connected — you can set a new password under Settings › Backup"); onDone?.(); }
+    catch (x: any) { toast(x?.message || "Could not sign in", true); }
+    finally { setBusy(false); }
+  };
   /* Owner, 22 Oct: "it keeps asking me to create the company again". This form used to be the only way
      to connect, and a wrong password ticked "First time" by itself, so every computer made a brand-new
      login. A computer now connects with one tap (and by itself after the entry code); the email login
@@ -283,8 +318,19 @@ export function ShopLogin({ onDone, emailOnly }: { onDone?: () => void; emailOnl
             <input type="checkbox" checked={first} onChange={e => setFirst(e.target.checked)} />
             <span>Make a new email login (not needed if the shop already has one)</span>
           </label>
-          <button className="btn" disabled={busy || !pw || !/^\S+@\S+\.\S+$/.test(email.trim())}>{busy ? (first ? "Making…" : "Connecting…") : first ? "Make the login" : "Sign in"}</button>
+          <button className="btn" disabled={busy || !pw || !emailOk}>{busy ? (first ? "Making…" : "Connecting…") : first ? "Make the login" : "Sign in"}</button>
         </form>
+        {!first && <div className="stack login-code" style={{ marginTop: 10 }}>
+          <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+            <span className="sm grow"><b>Forgot password?</b> Get a sign-in code on this email — no password needed.</span>
+            <button type="button" className="btn sm" disabled={busy || !emailOk} onClick={() => void sendCode()}>{codeSent ? "Send again" : "Send code"}</button>
+          </div>
+          {codeSent && <form className="row" style={{ gap: 8 }} onSubmit={e => { e.preventDefault(); void useCode(); }}>
+            <input className="in grow" inputMode="numeric" autoComplete="one-time-code" placeholder="Code from the email" value={code} onChange={e => setCode(e.target.value.replace(/\D/g, "").slice(0, 10))} />
+            <button className="btn p" disabled={busy || code.length < 6}>Sign in with code</button>
+          </form>}
+          {codeSent && <div className="xs mut">The email says “Your Magic Link” or “sign-in code”. Type the code, or open its link on this computer.</div>}
+        </div>}
       </details>
     </div>
   );
