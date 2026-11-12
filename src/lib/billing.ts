@@ -8,6 +8,7 @@ import { rupees, billAmount } from "./format";
 import { isOpen, isEstimate } from "./privacy";
 import { setTagsSold } from "./rfid";
 import { assertUnlocked } from "./finance";
+import { confirmAsk } from "./confirm-delete";
 import { currentStore, inStore, assertStoreRow, storeLocations } from "./stores";
 import { fillBillNames } from "./billing-products";
 import { validatePosLines } from "./pos";
@@ -435,17 +436,25 @@ export function billSummary(b: Bill, shop: Shop) {
   const billAmount = (value: number) => documentAmount(b, value);
   const d = isSale(b) ? due(b) : 0;
   const L = [`*${shop.name}*`, `${docName(b)} ${b.no} · ${new Date(b.at).toLocaleDateString("en-IN")}`,
-    `${b.items.length} items · ${b.total_qty} pcs · ${b.box_count} box${b.box_count === 1 ? "" : "es"}`,
-    b.bill_type === "return" ? `*Credit: ${billAmount(b.net)}*` : `*Total: ${billAmount(b.net)}*`];
-  if (b.paid) L.push(`Paid: ${billAmount(b.paid)}`);
-  if (d > 0) L.push(`*Balance due: ${billAmount(d)}*`);
-  if (isSale(b) && b.prev_due) L.push(`Total due with old balance: ${billAmount(b.prev_due + d)}`);
+    `${b.items.length} items · ${b.total_qty} pcs · ${b.box_count} box${b.box_count === 1 ? "" : "es"}`];
+  /* Owner, 12 Nov (photo + voice): "Total 212.20, Balance due 106.00" with no word of the 50% — the message shows
+     the same rows as the bill: amount, discount, net, then what was paid and what is left. */
+  if (b.discount) {
+    L.push(`Amount: ${billAmount(b.gross)}`);
+    L.push(`Discount${b.discount_pct ? " " + b.discount_pct + "%" : ""}${b.less_pct ? " + " + b.less_pct + "% less" : ""}: -${billAmount(b.discount)}`);
+  }
+  if (b.packing) L.push(`Packing: ${billAmount(b.packing)}`);
+  if (b.gst) L.push(`GST${gstLabel(b)}: ${billAmount(b.gst)}`);
+  L.push(b.bill_type === "return" ? `*Credit: ${billAmount(b.net)}*` : `*${b.discount || b.packing || b.gst ? "Net" : "Total"}: ${billAmount(b.net)}*`);
+  if (b.advance) L.push(`Advance: -${billAmount(b.advance)}`);
+  if (b.paid) L.push(`Paid: -${billAmount(b.paid)}`);
+  if (d > 0 && (b.advance || b.paid)) L.push(`Balance due: ${billAmount(d)}`);
+  if (isSale(b) && b.prev_due) L.push(`Old balance: ${billAmount(b.prev_due)}`, `Total due: ${billAmount(b.prev_due + d)}`);
   const qr = isSale(b) && d > 0 ? qrAccount(b, shop) : undefined;
   if (qr) L.push(`Pay by UPI: ${upiLink(qr, shop.name, d, b.no)}`);
   L.push("", "Full bill in the picture. Thank you!");
   return L.join("\n");
 }
-export const PASTE_HINT = "Bill picture copied — in the WhatsApp chat press Ctrl + V, then Enter to send it";
 /** Puts the bill picture on this computer's clipboard (Ctrl+V pastes it into the WhatsApp chat). */
 async function copyPicture(blob: Blob): Promise<boolean> {
   try {
@@ -559,7 +568,11 @@ export async function shareBill(b: Bill, shop: Shop): Promise<"shared" | "cancel
     if (nav.canShare?.({ files: [file] })) { await nav.share({ files: [file], text: billSummary(b, shop) }); return "shared"; }
   } catch (e: any) { if (e?.name === "AbortError") return "cancelled"; }
   // a computer: the bill picture goes on the clipboard and the chat opens with the short message; Ctrl+V adds the picture
+  /* Owner, 12 Nov (photo): the message went but the picture did not — nobody saw the "press Ctrl + V" note, because
+     WhatsApp opened on top at once. Now the note comes first, and WhatsApp opens from its button. */
   if (blob && await copyPicture(blob)) {
+    if (!await confirmAsk("The bill picture is copied. When WhatsApp opens, press Ctrl + V in the chat to add the picture, then press Enter to send.",
+      { title: "Send the bill picture", yes: "Open WhatsApp", no: "Cancel", startYes: true })) return "cancelled";
     window.open(waLink(b.party_phone, billSummary(b, shop)), "_blank");
     return "pasted";
   }

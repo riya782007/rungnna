@@ -21,7 +21,7 @@ import { ShopDetailsAsk, shopNeedsTaxDetails } from "../components/ShopDetailsAs
 import { NameItemCodes, unnamedCodes } from "../components/NameItemCodes";
 import { isRfidTag, normTag, soldBill, TagSet, Recent } from "../lib/rfid";
 import { PinField, pinCity } from "../components/PinField";
-import { discError, newBill, withEstimateDiscount, lineFrom, priceFor, totals, gstLabel, fixLine, finalize, due, getShop, newParty, partyDue, shareBill, PASTE_HINT, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
+import { discError, newBill, withEstimateDiscount, lineFrom, priceFor, totals, gstLabel, fixLine, finalize, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
 import { voiceBill } from "../lib/ai";
 import { useApp, toast, beep, go } from "../lib/app";
 import { can } from "../lib/roles";
@@ -555,7 +555,7 @@ export default function Billing({ args }: { args: string[] }) {
       const saved = await db.bills.get(b.id);
       if (saved && bags) setBagBill(saved);
       if (saved && print) printWithSlips(saved);
-      if (saved && share && await shareBill(saved, shop) === "pasted") toast(PASTE_HINT);
+      if (saved && share) await shareBill(saved, shop);
       return;
     }
     /* Owner, 10 Nov (voice): "I sent the bill and printed it, and the 50% discount was left off — I wrote it by hand."
@@ -624,7 +624,7 @@ export default function Billing({ args }: { args: string[] }) {
     await setSetting("draft_bill", null);
     if (bags) setBagBill(done);
     if (print) printWithSlips(done);
-    if (share && await shareBill(done, shop) === "pasted") toast(PASTE_HINT);
+    if (share) await shareBill(done, shop);
     setB(withEstimateDiscount(newBill(me?.id || "", shop, b.bill_type), shop)); setBox(1);
     setNextNo("");
     } catch (e: any) { toast(e.message || "Could not save bill", true); }

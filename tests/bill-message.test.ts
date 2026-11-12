@@ -13,6 +13,14 @@ describe("WhatsApp bill message", () => {
     expect(s).toContain("32 items · 64 pcs");
     expect(s).not.toContain("EARING");
   });
+  it("shows the discount, the advance and what is left, like the bill (12 Nov)", () => {
+    const d = totals({ ...b, discount_pct: 50, advance: 5000 }, "Delhi");
+    const s = billSummary(d, DEFAULT_SHOP);
+    expect(s).toMatch(/Discount 50%: -/);
+    expect(s).toMatch(/\*Net: /);
+    expect(s).toMatch(/Advance: -/);
+    expect(s).toMatch(/\nBalance due: /);
+  });
   it("has no emoji that a computer cannot show", () => {
     for (const s of [billText(b, DEFAULT_SHOP), billSummary(b, DEFAULT_SHOP)]) expect(s).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
   });

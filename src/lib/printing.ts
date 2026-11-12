@@ -31,6 +31,9 @@ export function receiptFeed(value: unknown): number {
    (Settings › Printing › Blank paper after the bill, 15 mm unless changed), so it always comes fully out. */
 export const slipFeed = (feed: number, _cut?: ReceiptCut) => feed;
 
+/** Wait between one roll slip and the next print job (bill → bag tag → cash slip). */
+export const SLIP_GAP_MS = 1500;
+
 export async function printDocument(source: Document, frame: () => Promise<void>, onDone = () => {}, cancelled = () => false) {
   const content = source.getElementById("printroot");
   if (!content?.textContent?.trim() || !content.children.length) throw new Error("No printable content. Close print and try again.");
@@ -38,7 +41,12 @@ export async function printDocument(source: Document, frame: () => Promise<void>
   host.title = "Receipt / labels";
   host.style.cssText = "position:fixed;left:-10000px;top:0;width:800px;height:600px;border:0";
   source.body.appendChild(host);
-  const remove = () => host.remove();
+  /* Owner, 12 Nov (photos + video): a bill sometimes stopped after a few lines, the rest of the paper blank, and
+     printed whole when printed again. The hidden page was taken away as soon as the print dialog closed, and at once
+     the next slip (bag tag, cash slip) started — while the printer driver could still be reading the bill from it.
+     A page that was sent to print now stays for a minute, and the next slip waits a moment. */
+  let sent = false;
+  const remove = () => { if (sent) setTimeout(() => host.remove(), 60_000); else host.remove(); };
   try {
     const doc = host.contentDocument!, win = host.contentWindow!;
     // An empty iframe defaults to quirks mode. Match the app's standards mode
@@ -84,7 +92,7 @@ export async function printDocument(source: Document, frame: () => Promise<void>
       try { await native.printHtml({ html, name: source.title || "Rungnna bill" }); } finally { remove(); onDone(); }
       return remove;
     }
-    win.addEventListener("afterprint", () => { remove(); onDone(); }, { once: true });
+    win.addEventListener("afterprint", () => { sent = true; remove(); setTimeout(onDone, SLIP_GAP_MS); }, { once: true });
     win.focus(); win.print();
     return remove;
   } catch (e) { remove(); throw e; }

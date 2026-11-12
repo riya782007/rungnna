@@ -20,6 +20,7 @@ function fixture() {
 }
 it("copies only printable content into a separate document and keeps it until afterprint", async () => {
   const x = fixture(), done = vi.fn();
+  vi.useFakeTimers({ toFake: ["setTimeout"] });
   await printDocument(x.source, async () => {}, done);
   expect(x.doc.open).toHaveBeenCalledOnce();
   expect(x.doc.write).toHaveBeenCalledWith("<!doctype html><html><head></head><body></body></html>");
@@ -28,7 +29,11 @@ it("copies only printable content into a separate document and keeps it until af
   expect(x.body).toEqual([x.clone]); expect(x.clone.textContent).toBe("BALI receipt");
   expect(x.clone.style.cssText).toContain("display:block!important");
   expect(x.win.print).toHaveBeenCalledOnce(); expect(x.host.remove).not.toHaveBeenCalled();
-  x.listeners.get("afterprint")!(); expect(done).toHaveBeenCalledOnce(); expect(x.host.remove).toHaveBeenCalledOnce();
+  // 12 Nov: the driver may still be reading the printed page, and the next slip waits a moment
+  x.listeners.get("afterprint")!(); expect(done).not.toHaveBeenCalled(); expect(x.host.remove).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(1500); expect(done).toHaveBeenCalledOnce(); expect(x.host.remove).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(60_000); expect(x.host.remove).toHaveBeenCalledOnce();
+  vi.useRealTimers();
 });
 it("does not print empty content or an effect cancelled while assets were loading", async () => {
   const x = fixture(); x.content.textContent = "";
