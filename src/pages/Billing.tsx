@@ -381,6 +381,18 @@ export default function Billing({ args }: { args: string[] }) {
   const unlinked = useRef(new Recent());
   useEffect(() => { tagsRef.current = new TagSet(b?.rfid_tags || []); }, [b?.id]);
 
+  /* Retail: the shop's usual estimate discount (50%) is for wholesale rates, so a retail bill starts without it;
+     back to wholesale puts it back. Lines already on the bill keep their rates. */
+  function setLevel(level: "wholesale" | "retail") {
+    setB(x => {
+      if (!x || (x.price_level || "wholesale") === level) return x;
+      const usual = x.bill_type === "estimate" && x.status !== "final";
+      if (level === "retail") return { ...x, price_level: level, ...(usual && x.discount_pct === (shop.est_disc_pct || 0) && (x.less_pct || 0) === (shop.est_less_pct || 0) ? { discount_pct: 0, less_pct: 0, discount: 0 } : {}) };
+      return usual && !x.discount_pct && !x.less_pct ? withEstimateDiscount({ ...x, price_level: level }, shop) : { ...x, price_level: level };
+    });
+    if (level === "retail") toast("Retail bill: scan an item, then type its retail rate");
+    setTimeout(() => scanRef.current?.focus(), 0);
+  }
   function addProduct(p: Product, pkts = 1, pieces = 0, rate = 0, destination = { billId: billRef.current?.id, box: boxRef.current }) {
     if (savingRef.current || switchingRef.current || destination.billId !== billRef.current?.id) return false;
     const repeated = billRef.current?.items.some(l => l.product_id === p.id && l.box_no === destination.box);
@@ -497,9 +509,22 @@ export default function Billing({ args }: { args: string[] }) {
     const level = billRef.current?.price_level || "wholesale";
     const billed = priceFor(p, level);
     const useSticker = printed > 0 && level !== "retail" && printed !== billed;
-    if (!addProduct(p, 1, 0, useSticker ? printed / 100 : 0, destination)) { beep(false); toast("Bill changed or saving — scan this label again", true); return "Bill changed or saving — scan again"; }
+    // Retail (owner, 12 Nov): the rate is typed for each new item; the same item scanned again keeps the rate typed
+    let retail = 0;
+    if (level === "retail") {
+      const same = billRef.current?.items.find(l => l.product_id === p.id && l.rate > 0);
+      if (same) retail = same.rate / 100;
+      else {
+        const typed = await askText(`Retail rate for ${label(p)} — ₹ for one piece`, p.retail_rate ? String(p.retail_rate / 100) : "", { numeric: true });
+        if (typed === null) { scanRef.current?.focus(); return "Not added"; }
+        retail = Number(typed.replace(/[^\d.]/g, ""));
+        if (!(retail > 0)) { beep(false); toast("Type the retail rate, e.g. 150 — then scan the item again", true); scanRef.current?.focus(); return "No rate"; }
+        setTimeout(() => scanRef.current?.focus(), 0);
+      }
+    }
+    if (!addProduct(p, 1, 0, retail || (useSticker ? printed / 100 : 0), destination)) { beep(false); toast("Bill changed or saving — scan this label again", true); return "Bill changed or saving — scan again"; }
     if (useSticker) toast(`Billed at the sticker's rate ${billAmount(printed)} — the product list says ${billed ? billAmount(billed) : "no rate"} for ${label(p)}. Correct it in Products if the sticker is old.`, true);
-    else if (printed && billed && printed !== billed) toast(`Check rate: sticker says ${billAmount(printed)}, bill uses ${billAmount(billed)} for ${label(p)}`, true);
+    else if (level !== "retail" && printed && billed && printed !== billed) toast(`Check rate: sticker says ${billAmount(printed)}, bill uses ${billAmount(billed)} for ${label(p)}`, true);
     // show exactly what the QR carried, so a mislabelled sticker is visible at the counter
     if (["shop label", "rungnna"].includes(parsed.how)) {
       const means = parsed.icode ? codeInfo(parsed.icode, readItemMap(itemNames?.value))?.name : parsed.item?.toUpperCase();
@@ -560,7 +585,7 @@ export default function Billing({ args }: { args: string[] }) {
     }
     /* Owner, 10 Nov (voice): "I sent the bill and printed it, and the 50% discount was left off — I wrote it by hand."
        An estimate with no discount at all, in a shop whose estimates always carry one, asks once before saving. */
-    if (!fixed && b.bill_type === "estimate" && !t.discount && !b.discount_pct && !b.less_pct && t.items.length
+    if (!fixed && b.bill_type === "estimate" && b.price_level !== "retail" && !t.discount && !b.discount_pct && !b.less_pct && t.items.length
       && ((shop.est_disc_pct || 0) > 0 || (shop.est_less_pct || 0) > 0)) {
       const usual = [shop.est_disc_pct ? shop.est_disc_pct + "%" : "", shop.est_less_pct ? shop.est_less_pct + "% less" : ""].filter(Boolean).join(" + ");
       if (await confirmAsk(`This estimate has no discount. Put the usual ${usual} on it before saving?`,
@@ -742,6 +767,11 @@ export default function Billing({ args }: { args: string[] }) {
           </div></div>}
         <div className="pos-no"><span className="xs mut">{b.no ? "Bill no" : "Next no"}</span><b className="mono">{b.no || nextNo}</b>
           {b.bill_type === "estimate" && (moreOpen || !!b.inv_no) && <input className="in xs mono" style={{ marginTop: 4, maxWidth: 170 }} aria-label="Invoice no. for this estimate" placeholder="Invoice no. (optional)" value={b.inv_no || ""} onChange={e => set({ inv_no: e.target.value.toUpperCase().slice(0, 24) })} />}</div>
+        {/* Owner, 12 Nov (voice): a retail customer's bill — tap Retail, scan, and type the rate we give for each item */}
+        {b.bill_type !== "challan" && <div className="seg pos-level" role="group" aria-label="Rates">
+          <button aria-pressed={(b.price_level || "wholesale") !== "retail"} onClick={() => setLevel("wholesale")}>Wholesale</button>
+          <button aria-pressed={b.price_level === "retail"} onClick={() => setLevel("retail")} title="Scan, then type the retail rate for each item">Retail</button>
+        </div>}
         <button className="pos-cust" onClick={() => setCustOpen(true)}>
           <span className="xs mut">Client name</span>
           <b>{b.party_name || "Walk-in / cash"}</b>

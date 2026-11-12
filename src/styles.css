@@ -1569,3 +1569,4 @@ html[data-company="gst"] .purchase-photo .note.warn{color:var(--warn)} html[data
 .pos-notes-phone label.f{display:none}
 button.nav{border:0;background:none;font:inherit;cursor:pointer;width:100%;text-align:left}
 .pin-field .pin-hits{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.pin-field .pin-hits .chip{height:28px;padding:0 10px;font-size:12px}
+.pos-level{flex:none}.pos-level button{padding:0 12px}
