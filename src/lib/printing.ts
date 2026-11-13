@@ -19,7 +19,10 @@ export function receiptCutSetup(cut: ReceiptCut) {
 /* Blank paper after the last line of a receipt (owner's photo, 26 Oct: the tear went through "Box qty" and the
    totals). The print head sits behind the tear bar / cutter, so without this the last lines are still inside the
    printer when the slip is torn off. */
-export const RECEIPT_FEEDS = [0, 10, 15, 20, 25, 30, 40] as const;
+/* Owner, 13 Nov (photo + voice): "the paper comes out empty first, then the bill — and the last lines stay inside;
+   with the cutter they are cut". The blank at the start is the paper between his printer's head and its cutter
+   (about 5 cm on the photo), so the blank after the bill must be at least that long: 50 and 60 mm added. */
+export const RECEIPT_FEEDS = [0, 10, 15, 20, 25, 30, 40, 50, 60] as const;
 export const DEFAULT_RECEIPT_FEED = 25;   // 3 Nov: 15 mm left the totals inside on his printer
 export function receiptFeed(value: unknown): number {
   const n = Number(value);
