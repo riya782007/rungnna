@@ -5,12 +5,13 @@ import { confirmDelete } from "../lib/confirm-delete";
 import { SelectAll } from "../components/SelectAll";
 import { useEffect, useMemo, useState } from "react";
 import { fillBillNames } from "../lib/billing-products";
+import { documentAmount } from "../lib/estimate-display";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, getSetting, type Bill, type BillType, type Payment } from "../lib/db";
 import { BagLabels, ManyBagLabels } from "../components/BagLabels";
 import { GstBill } from "../components/GstBill";
 import { inStore } from "../lib/scope";
-import { due, getShop, voidBill, convertToGst, shareBill, billText, waLink, deleteEstimates, totals, gstLabel, isSale, docName, docShort, DEFAULT_SHOP, type Shop } from "../lib/billing";
+import { priceFor, due, getShop, voidBill, convertToGst, shareBill, billText, waLink, deleteEstimates, totals, gstLabel, isSale, docName, docShort, DEFAULT_SHOP, type Shop } from "../lib/billing";
 import { canMerge, mergeable, mergeBills, mergeLines, splitBill, splittable, returnable, returnableBill, buildReturn, saveReturn } from "../lib/docs";
 import { usePrivate, visibleBill, lockNow, isEstimate } from "../lib/privacy";
 import { Icon } from "../components/Icon";
@@ -158,6 +159,26 @@ function MergeDialog({ sources, onClose, onDone }: { sources: Bill[]; onClose: (
   );
 }
 
+/* Owner, 13 Nov (voice): "on a retail bill I should see what the wholesale rate was — when I am not at the shop I
+   want to see it". The owner sees each item's wholesale rate beside the retail rate charged, and the difference. */
+function RetailVsWholesale({ b }: { b: Bill }) {
+  const products = useLiveQuery(() => db.products.bulkGet(b.items.map(l => l.product_id || "")), [b.id, b.items.length], []);
+  const rows = b.items.map((l, i) => { const p = products[i]; const w = p ? priceFor(p, "wholesale") : 0; return { l, w }; });
+  const retail = rows.reduce((a, r) => a + r.l.amount, 0), whole = rows.reduce((a, r) => a + r.w * r.l.qty, 0);
+  const amt = (v: number) => "₹" + documentAmount(b, v);
+  const unknown = rows.filter(r => !r.w).length;
+  return <div className="card"><header><h3>Retail bill · wholesale rates</h3><span className="grow" />
+    <span className={"pill " + (retail >= whole ? "ok" : "bad")}>{retail >= whole ? "+" : ""}{amt(retail - whole)}</span></header>
+    <div className="pad stack">
+      <table className="eod-t" style={{ width: "100%" }}><thead><tr><th style={{ textAlign: "left" }}>Item</th><th>Qty</th><th>Retail rate</th><th>Wholesale rate</th></tr></thead>
+        <tbody>{rows.map(({ l, w }) => <tr key={l.id}><td>{[l.item, l.style].filter(Boolean).join(" · ")}</td><td className="r mono">{l.qty}</td>
+          <td className="r mono">{amt(l.rate)}</td><td className={"r mono" + (w && l.rate < w ? " bad" : "")}>{w ? amt(w) : "—"}</td></tr>)}</tbody></table>
+      <div className="row between sm"><span>Charged (retail)</span><b className="mono">{amt(retail)}</b></div>
+      <div className="row between sm"><span>At wholesale rates</span><b className="mono">{amt(whole)}</b></div>
+      <div className="xs mut">Wholesale rates are today's rates in Products.{unknown ? ` ${unknown} item${unknown > 1 ? "s have" : " has"} no wholesale rate.` : ""}</div>
+    </div></div>;
+}
+
 function BillView({ id }: { id: string }) {
   const { me } = useApp();
   const b = useLiveQuery(async () => { const bill = await db.bills.get(id); return bill ? fillBillNames(bill) : undefined; }, [id]);
@@ -185,7 +206,7 @@ function BillView({ id }: { id: string }) {
   };
   return (
     <div>
-      <Head eyebrow={docName(b)} title={b.no || "Draft"} sub={`${b.party_name || "Walk-in"} · ${when(b.at)} · ${b.status === "void" ? "CANCELLED" : statusText(b)}`}>
+      <Head eyebrow={docName(b)} title={b.no || "Draft"} sub={`${b.party_name || "Walk-in"} · ${when(b.at)} · ${b.status === "void" ? "CANCELLED" : statusText(b)}${b.price_level === "retail" ? " · RETAIL" : ""}`}>
         <button className="btn" onClick={() => setPrinting("a5")}>Print A5</button>
         <button className="btn" onClick={async () => setPrinting(await getSetting<PrintFormat>("thermal_width", "80mm"))}>Thermal</button>
         <button className="btn" onClick={() => setPrinting("packing")}>Packing slip</button>
@@ -195,6 +216,7 @@ function BillView({ id }: { id: string }) {
       <div className="split">
         <div className="card pad" style={{ overflow: "auto" }}><div className="inv-preview"><InvoiceSheet b={b} shop={shop} format="a5" /></div></div>
         <div className="stack">
+          {b.price_level === "retail" && boss && <RetailVsWholesale b={b} />}
           <GstBill b={b} shop={shop} />
           {b.status === "final" && d > 0 && <div className="card"><header><h3>Receive payment</h3><span className="pill bad">Due {rupees(d)}</span></header>
             <div className="pad stack"><input className="in mono" aria-label="Amount received" inputMode="decimal" placeholder="Amount received" value={payAmt} onChange={e => setPayAmt(e.target.value)} />

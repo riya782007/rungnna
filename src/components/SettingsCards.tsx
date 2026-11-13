@@ -11,7 +11,7 @@ import { rateMark } from "../lib/label-tspl";
 import { saveLabelPatch } from "./StickerQuickBar";
 import { printedCostCode } from "../lib/label-cost-code";
 import { byRollNo } from "./SupplierNo";
-import { RECEIPT_CUTS, receiptCut, receiptCutSetup, type ReceiptCut, RECEIPT_FEEDS, DEFAULT_RECEIPT_FEED, receiptFeed } from "../lib/printing";
+import { RECEIPT_CUTS, receiptCut, receiptCutSetup, type ReceiptCut, RECEIPT_FEEDS, DEFAULT_RECEIPT_FEED, receiptFeed, ROLL_PAGES, rollPage, setRollMax, MAX_ROLL_PAGE } from "../lib/printing";
 import { gstRequest } from "../lib/compliance";
 import { getShop, saveShop } from "../lib/billing";
 import { getTradeCode, saveTradeCode, DEFAULT_TRADE_CODE, type TradeCode } from "../lib/tradeCode";
@@ -235,6 +235,7 @@ export function PrintingCard() {
   const [width, setWidth] = useState("80mm");
   const [cut, setCut] = useState<ReceiptCut>("partial");
   const [feed, setFeed] = useState<number>(DEFAULT_RECEIPT_FEED);
+  const [rollPg, setRollPage] = useState<number>(MAX_ROLL_PAGE);
   const [copies, setCopies] = useState("1");
   const [ok, setOk] = useState("");
   const [lines, setLines] = useState<"item" | "full">("item");
@@ -244,6 +245,7 @@ export function PrintingCard() {
     getSetting("thermal_width", "80mm").then(setWidth);
     getSetting("receipt_cut", "partial").then(value => setCut(receiptCut(value)));
     getSetting("receipt_feed", DEFAULT_RECEIPT_FEED).then(value => setFeed(receiptFeed(value)));
+    getSetting("roll_max_page", MAX_ROLL_PAGE).then(value => setRollPage(rollPage(value)));
   }, []);
   const done = (what: string) => { setOk(what); toast(what); };
   return (
@@ -274,6 +276,11 @@ export function PrintingCard() {
             const value = receiptFeed(e.target.value);
             try { await setSetting("receipt_feed", value); setFeed(value); done("Paper after bill saved"); } catch { toast("Could not save paper after bill", true); }
           }}>{RECEIPT_FEEDS.map(mm => <option key={mm} value={mm}>{mm ? mm + " mm" : "None"}</option>)}</select></Help>
+        <Help label="Longest bill page the printer takes" help="A long bill is printed in pieces of this length. If long bills come out with a blank gap in the middle, set the printer's paper in Windows to its long roll (Printer → Printing preferences → Paper size: 80 x 3276 mm), then choose 3 metres here.">
+          <select className="in" value={rollPg} onChange={async e => {
+            const value = rollPage(e.target.value);
+            try { await setSetting("roll_max_page", value); setRollPage(value); setRollMax(value); done("Page length saved"); } catch { toast("Could not save page length", true); }
+          }}>{ROLL_PAGES.map(mm => <option key={mm} value={mm}>{mm === 280 ? "28 cm (printer set to short paper)" : mm >= 1000 ? `${mm / 1000} m (long roll paper)` : `${mm / 10} cm`}</option>)}</select></Help>
         <div className="xs mut">These are kept on this computer. The receipt length always fits the bill.</div>
       </div></div>
   );

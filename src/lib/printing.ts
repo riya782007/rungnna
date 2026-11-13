@@ -138,7 +138,15 @@ export async function preparePrint(doc: Document, frame: () => Promise<void>) {
 /** The longest roll page drivers print at full size, in mm. */
 export const MAX_ROLL_PAGE = 280;
 
-export function thermalPage(width: number, heightPx: number) {
+/* Owner, 13 Nov (photo): a 30-line bill came out in two pieces with a long blank between line 16 and 17 — his printer
+   feeds paper at the end of every page. A printer set to its long roll paper ("80 x 3276 mm" in Windows) takes one long
+   page without shrinking it, so each computer can say how long a page its printer takes (Settings › Bill printing). */
+export const ROLL_PAGES = [280, 600, 1200, 3000] as const;
+export const rollPage = (v: unknown) => (ROLL_PAGES as readonly number[]).includes(Number(v)) ? Number(v) : MAX_ROLL_PAGE;
+let rollMax = MAX_ROLL_PAGE;
+export const setRollMax = (mm: unknown) => { rollMax = rollPage(mm); };
+
+export function thermalPage(width: number, heightPx: number, max = rollMax) {
   if (![58, 80].includes(width) || !Number.isFinite(heightPx) || heightPx <= 0) throw new Error("Invalid receipt dimensions");
   /* Owner, 5 Nov (video: "Print out is very small"): one page over a metre long is shrunk by the printer driver to
      fit its longest paper, so every letter came out tiny. Keep each page within MAX_ROLL_PAGE (the length that has
@@ -146,7 +154,7 @@ export function thermalPage(width: number, heightPx: number) {
      full blank one (4 Nov: the reason the cap had been removed). Each page keeps 4 mm for its margins and 10 mm so a
      line that does not fit moves whole to the next page instead of pushing out one more page. */
   const content = heightPx * 25.4 / 96;
-  const pages = content + 8 <= MAX_ROLL_PAGE ? 1 : Math.ceil(content / (MAX_ROLL_PAGE - 14));
+  const pages = content + 8 <= max ? 1 : Math.ceil(content / (max - 14));
   const height = pages === 1 ? Math.max(30, Math.ceil(content + 8)) : Math.ceil(content / pages + 14);
   return `@page{size:${width}mm ${height}mm;margin:2mm 1mm}@page rj-receipt{size:${width}mm ${height}mm;margin:2mm 1mm}`;
 }

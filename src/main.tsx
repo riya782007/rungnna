@@ -13,8 +13,12 @@ import "@fontsource/roboto-condensed/latin-700.css";
 import "./styles.css";
 import { startUpdates } from "./lib/update";
 import { finishEmailLink } from "./lib/sync";
+import { getSetting } from "./lib/db";
+import { setRollMax } from "./lib/printing";
 
 startUpdates();
+// how long a page this computer's roll printer takes (Settings › Bill printing)
+getSetting("roll_max_page", 280).then(setRollMax).catch(() => {});
 setTimeout(() => sessionStorage.removeItem("rj_reloaded"), 15000);
 // keep the PIN code list on this computer for the customer forms, so it is there when the internet is not
 setTimeout(() => { if (navigator.onLine) fetch("/pincodes.txt").catch(() => {}); }, 60_000);

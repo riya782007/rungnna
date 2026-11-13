@@ -2,6 +2,7 @@ import { PinField, pinCity } from "../components/PinField";
 import { SalesSummaryButton } from "../components/SalesSummary";
 import { customerProfit, type CustomerProfit } from "../lib/customerProfit";
 import { can } from "../lib/roles";
+import { vcards, saveContacts } from "../lib/vcard";
 import { askText } from "../components/AskHost";
 import { stateCode, GST_STATES } from "../lib/states";
 import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
@@ -28,6 +29,7 @@ export default function Customers({ args }: { args: string[] }) {
 }
 
 function PartyList() {
+  const { me } = useApp();
   const [q, setQ] = useState("");
   const [onlyDue, setOnlyDue] = useState(false);
   const parties = useLiveQuery(() => db.parties.filter(p => !p.deleted && p.kind !== "supplier").toArray(), [], []);
@@ -43,6 +45,13 @@ function PartyList() {
     <div>
       <Head title="Customers" sub={`${parties.length} customers · ${rupees(toCollect)} to collect`}>
         <button className="btn p" onClick={async () => { const n = await askText("Customer / shop name"); if (!n) return; const ph = await askText("Mobile number", "", { numeric: true }) || ""; const p = newParty(n.toUpperCase(), ph.replace(/\D/g, "")); await put("parties", p); go("customers/" + p.id); }}><Icon n="plus" size={18} />Add</button>
+        {can(me, "void") && <button className="btn" title="Every customer's mobile number as a phone contact" onClick={async () => {
+          const { text, count } = vcards(parties);
+          if (!count) return toast("No customer has a mobile number yet", true);
+          const r = await saveContacts(text, `rungnna-customers-${new Date().toISOString().slice(0, 10)}.vcf`);
+          if (r === "downloaded") toast(`${count} contacts saved as a file. Phone: open the file and choose Contacts. Computer: contacts.google.com → Import → this file.`);
+          else if (r === "shared") toast(`${count} contacts sent — choose Contacts to add them`);
+        }}>Save to phone contacts</button>}
       </Head>
       <div className="row" style={{ marginBottom: 12, flexWrap: "nowrap" }}>
         <div className="wedge grow"><Icon n="search" size={18} /><input placeholder="Name, mobile or city" value={q} onChange={e => setQ(e.target.value)} /></div>

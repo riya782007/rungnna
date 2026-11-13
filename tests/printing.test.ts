@@ -77,3 +77,11 @@ describe("thermal invoices", () => {
   it("renders a 58mm page with wrap-safe narrow classes and signed government QR", () => { const b = { ...newBill("o", DEFAULT_SHOP, "gst"), compliance: { irn: { id: "registered-irn", generated_at: "2026-10-02", ack_no: "ACK123", signed_qr: "signed-qr-value", sandbox: true }, ewb: { id: "EWB123", generated_at: "2026-10-02", sandbox: true } } }; const html = renderToStaticMarkup(createElement(InvoiceSheet, { b, shop: DEFAULT_SHOP, format: "58mm" })); expect(html).toContain('data-thermal-width="58"'); expect(html).toContain("thermal narrow"); expect(html).toContain("ACK123"); expect(html).toContain("EWB123"); expect(html).toContain('class="signed-qr"'); expect(html).toContain("SANDBOX"); });
   it("keeps 80mm printing and excludes cancelled signed QR", () => { const b = { ...newBill("o", DEFAULT_SHOP), compliance: { irn: { id: "irn", generated_at: "2026-10-02", signed_qr: "signed", sandbox: false, cancelled_at: "2026-10-02" } } }; const html = renderToStaticMarkup(createElement(InvoiceSheet, { b, shop: DEFAULT_SHOP, format: "80mm" })); expect(html).toContain('data-thermal-width="80"'); expect(html).toContain("CANCELLED"); expect(html).not.toContain('class="signed-qr"'); });
 });
+
+/* Owner, 13 Nov: a printer set to its long roll paper takes a long bill as one page — no blank gap in the middle. */
+describe("longest page per computer", () => {
+  it("keeps a 30-line bill on one page when the printer takes long pages", () => {
+    expect(thermalPage(80, 1200)).toMatch(/size:80mm 1\d\dmm/);         // ~317 mm at 28 cm pages → two pieces
+    expect(thermalPage(80, 1200, 3000)).toContain("size:80mm 326mm");     // one piece on long roll paper
+  });
+});
