@@ -30,7 +30,7 @@ import { checkBill, checkSummary, matchSupplier, fallbackBillNo, type LineFix } 
 import { newParty } from "../lib/billing";
 import { UNITS, UNIT_RE } from "../lib/products";
 import { isPdf, expandPdfs, splitPage, joinParts, srSpan, repeatedCodes, acceptProof } from "../lib/pdf-pages";
-import { CartonPrint, type LineFix as SavedLineFix } from "./CartonPrint";
+import { CartonPrint, type LineFix as SavedLineFix, type BulkLineFix } from "./CartonPrint";
 import { saveProduct } from "../lib/products";
 import { evenRate } from "../lib/pricing";
 import { QuickLineBox, type QuickAdd } from "./QuickLineBox";
@@ -720,6 +720,34 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
     return q;
   };
 
+  /* Owner, 13 Nov (photo + voice): "the unit or item name has to be fixed piece by piece — every item again". Ten lines
+     of one bill all read as "25 PCI SET POUCH": tick them and change the item name, unit or pieces per box once. */
+  const fixLines = async (indexes: number[], f: BulkLineFix): Promise<Job[]> => {
+    const p = saved; if (!p) throw new Error("Open the saved bill first");
+    const item = (f.item || "").trim().toUpperCase(), type = (f.type || "").trim().toUpperCase();
+    const pack = f.pack?.trim() ? Number(f.pack) : undefined;
+    if (!item && !type && pack === undefined) throw new Error("Type the item name, or choose the unit or pieces per box");
+    if (pack !== undefined && (!Number.isSafeInteger(pack) || pack < 1 || pack > 10000)) throw new Error("Pieces in a box must be a whole number");
+    const want = new Set(indexes);
+    for (const i of want) {
+      const line = p.items[i]; const prod = line?.product_id ? await db.products.get(line.product_id) : undefined;
+      if (!prod) continue;
+      const t = type || prod.type || "PCS", pk = pack ?? prod.pack ?? 1;
+      await saveProduct({ ...prod, ...(item ? { item } : {}), ...(type ? { type } : {}), ...(pack !== undefined ? { pack } : {}),
+        cost_code: prod.cost_code?.replace(/X\d+[A-Z]+$/i, `X${pk}${t}`) }, true);
+    }
+    const items = p.items.map((l, i) => {
+      if (!want.has(i)) return l;
+      const { print_qty: _old, ...rest } = l;
+      return { ...(pack !== undefined ? rest : l), ...(item ? { item } : {}), ...(pack !== undefined ? { label_pack: pack } : {}) };
+    });
+    const next = { ...p, items, updated_at: now() };
+    await put("purchases", next);
+    const q = await jobsFor(next);
+    setSaved(next); setJobs(q);
+    return q;
+  };
+
   /* Owner, 2 Nov (voice): "some goods need double tags — one inside, one outside — and printing again didn't give me
      the 9 and 9 again". Stickers each: 2 prints every sticker of the saved bill twice (3 for three); it is a printing
      choice only: the saved bill and stock do not change. */
@@ -863,7 +891,7 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
       </div>
       <StickerQuickBar cfg={cfg} onChange={setCfg} />
       {showCarton && !!jobs.length
-        ? <CartonPrint purchase={saved} jobs={jobs} busy={printer.busy} autoSr={autoSr} onAutoDone={() => setAutoSr(undefined)} onFix={fixLine} times={times} print={async q => { setError(""); await sendToPrinter(timesJobs(q), true); }} />
+        ? <CartonPrint purchase={saved} jobs={jobs} busy={printer.busy} autoSr={autoSr} onAutoDone={() => setAutoSr(undefined)} onFix={fixLine} onFixMany={fixLines} times={times} print={async q => { setError(""); await sendToPrinter(timesJobs(q), true); }} />
         : <>
           <div className="xs mut">Stays here until you close it. Printing again never adds stock again.</div>
           <div className="tw"><table className="pos-t"><thead><tr><th>Item</th><th>Style</th><th>Colour</th><th className="r">Qty</th><th className="r">Rate</th></tr></thead><tbody>

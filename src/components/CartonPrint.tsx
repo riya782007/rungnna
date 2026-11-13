@@ -8,6 +8,7 @@ const CustomerCamera = lazy(() => import("./CustomerCamera"));
 import type { Job } from "../pages/Labels";
 import { parseSrList } from "../lib/quick-line";
 import { toast } from "../lib/app";
+import { UNITS } from "../lib/products";
 
 /* Owner, 29 Oct (voice): "the goods come carton by carton — I need a place where I open one carton, take out its
    stickers, then the next". The purchase is saved once (stock in, one bill); the stickers then go out one carton at
@@ -30,7 +31,10 @@ const up = (v?: string) => (v || "").trim().toUpperCase();
    the line in place: item, code, rate, pieces per box and stickers. Save & print puts it right on the saved bill and
    on the product (stock and cost are not touched) and prints that line again. */
 export type LineFix = { item: string; style: string; rate: string; pack: string; stickers: string };
-export function CartonPrint({ purchase, jobs, print, busy, autoSr, onAutoDone, onFix, times = 1 }: { purchase: Purchase; jobs: Job[]; print: (queue: Job[]) => Promise<unknown>; busy?: boolean; autoSr?: string; onAutoDone?: () => void; onFix?: (index: number, fix: LineFix) => Promise<Job[]>; times?: number }) {
+/** One change for many ticked lines (owner, 13 Nov): blank fields are left as they are. */
+export type BulkLineFix = { item?: string; type?: string; pack?: string };
+export function CartonPrint({ purchase, jobs, print, busy, autoSr, onAutoDone, onFix, onFixMany, times = 1 }: { purchase: Purchase; jobs: Job[]; print: (queue: Job[]) => Promise<unknown>; busy?: boolean; autoSr?: string; onAutoDone?: () => void; onFix?: (index: number, fix: LineFix) => Promise<Job[]>; onFixMany?: (indexes: number[], fix: BulkLineFix) => Promise<Job[]>; times?: number }) {
+  const [many, setMany] = useState<BulkLineFix>({});
   const [editing, setEditing] = useState<{ i: number; f: LineFix } | null>(null);
   const [prog, setProg] = useState<Progress>({ done: {} });
   const [ticked, setTicked] = useState<Set<string>>(new Set());
@@ -125,6 +129,27 @@ export function CartonPrint({ purchase, jobs, print, busy, autoSr, onAutoDone, o
     finally { setWorking(false); }
   };
 
+  const saveMany = async (andPrint: boolean) => {
+    if (!onFixMany || working || !sel.length) return;
+    setWorking(true);
+    try {
+      const srs = new Set(sel.map(l => l.sr));
+      const fresh = await onFixMany(sel.map(l => l.i), many);
+      setMany({});
+      if (andPrint) {
+        const queue = fresh.filter(j => srs.has(String(j.line ?? "")));
+        if (queue.length) {
+          await print(queue);
+          const done = { ...prog.done }; for (const s of srs) done[s] = carton;
+          save({ done });
+        }
+      }
+      setTicked(new Set());
+      toast(`${srs.size} line${srs.size === 1 ? "" : "s"} corrected${andPrint ? " and printed" : ""}`);
+    } catch (e: any) { toast(e?.message || "Could not save the correction", true); }
+    finally { setWorking(false); }
+  };
+
   const enter = () => {
     const t = text.trim();
     if (!t) { if (sel.length) void run(sel, `Carton ${carton}`); return; }
@@ -157,6 +182,20 @@ export function CartonPrint({ purchase, jobs, print, busy, autoSr, onAutoDone, o
         {working ? "Printing…" : sel.length ? `Print carton ${carton} · ${selStickers} sticker${selStickers === 1 ? "" : "s"}` : `Tick the lines of carton ${carton}`}</button>
       {!!left.length && <button type="button" className="btn" disabled={working} onClick={() => void run(left, "All left")}>Print all left ({left.reduce((n, l) => n + l.stickers, 0)})</button>}
     </div>
+    {onFixMany && <div className="row carton-many" style={{ gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+      <span className="sm"><b>{sel.length ? `Change the ${sel.length} ticked line${sel.length === 1 ? "" : "s"}` : "Change many lines at once"}</b>
+        <span className="xs mut">{sel.length ? " — blank boxes stay as they are" : " — tick the lines first (or "}</span>
+        {!sel.length && <><button type="button" className="linkbtn xs" onClick={() => tick(lines.map(l => l.sr))}>tick all</button><span className="xs mut">)</span></>}</span>
+      {!!sel.length && <>
+        <label className="f">Item name<input className="in" aria-label="Item name for ticked lines" placeholder="e.g. POUCH" value={many.item || ""} onChange={e => setMany({ ...many, item: e.target.value.toUpperCase() })} /></label>
+        <label className="f">Unit<select className="in" aria-label="Unit for ticked lines" value={many.type || ""} onChange={e => setMany({ ...many, type: e.target.value })}>
+          <option value="">— as it is —</option>{UNITS.map(u => <option key={u} value={u}>{u}</option>)}</select></label>
+        <label className="f">Pieces per box<input className="in r" inputMode="numeric" aria-label="Pieces per box for ticked lines" placeholder="as it is" style={{ maxWidth: 90 }} value={many.pack || ""} onChange={e => setMany({ ...many, pack: e.target.value.replace(/\D/g, "") })} /></label>
+        <button type="button" className="btn p" disabled={working} onClick={() => void saveMany(true)}>Save &amp; print</button>
+        <button type="button" className="btn" disabled={working} onClick={() => void saveMany(false)}>Save only</button>
+        <button type="button" className="linkbtn" onClick={() => setTicked(new Set())}>Untick all</button>
+      </>}
+    </div>}
     <div className="tw"><table className="pos-t carton-t"><thead><tr><th></th><th>Sr.</th><th>Item</th><th>Code</th><th className="r">Qty</th><th className="r">Rate</th><th className="r">X</th><th className="r">Stickers</th><th>Carton</th><th>Photo</th><th></th></tr></thead><tbody>
       {lines.map(l => editing?.i === l.i ? <tr key={l.sr} className="fixing" onClick={e => e.stopPropagation()}>
         <td></td><td className="mono b">{l.sr}</td>
