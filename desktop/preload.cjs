@@ -10,4 +10,5 @@ contextBridge.exposeInMainWorld("rungnnaDesktop", {
   started: () => ipcRenderer.send("rj-started"),
   printers: () => ipcRenderer.invoke("rj-printers"),
   printHtml: o => ipcRenderer.invoke("rj-print", o),
+  serialFor: kind => ipcRenderer.send("rj-serial-for", kind),
 });

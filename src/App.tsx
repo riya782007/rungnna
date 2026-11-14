@@ -1,3 +1,5 @@
+import { waitingWa, markWaSent, type WaJob } from "./lib/waRelay";
+import { shareBill, getShop } from "./lib/billing";
 import { lazy, Suspense, useEffect, useState, Component, type ReactNode } from "react";
 import { onUpdate, applyUpdate, onBehind, checkAppNow } from "./lib/update";
 import { AppProvider, useApp, useRoute, Toasts, go, toast } from "./lib/app";
@@ -68,6 +70,9 @@ const Purchase = lazy(() => import("./pages/Purchase"));
 const Tour = lazy(() => import("./pages/Tour"));
 const Desk = lazy(() => import("./pages/Desk"));
 const FloorScreen = lazy(() => import("./pages/FloorScreen"));
+const Pick = lazy(() => import("./pages/Pick"));
+const Count = lazy(() => import("./pages/Count"));
+const Call = lazy(() => import("./pages/Call"));
 
 /* Five places. Everything else is a tab inside one of them. */
 type Sec = { key: string; label: string; icon: string; tabs?: [string, string][] };
@@ -75,12 +80,12 @@ const SECTIONS: Sec[] = [
   { key: "home", label: "Home", icon: "home" },
   { key: "purchase", label: "Bill → Stickers", icon: "print" },
   { key: "sell", label: "Sell", icon: "sell", tabs: [["bill", "New bill"], ["bills", "Bills"], ["customers", "Customers"], ["tour", "Map & tour"], ["desk", "Repairs"], ["suppliers", "Suppliers"], ["dealers", "Trade orders"], ["vouchers", "Vouchers"]] },
-  { key: "stock", label: "Stock", icon: "stock", tabs: [["products", "Products"], ["add", "Add inventory"], ["stockin", "Stock in"], ["scan", "Scan & record"], ["recheck", "Recheck"], ["rfid", "RFID count"], ["labels", "Labels"], ["photos", "Photos"], ["catalogue", "Catalogue"], ["screen", "Floor TV"], ["racks", "Racks"], ["move", "Move"], ["activity", "Activity"], ["import", "Import"]] },
+  { key: "stock", label: "Stock", icon: "stock", tabs: [["products", "Products"], ["add", "Add inventory"], ["stockin", "Stock in"], ["scan", "Scan & record"], ["pick", "Picking (KOT)"], ["count", "Count"], ["recheck", "Recheck"], ["rfid", "RFID count"], ["labels", "Labels"], ["photos", "Photos"], ["catalogue", "Catalogue"], ["screen", "Floor TV"], ["racks", "Racks"], ["move", "Move"], ["activity", "Activity"], ["import", "Import"]] },
   { key: "reports", label: "Reports", icon: "sales" },
   { key: "ask", label: "Ask", icon: "ask" },
   { key: "settings", label: "Settings", icon: "settings" },
 ];
-const sectionOf = (r: string) => (["bill", "bills", "customers", "tour", "desk", "suppliers", "dealers", "vouchers"].includes(r) ? "sell" : ["products", "product", "add", "stockin", "scan", "recheck", "rfid", "labels", "photos", "catalogue", "screen", "racks", "move", "activity", "import"].includes(r) ? "stock" : r === "ask" || r === "settings" || r === "reports" || r === "purchase" ? r : r === "roles" ? "settings" : "home");
+const sectionOf = (r: string) => (["bill", "bills", "customers", "tour", "desk", "suppliers", "dealers", "vouchers"].includes(r) ? "sell" : ["products", "product", "add", "stockin", "scan", "pick", "count", "recheck", "rfid", "labels", "photos", "catalogue", "screen", "racks", "move", "activity", "import"].includes(r) ? "stock" : r === "ask" || r === "settings" || r === "reports" || r === "purchase" ? r : r === "roles" ? "settings" : "home");
 const lastTab: Record<string, string> = { sell: "bill", stock: "products" };
 
 function useSync() {
@@ -211,6 +216,9 @@ function Shell() {
     case "dealers": page = <Dealers />; break;
     case "purchase": page = <Purchase />; break;
     case "tour": page = <Tour />; break;
+    case "pick": page = <Pick />; break;
+    case "count": page = <Count />; break;
+    case "callhost": page = <Call room={args[0]} host phone={decodeURIComponent(args[1] || "")} name={decodeURIComponent(args[2] || "")} />; break;
     case "desk": page = <Desk />; break;
     case "screen": page = <FloorScreen floor={args[0] || ""} />; break;
     default: page = <Home />;
@@ -261,6 +269,7 @@ function Shell() {
           <Guard key={store + route + (args[0] || "")}>
             {sec === "stock" && route !== "labels" && <Suspense fallback={null}><StockAI route={route} /></Suspense>}
             {route !== "purchase" && <ShopPrintsWaiting />}
+            <PhoneWhatsApp />
             <Suspense fallback={<Loading />}><div className="pagein">{page}</div></Suspense>
           </Guard>
         </main>
@@ -334,5 +343,24 @@ function ShopPrintsWaiting() {
   return <div className="note warn row" role="status" style={{ gap: 8, marginBottom: 10 }}>
     <span className="grow"><b>{n} sticker{n === 1 ? "" : "s"} sent from {q[0].by || "a phone"}</b> are waiting to print ({q.map(x => x.no).join(", ")}).</span>
     <a className="btn p sm" href="#/purchase">Print them (F1)</a>
+  </div>;
+}
+
+/* Bills a computer without WhatsApp handed to the shop phone (lib/waRelay): one tap each, on the phone only. */
+function PhoneWhatsApp() {
+  const { me } = useApp();
+  const stamp = useLiveQuery(() => db.config.filter(c => c.id.startsWith("wa_out:")).toArray().then(r => r.map(x => x.updated_at).join()), [], "");
+  const jobs = useLiveQuery(() => waitingWa(), [stamp], [] as WaJob[]);
+  if (!isPhoneLike() || !jobs.length) return null;
+  return <div className="note warn stack" role="status" style={{ gap: 6, marginBottom: 10 }}>
+    <b>{jobs.length} bill{jobs.length === 1 ? "" : "s"} to send on WhatsApp</b>
+    {jobs.slice(0, 6).map(j => <div key={j.bill_id} className="row" style={{ gap: 6 }}>
+      <span className="grow sm">{j.no} · {j.party}{j.by ? ` · from ${j.by}` : ""}</span>
+      <button className="btn g sm" onClick={async () => {
+        const b = await db.bills.get(j.bill_id); if (!b) return toast("Bill not on this phone yet — wait for sync", true);
+        const r = await shareBill(b, await getShop()); if (r !== "cancelled") await markWaSent(j, me?.name || "");
+      }}>Send</button>
+      <button className="btn sm" onClick={() => markWaSent(j, me?.name || "")}>Done</button>
+    </div>)}
   </div>;
 }

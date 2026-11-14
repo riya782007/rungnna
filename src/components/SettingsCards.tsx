@@ -1,3 +1,5 @@
+import { Switch } from "./common";
+import { viaPhone, setViaPhone } from "../lib/waRelay";
 import { PRINT_KINDS, directPrinter, setDirectPrinter } from "../lib/printing";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -283,6 +285,7 @@ export function PrintingCard() {
             try { await setSetting("roll_max_page", value); setRollPage(value); setRollMax(value); done("Page length saved"); } catch { toast("Could not save page length", true); }
           }}>{ROLL_PAGES.map(mm => <option key={mm} value={mm}>{mm === 280 ? "28 cm (printer set to short paper)" : mm >= 1000 ? `${mm / 1000} m (long roll paper)` : `${mm / 10} cm`}</option>)}</select></Help>
         <DirectPrinters />
+        <WaViaPhone />
         <div className="xs mut">These are kept on this computer. The receipt length always fits the bill.</div>
       </div></div>
   );
@@ -365,4 +368,10 @@ export function TradeCodeCard() {
       <label className="row sm" style={{ gap: 6 }}><input type="checkbox" checked={t.owner_real} onChange={e => setDraft({ ...t, owner_real: e.target.checked })} />I (the owner) see real rates and totals</label>
       <div className="row"><button className="btn p sm" disabled={!draft} onClick={() => void save()}>Save</button></div>
     </div></div>;
+}
+
+function WaViaPhone() {
+  const [on, setOn] = useState(viaPhone());
+  return <Switch on={on} onChange={v => { setViaPhone(v); setOn(v); toast(v ? "WhatsApp bills from this computer go to the shop phone" : "WhatsApp opens on this computer"); }}
+    label="WhatsApp from the shop phone" hint="This computer has no WhatsApp: the WhatsApp button sends the bill to the shop phone, which shows 'bills to send' — one tap each." />;
 }

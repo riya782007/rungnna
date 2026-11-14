@@ -24,6 +24,7 @@ import { getFollow, saveFollow, dueCallbacks, type FollowUp } from "../lib/follo
 import { usePrivate, isEstimate } from "../lib/privacy";
 import { usePrintJob } from "../lib/printing";
 import { customerStats, type CustomerStat } from "../lib/customerRank";
+import { newRoom } from "./Call";
 
 /* Customers: who buys, what they owe, one tap to collect or remind. */
 export default function Customers({ args }: { args: string[] }) {
@@ -130,6 +131,7 @@ function PartyView({ id }: { id: string }) {
       <Head title={p.name} sub={[p.phone, p.city, p.kind].filter(Boolean).join(" · ")}>
         {p.phone && <a className="btn" href={"tel:" + p.phone}>Call</a>}
         {p.phone && <a className="btn" target="_blank" rel="noreferrer" href={waLink(p.phone, `Namaste ${p.name} ji,`)}><Icon n="wa" size={18} />WhatsApp</a>}
+        <a className="btn" href={`#/callhost/${newRoom()}/${encodeURIComponent(p.phone || "")}/${encodeURIComponent(p.name)}`}>Video call</a>
         <button className="btn p" onClick={() => go("bill")}>New bill</button>
       </Head>
 

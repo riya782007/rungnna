@@ -1,3 +1,6 @@
+import { viaPhone, queueWa } from "./waRelay";
+import { isPhoneLike } from "./print-queue";
+const toastLater = (t: string) => void import("./app").then(m => m.toast(t));
 import { documentAmount, documentDiscount } from "./estimate-display";
 import { qrAccount, upiLink } from "./upi";
 import { allocate } from "./allocate";
@@ -569,7 +572,9 @@ export async function billImage(b: Bill, shop: Shop): Promise<Blob> {
 
 /* Android/iPhone: opens the share sheet with the bill picture attached (pick WhatsApp).
    Computers: opens WhatsApp Web with the bill text. */
-export async function shareBill(b: Bill, shop: Shop): Promise<"shared" | "cancelled" | "pasted" | "wa"> {
+export async function shareBill(b: Bill, shop: Shop, by = ""): Promise<"shared" | "cancelled" | "pasted" | "wa" | "phone"> {
+  // this computer has no WhatsApp: the shop phone sends it (Settings › Printing › WhatsApp from the shop phone)
+  if (viaPhone() && !isPhoneLike()) { await queueWa(b, by); toastLater(`Bill ${b.no} sent to the shop phone — tap Send there`); return "phone"; }
   let blob: Blob | undefined;
   try {
     blob = await billImage(b, shop);

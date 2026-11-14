@@ -1,3 +1,4 @@
+import { sendToFloors, listPicks, ticketLeft, floorName } from "../lib/picking";
 import { SpeakText } from "../components/Voice";
 import { saveFollow } from "../lib/followup";
 import { rupees } from "../lib/format";
@@ -619,7 +620,9 @@ export default function Billing({ args }: { args: string[] }) {
     /* Owner, 14 Nov (voice): "the manager PIN is asked again and again for the discount — customers are stuck waiting".
        The usual 50% (now on by default) plus the "less" given to good customers (up to 5%, or the shop's own usual
        less if higher) never asks; and a few paise of rounding on a small bill (50.2% on ₹3.41) is not a discount. */
-    const usualPct = b.bill_type === "estimate" ? (() => { const d = Math.min(100, shop.est_disc_pct || 0), l = Math.min(100, Math.max(shop.est_less_pct || 0, 5)); return 100 - (100 - d) * (100 - l) / 100; })() : 0;
+    /* Owner, 14 Nov 15:11: "a customer saw the 50% and staff gave 10% extra — anything more than 50% needs the
+       owner's password". So the free limit is exactly the shop's usual discount (+ its own usual less, if set). */
+    const usualPct = b.bill_type === "estimate" ? (() => { const d = Math.min(100, shop.est_disc_pct || 0), l = Math.min(100, shop.est_less_pct || 0); return 100 - (100 - d) * (100 - l) / 100; })() : 0;
     const limit = Math.max(shop.max_disc ?? 10, usualPct);
     if (offPct > limit + 0.5 && !can(me, "discount")) {
       const pin = await askText(`Discount is ${offPct.toFixed(1)}% — above the ${+limit.toFixed(1)}% limit. Owner or manager PIN:`);
@@ -912,6 +915,11 @@ export default function Billing({ args }: { args: string[] }) {
               <option value="a5">A5 invoice</option><option value="a4">A4 invoice</option><option value="80mm">80 mm thermal</option><option value="58mm">58 mm thermal</option><option value="packing">Packing slip (no rates)</option></select>
             <button className="btn" disabled={saving} onClick={doHold}>Hold · F3</button>
             <button className="btn" disabled={saving} onClick={() => setHeld(true)}>Held · F4</button>
+            <button className="btn" disabled={saving || !b.items.length} title="Send these lines to each floor's picking screen (KOT): rack, box, pieces" onClick={async () => {
+              const ts = await sendToFloors({ source: "bill", id: b.id, no: b.no || "T" + b.id.slice(0, 4).toUpperCase(), party: b.party_name, by: me?.name || "" }, b.items.filter(l => !l.stock_done).map(l => ({ product_id: l.product_id, code: l.code, item: l.item, style: l.style, color: l.color, qty: l.qty })));
+              toast(ts.length ? `Sent to ${ts.map(t => floorName(t.floor)).join(", ")} — Stock › Picking` : "Nothing to pick");
+            }}>Floors · KOT</button>
+            <PickStatus billId={b.id} />
             <button className="btn p" disabled={saving} title={"Saves to Bills → " + (b.bill_type === "estimate" ? "Estimates" : b.bill_type === "gst" ? "Tax invoices" : "Challans")} onClick={() => doSave(false)}>{saving ? "Saving…" : `Save ${documentName}`}</button>
             <button className="btn dk" disabled={saving} onClick={() => doSave(true)}>Print {documentName}</button>
             <button className="btn g" disabled={saving} onClick={() => doSave(false, true)}>WhatsApp · F10</button>
@@ -1199,4 +1207,11 @@ function PairPhone({ id, peers, onNew, onClose }: { id: string; peers: number; o
       </div>
     </Modal>
   );
+}
+
+/* Which floors still have to send goods for this bill (KOT). */
+function PickStatus({ billId }: { billId: string }) {
+  const ts = useLiveQuery(() => listPicks().then(r => r.filter(t => t.source_id === billId && t.status !== "cancelled")), [billId], []);
+  if (!ts.length) return null;
+  return <span className="row" style={{ gap: 4 }}>{ts.map(t => <span key={t.id} className={"pill " + (t.status === "done" ? "ok" : "warn")}>{floorName(t.floor)} {t.status === "done" ? "✓" : ticketLeft(t)}</span>)}</span>;
 }

@@ -168,8 +168,19 @@ function permissions(ses) {
   ses.setPermissionCheckHandler((_wc, perm) => allowed.has(perm));
   ses.setDevicePermissionHandler(d => ["serial", "usb", "hid", "bluetooth"].includes(d.deviceType));
   // the label printer: pick it without a browser chooser (TSC printers first)
-  ses.on("select-serial-port", (event, ports, _wc, cb) => {
+  ses.on("select-serial-port", async (event, ports, _wc, cb) => {
     event.preventDefault();
+    // weighing scale (owner's list R-159): let the person pick its port; the label printer is picked by itself
+    if (serialWant === "scale") {
+      serialWant = "";
+      if (!ports.length) return cb("");
+      const others = ports.filter(p => !/tsc/i.test(`${p.displayName || ""} ${p.portName || ""}`));
+      const list = others.length ? others : ports;
+      if (list.length === 1) return cb(list[0].portId);
+      const { response } = await dialog.showMessageBox(win, { type: "question", title: "Weighing scale", message: "Which port is the weighing scale on?",
+        buttons: [...list.map(p => `${p.displayName || "Serial"} (${p.portName || ""})`), "Cancel"], cancelId: list.length });
+      return cb(response < list.length ? list[response].portId : "");
+    }
     const pick = ports.find(p => /tsc|print|usb/i.test(`${p.displayName || ""} ${p.portName || ""}`)) || ports[0];
     cb(pick ? pick.portId : "");
   });
@@ -262,6 +273,8 @@ ipcMain.on("rj-build", e => { e.returnValue = { active: activeId, ready: readyId
 ipcMain.handle("rj-check-now", async () => { await checkWebUpdate(); return { active: activeId, ready: readyId, shell: SHELL_API, live: liveId, lastCheck, lastError }; });
 ipcMain.handle("rj-apply-update", () => applyWebUpdate());
 ipcMain.on("rj-started", () => startedOk());
+let serialWant = "";
+ipcMain.on("rj-serial-for", (_e, kind) => { serialWant = String(kind || ""); });
 
 /* Direct printing (owner, 14 Nov): bills go straight to the bill printer (POS-80), stickers to the TSC, A4/A5 to the
    Canon — no Print box, and a long bill as ONE page of exactly its own length (no gap, no cut in the middle).

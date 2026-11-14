@@ -144,6 +144,8 @@ export default function Home() {
 
   const gone = useLiveQuery(async () => (await customerStats()).filter(x => x.notReturning).length, [], 0);
   const openDesk = useLiveQuery(() => db.config.filter(c => c.id.startsWith("desk:") && !c.deleted && c.value?.status !== "closed").count(), [], 0);
+  const counts = useLiveQuery(() => db.config.filter(c => c.id.startsWith("count:") && !c.deleted && !!c.value?.finished && !c.value?.applied && (c.value?.diffs || []).some((d: any) => d.counted !== d.expected)).count(), [], 0);
+  const picks = useLiveQuery(() => db.config.filter(c => c.id.startsWith("pick:") && !c.deleted && (c.value?.status === "new" || c.value?.status === "picking")).count(), [], 0);
   const calls = useLiveQuery(async () => (await dueCallbacks()).length, [], 0);
   const urgent = [
     d.outOfStock ? { t: "Out of stock — reorder now", to: "products", n: d.outOfStock, kind: "bad" } : null,
@@ -155,6 +157,8 @@ export default function Home() {
     d.noPhoto ? { t: "Products without a photo", to: "products", n: d.noPhoto, kind: "ok" } : null,
     d.flagged ? { t: "Damaged / missing pieces", to: "racks", n: d.flagged, kind: "bad" } : null,
     money && gone ? { t: "Customers not coming back", to: "customers", n: gone, kind: "warn" } : null,
+    money && counts ? { t: "Stock count differences to check", to: "count", n: counts, kind: "bad" } : null,
+    picks ? { t: "Picking tickets open (floors)", to: "pick", n: picks, kind: "warn" } : null,
     calls ? { t: "Customers to call back today", to: "customers/calls", n: calls, kind: "warn" } : null,
     openDesk ? { t: "Repairs & complaints open", to: "desk", n: openDesk, kind: "warn" } : null,
   ].filter(Boolean) as { t: string; to: string; n: number; kind: string }[];

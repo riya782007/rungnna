@@ -1,3 +1,4 @@
+import { TallyButton } from "../components/TallyExport";
 import { StaffPoints } from "../components/StaffPoints";
 import { useEffect, useMemo, useState } from "react";
 import { reportData, exportExcel, type ReportRow } from "../lib/reports";
@@ -63,6 +64,7 @@ export default function Reports() {
   return <div>
     <Head title="Reports" sub={`${from} to ${to}${busy ? " · loading" : ""}`}>
       <button className="btn p" onClick={() => exportExcel(`${tab}-${from}-to-${to}`, shown(rows, divisor, true))}><Icon n="download" size={18} />Excel</button>
+      <TallyButton from={from} to={to} store={branch} />
       <button className="btn g" onClick={async () => {
         const text = view.slice(0, 20).map(r => Object.values(r).join(" · ")).join("\n");
         try { await navigator.share?.({ title: "Rungnna report", text }); } catch { await navigator.clipboard?.writeText(text); toast("Copied report text"); }

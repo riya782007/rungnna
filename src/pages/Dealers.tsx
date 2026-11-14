@@ -1,3 +1,4 @@
+import { sendToFloors } from "../lib/picking";
 import { DeleteButton } from "../components/DeleteButton";
 import { confirmDelete } from "../lib/confirm-delete";
 import { useEffect, useState } from "react";
@@ -65,6 +66,7 @@ export default function Dealers() {
             <td className="r">{l.qty}</td><td className="r mono">{rupees(l.rate)}</td><td className="r mono">{rupees(l.amount)}</td></tr>)}</tbody></table></div>
         <div className="row"><span className="grow">{open.total_qty} pieces{open.note ? " · " + open.note : ""}</span><b className="mono">{rupees(open.total)}</b></div>
         {open.status === "new" && <div className="row">
+          <button className="btn" onClick={() => act(async () => { const ts = await sendToFloors({ source: "order", id: open.id, no: open.no, party: open.dealer_shop || open.dealer_name, by: me?.name || "" }, open.items.map(l => ({ product_id: l.product_id, code: l.code, item: l.item, style: l.style, color: l.color, qty: l.qty }))); if (!ts.length) throw new Error("Nothing to pick"); }, "Sent to the floors — Stock › Picking")}>Floors · KOT</button>
           {can(me, "billing.sell") && <button className="btn p" onClick={() => act(async () => { const b = await orderToBill(open, "gst", me?.id || ""); setOpen(null); go("bill/" + b.id); }, "Bill ready — check, pack and save")}>Make GST invoice</button>}
           {can(me, "estimates.open") && <button className="btn" onClick={() => act(async () => { const b = await orderToBill(open, "estimate", me?.id || ""); setOpen(null); go("bill/" + b.id); }, "Estimate ready")}>Make estimate</button>}
           <DeleteButton className="btn bad" onDelete={async () => { if (await confirmDelete("Cancel this order?")) await act(async () => { await cancelOrder(open); setOpen(null); }, "Order cancelled"); }}>Cancel order</DeleteButton>
