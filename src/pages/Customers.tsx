@@ -19,31 +19,41 @@ import { go, toast, useApp } from "../lib/app";
 import { rupees, toPaise, when } from "../lib/format";
 import { Head, PhotoButton, Thumb } from "../components/common";
 import { Icon } from "../components/Icon";
-import { VoiceNotes } from "../components/Voice";
+import { VoiceNotes, SpeakText } from "../components/Voice";
+import { getFollow, saveFollow, dueCallbacks, type FollowUp } from "../lib/followup";
 import { usePrivate, isEstimate } from "../lib/privacy";
 import { usePrintJob } from "../lib/printing";
+import { customerStats, type CustomerStat } from "../lib/customerRank";
 
 /* Customers: who buys, what they owe, one tap to collect or remind. */
 export default function Customers({ args }: { args: string[] }) {
-  return args[0] ? <PartyView id={args[0]} /> : <PartyList />;
+  return args[0] && args[0] !== "calls" ? <PartyView id={args[0]} /> : <PartyList />;
 }
 
 function PartyList() {
   const { me } = useApp();
   const [q, setQ] = useState("");
   const [onlyDue, setOnlyDue] = useState(false);
+  const [view, setView] = useState<"dues" | "rank" | "gone" | "calls">(location.hash.includes("calls") ? "calls" : "dues");
+  const calls = useLiveQuery(() => dueCallbacks(), [], [] as Awaited<ReturnType<typeof dueCallbacks>>);
+  const callIds = new Map(calls.map(c => [c.party_id, c]));
+  const [stats, setStats] = useState<Map<string, CustomerStat>>(new Map());
   const parties = useLiveQuery(() => db.parties.filter(p => !p.deleted && p.kind !== "supplier").toArray(), [], []);
   const stamp = useLiveQuery(async () => (await db.bills.count()) + ":" + (await db.receipts.count()) + ":" + (await db.bills.orderBy("updated_at").last())?.updated_at, [], "");
   const [bal, setBal] = useState<Map<string, number>>(new Map());
   const priv = usePrivate();
   useEffect(() => { balances().then(setBal); }, [stamp, parties.length, priv]);
+  useEffect(() => { customerStats().then(r => setStats(new Map(r.map(x => [x.party_id, x])))); }, [stamp, parties.length]);
+  const gone = [...stats.values()].filter(x => x.notReturning).length;
+  const seeDues = can(me, "customers.dues");
   const list = useMemo(() => parties
-    .filter(p => (!q || (p.name + " " + p.phone + " " + p.city).toLowerCase().includes(q.toLowerCase())) && (!onlyDue || (bal.get(p.id) || 0) > 0))
-    .sort((a, z) => (bal.get(z.id) || 0) - (bal.get(a.id) || 0) || a.name.localeCompare(z.name)), [parties, q, onlyDue, bal]);
+    .filter(p => (!q || (p.name + " " + p.phone + " " + p.city + " " + (stats.get(p.id)?.top.join(" ") || "")).toLowerCase().includes(q.toLowerCase())) && (!onlyDue || (bal.get(p.id) || 0) > 0)
+      && (view !== "gone" || stats.get(p.id)?.notReturning) && (view !== "calls" || callIds.has(p.id)) && (view !== "rank" || stats.has(p.id)))
+    .sort((a, z) => view !== "dues" || !seeDues ? (stats.get(a.id)?.rank || 1e9) - (stats.get(z.id)?.rank || 1e9) : (bal.get(z.id) || 0) - (bal.get(a.id) || 0) || a.name.localeCompare(z.name)), [parties, q, onlyDue, bal, view, stats, calls, seeDues]);
   const toCollect = [...bal.values()].reduce((a, v) => a + Math.max(0, v), 0);
   return (
     <div>
-      <Head title="Customers" sub={`${parties.length} customers · ${rupees(toCollect)} to collect`}>
+      <Head title="Customers" sub={`${parties.length} customers${seeDues ? ` · ${rupees(toCollect)} to collect` : ""}`}>
         <button className="btn p" onClick={async () => { const n = await askText("Customer / shop name"); if (!n) return; const ph = await askText("Mobile number", "", { numeric: true }) || ""; const p = newParty(n.toUpperCase(), ph.replace(/\D/g, "")); await put("parties", p); go("customers/" + p.id); }}><Icon n="plus" size={18} />Add</button>
         {can(me, "void") && <button className="btn" title="Every customer's mobile number as a phone contact" onClick={async () => {
           const { text, count } = vcards(parties);
@@ -55,14 +65,28 @@ function PartyList() {
       </Head>
       <div className="row" style={{ marginBottom: 12, flexWrap: "nowrap" }}>
         <div className="wedge grow"><Icon n="search" size={18} /><input placeholder="Name, mobile or city" value={q} onChange={e => setQ(e.target.value)} /></div>
-        <button className="chip" aria-pressed={onlyDue} onClick={() => setOnlyDue(!onlyDue)}>With dues</button>
+        {seeDues && <button className="chip" aria-pressed={onlyDue} onClick={() => setOnlyDue(!onlyDue)}>With dues</button>}
       </div>
+      <div className="row" style={{ marginBottom: 12 }}>
+        <div className="seg" role="group" aria-label="Order">
+          <button aria-pressed={view === "dues"} onClick={() => setView("dues")}>{seeDues ? "By dues" : "All"}</button>
+          <button aria-pressed={view === "rank"} onClick={() => setView("rank")}>Ranking (A / B / C)</button>
+          <button aria-pressed={view === "gone"} onClick={() => setView("gone")}>Not coming back {gone ? `· ${gone}` : ""}</button>
+          <button aria-pressed={view === "calls"} onClick={() => setView("calls")}>Call back {calls.length ? `· ${calls.length}` : ""}</button>
+        </div>
+        <a className="btn sm" href="#/tour">Map &amp; tour</a>
+        <a className="btn sm" href="#/desk">Repairs &amp; complaints</a>
+      </div>
+      {view !== "dues" && <div className="xs mut" style={{ marginBottom: 8 }}>Last 12 months. A = top 20% by purchase, B = next 30%, C = rest. Points = 1 per ₹1,000 bought. "Not coming back" = no bill for twice their usual gap (at least 30 days).</div>}
       <div className="list">
         {list.map(p => { const b = bal.get(p.id) || 0; return (
           <a key={p.id} href={"#/customers/" + p.id}>
             <Thumb photo_id={p.photo_id} url={p.photo_url} text={p.name} size={40} />
-            <span className="grow"><b className="sm">{p.name}</b><div className="xs mut">{p.city || p.tier}</div></span>
-            {b > 0 ? <b className="mono" style={{ color: "var(--bad)" }}>{rupees(b)}</b> : b < 0 ? <span className="pill ok">advance {rupees(-b)}</span> : <span className="xs mut">clear</span>}
+            <span className="grow"><b className="sm">{p.name}</b> {stats.get(p.id) && <span className={"pill " + (stats.get(p.id)!.grade === "A" ? "ok" : "")}>{stats.get(p.id)!.grade} · #{stats.get(p.id)!.rank}</span>}
+              <div className="xs mut">{p.city || p.tier}{stats.get(p.id) ? ` · ${stats.get(p.id)!.points} pts · buys ${stats.get(p.id)!.top.join(", ").toLowerCase() || "—"}${stats.get(p.id)!.gapDays ? ` · comes every ~${stats.get(p.id)!.gapDays} days` : ""}` : ""}</div>
+              {callIds.has(p.id) && <div className="xs" style={{ color: "var(--warn, #b7791f)" }}>Call back {callIds.get(p.id)!.callback}{callIds.get(p.id)!.wants ? " · wants " + callIds.get(p.id)!.wants : ""}</div>}
+              {view === "gone" && stats.get(p.id) && <div className="xs" style={{ color: "var(--bad)" }}>Last bill {stats.get(p.id)!.daysSince} days ago · {stats.get(p.id)!.why.filter(w => seeDues || !w.includes("due")).join(" · ")}</div>}</span>
+            {!seeDues ? null : b > 0 ? <b className="mono" style={{ color: "var(--bad)" }}>{rupees(b)}</b> : b < 0 ? <span className="pill ok">advance {rupees(-b)}</span> : <span className="xs mut">clear</span>}
             <Icon n="chev" size={16} />
           </a>); })}
         {!list.length && <div className="empty"><b>No customers yet</b>They're added from Client name on a bill or with Add.</div>}
@@ -110,7 +134,7 @@ function PartyView({ id }: { id: string }) {
       </Head>
 
       <div className="hero three">
-        <div><span className="k">{bal >= 0 ? "Balance due" : "Advance with us"}</span><b>{rupees(Math.abs(bal))}</b><span className="xs">{bills.filter(b => b.status === "final" && isSale(b)).length} bills</span></div>
+        <div><span className="k">{bal >= 0 ? "Balance due" : "Advance with us"}</span><b>{can(me, "customers.dues") ? rupees(Math.abs(bal)) : "—"}</b><span className="xs">{bills.filter(b => b.status === "final" && isSale(b)).length} bills</span></div>
         <div><span className="k">Bought (all time)</span><b>{rupees(bills.filter(b => b.status === "final" && isSale(b)).reduce((a, b) => a + b.net, 0) - bills.filter(b => b.status === "final" && b.bill_type === "return").reduce((a, b) => a + b.net, 0))}</b></div>
         <div><span className="k">Last bill</span><b style={{ fontSize: 18 }}>{bills[0] ? when(bills[0].at) : "—"}</b></div>
       </div>
@@ -193,6 +217,7 @@ function PartyView({ id }: { id: string }) {
           <label className="f">Notes<textarea className="in" rows={2} value={p.notes} onChange={e => set("notes", e.target.value)} placeholder="Likes kundan sets, pays on Saturdays…" /></label>
           <button className="btn p" onClick={async () => { await put("parties", { ...p, phone: normPhone(p.phone).replace(/^91(?=\d{10}$)/, "") }); toast("Saved"); }}>Save</button>
         </div>
+        <FollowCard partyId={p.id} />
         <div className="card pad"><VoiceNotes entity="party" entityId={p.id} /></div>
       </div>}
 
@@ -253,4 +278,22 @@ function ShareStatement({ party, entries, shop, onClose }: { party: Party; entri
       </div>
     </Modal>
   );
+}
+
+/* Products they want + call-back date (owner, 14 Nov 14:24), with a mic so nothing has to be typed. */
+function FollowCard({ partyId }: { partyId: string }) {
+  const { me } = useApp();
+  const [f, setF] = useState<FollowUp>({ wants: "", callback: "", note: "", by: "", at: "" });
+  useEffect(() => { getFollow(partyId).then(x => x && setF(x)); }, [partyId]);
+  return <div className="card pad stack">
+    <b className="sm">Follow-up</b>
+    <label className="f">Products they want / buy <SpeakText label="🎙" onText={t => setF(x => ({ ...x, wants: (x.wants ? x.wants + ", " : "") + t }))} /><input className="in" value={f.wants} onChange={e => setF({ ...f, wants: e.target.value })} /></label>
+    <div className="grid g2">
+      <label className="f">Call back on<input className="in" type="date" value={f.callback} onChange={e => setF({ ...f, callback: e.target.value, done: "" })} /></label>
+      <label className="f">Note <SpeakText label="🎙" onText={t => setF(x => ({ ...x, note: (x.note ? x.note + " " : "") + t }))} /><input className="in" value={f.note} onChange={e => setF({ ...f, note: e.target.value })} /></label>
+    </div>
+    <div className="row"><button className="btn p" onClick={async () => { await saveFollow(partyId, { ...f, by: me?.name || "" }); toast("Saved"); }}>Save</button>
+      {f.callback && !f.done && <button className="btn" onClick={async () => { const n = { ...f, done: new Date().toISOString().slice(0, 10), by: me?.name || "" }; await saveFollow(partyId, n); setF(n); toast("Call-back marked done"); }}>Called — done</button>}
+      {f.done && <span className="xs mut">Called on {f.done}</span>}</div>
+  </div>;
 }

@@ -24,7 +24,7 @@ const crypto = require("node:crypto");
    to it only when the owner taps Update (or the app is idle on Home / next start). The running
    screen keeps its own files until then, so a bill in progress is never disturbed. A release
    that fails to start is rolled back to the last good one automatically. */
-const SHELL_API = 2;                           // bump when main/preload gain features new screens rely on (2: check now, status)
+const SHELL_API = 3;                           // bump when main/preload gain features new screens rely on (2: check now, status; 3: direct printing)
 const UPD_DIR = () => path.join(app.getPath("userData"), "web-updates");
 const STATE = () => path.join(UPD_DIR(), "state.json");
 const readState = () => { try { return JSON.parse(fs.readFileSync(STATE(), "utf8")); } catch { return {}; } };
@@ -262,6 +262,25 @@ ipcMain.on("rj-build", e => { e.returnValue = { active: activeId, ready: readyId
 ipcMain.handle("rj-check-now", async () => { await checkWebUpdate(); return { active: activeId, ready: readyId, shell: SHELL_API, live: liveId, lastCheck, lastError }; });
 ipcMain.handle("rj-apply-update", () => applyWebUpdate());
 ipcMain.on("rj-started", () => startedOk());
+
+/* Direct printing (owner, 14 Nov): bills go straight to the bill printer (POS-80), stickers to the TSC, A4/A5 to the
+   Canon — no Print box, and a long bill as ONE page of exactly its own length (no gap, no cut in the middle).
+   The screen sends the finished page; this prints it in a hidden window on the printer chosen in Settings. */
+ipcMain.handle("rj-printers", async () => {
+  try { return (await win.webContents.getPrintersAsync()).map(p => ({ name: p.name, label: p.displayName || p.name, isDefault: !!p.isDefault })); } catch { return []; }
+});
+ipcMain.handle("rj-print", async (_e, o) => {
+  const { html, deviceName, widthMm, heightMm, copies } = o || {};
+  if (!html || !deviceName) throw new Error("No printer chosen");
+  const pw = new BrowserWindow({ show: false, webPreferences: { javascript: false, sandbox: true } });
+  try {
+    await pw.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
+    await new Promise(r => setTimeout(r, 300));   // images and fonts settle
+    const opts = { silent: true, deviceName, printBackground: true, copies: copies || 1, margins: { marginType: "none" } };
+    if (widthMm > 0 && heightMm > 0) opts.pageSize = { width: Math.round(widthMm * 1000), height: Math.round(heightMm * 1000) };
+    return await new Promise((resolve, reject) => pw.webContents.print(opts, (ok, why) => ok ? resolve(true) : reject(new Error(why || "Print failed"))));
+  } finally { setTimeout(() => { try { pw.destroy(); } catch { /* closed */ } }, 60_000); }
+});
 app.on("second-instance", () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
 app.whenReady().then(() => {
   pickActive();

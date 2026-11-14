@@ -168,7 +168,7 @@ export interface PurchaseReturn extends Row {
 
 export type VoucherType = "payment" | "receipt" | "expense" | "journal";
 export type MoneyMode = "cash" | "upi" | "card" | "bank" | "cheque" | "credit";
-export type ExpenseCategory = "rent" | "salary" | "electricity" | "transport" | "tea" | "other";
+export type ExpenseCategory = "rent" | "salary" | "electricity" | "transport" | "tea" | "incentive" | "bonus" | "stationery" | "packing" | "gift" | "other";
 export interface Voucher extends Row {
   ref?: string;
   no: string; series: string; type: VoucherType; at: string; mode: MoneyMode; amount: number;

@@ -8,7 +8,7 @@ export const ROUTE_PERM: Record<string, string> = {
   reports: "reports.view", ask: "ai.use", scan: "stock.in", stockin: "stock.in", recheck: "stock.count", rfid: "stock.count",
   labels: "labels.print", catalogue: "catalogue.share", photos: "catalogue.share", racks: "racks.manage", move: "stock.move", products: "stock.view", product: "stock.view",
   activity: "stock.view", add: "products.edit", dealers: "dealers.manage", import: "import.data", bank: "bank.reconcile", stores: "stores.transfer", roles: "staff.manage",
-  settings: "settings.manage", purchase: "purchases.photo",
+  settings: "settings.manage", purchase: "purchases.photo", tour: "customers.manage", desk: "customers.manage", screen: "stock.view",
 };
 
 /** May this person open this screen? Settings always opens (a person's own language, PIN and lock). */

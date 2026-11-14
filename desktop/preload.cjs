@@ -8,4 +8,6 @@ contextBridge.exposeInMainWorld("rungnnaDesktop", {
   applyUpdate: () => ipcRenderer.invoke("rj-apply-update"),
   checkNow: () => ipcRenderer.invoke("rj-check-now"),
   started: () => ipcRenderer.send("rj-started"),
+  printers: () => ipcRenderer.invoke("rj-printers"),
+  printHtml: o => ipcRenderer.invoke("rj-print", o),
 });

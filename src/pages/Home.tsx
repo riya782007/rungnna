@@ -1,3 +1,5 @@
+import { dueCallbacks } from "../lib/followup";
+import { customerStats } from "../lib/customerRank";
 import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -140,6 +142,9 @@ export default function Home() {
   ];
   const chanTotal = channels.reduce((a, s) => a + s.value, 0);
 
+  const gone = useLiveQuery(async () => (await customerStats()).filter(x => x.notReturning).length, [], 0);
+  const openDesk = useLiveQuery(() => db.config.filter(c => c.id.startsWith("desk:") && !c.deleted && c.value?.status !== "closed").count(), [], 0);
+  const calls = useLiveQuery(async () => (await dueCallbacks()).length, [], 0);
   const urgent = [
     d.outOfStock ? { t: "Out of stock — reorder now", to: "products", n: d.outOfStock, kind: "bad" } : null,
     d.reorder.length ? { t: "Running low — order soon", to: "products", n: d.reorder.length, kind: "warn" } : null,
@@ -149,6 +154,9 @@ export default function Home() {
     d.noRate ? { t: "Products without a rate", to: "products", n: d.noRate, kind: "ok" } : null,
     d.noPhoto ? { t: "Products without a photo", to: "products", n: d.noPhoto, kind: "ok" } : null,
     d.flagged ? { t: "Damaged / missing pieces", to: "racks", n: d.flagged, kind: "bad" } : null,
+    money && gone ? { t: "Customers not coming back", to: "customers", n: gone, kind: "warn" } : null,
+    calls ? { t: "Customers to call back today", to: "customers/calls", n: calls, kind: "warn" } : null,
+    openDesk ? { t: "Repairs & complaints open", to: "desk", n: openDesk, kind: "warn" } : null,
   ].filter(Boolean) as { t: string; to: string; n: number; kind: string }[];
 
   return (

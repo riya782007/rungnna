@@ -65,19 +65,22 @@ const Roles = lazy(() => import("./pages/Roles"));
 const AddInventory = lazy(() => import("./pages/AddInventory"));
 const Dealers = lazy(() => import("./pages/Dealers"));
 const Purchase = lazy(() => import("./pages/Purchase"));
+const Tour = lazy(() => import("./pages/Tour"));
+const Desk = lazy(() => import("./pages/Desk"));
+const FloorScreen = lazy(() => import("./pages/FloorScreen"));
 
 /* Five places. Everything else is a tab inside one of them. */
 type Sec = { key: string; label: string; icon: string; tabs?: [string, string][] };
 const SECTIONS: Sec[] = [
   { key: "home", label: "Home", icon: "home" },
   { key: "purchase", label: "Bill → Stickers", icon: "print" },
-  { key: "sell", label: "Sell", icon: "sell", tabs: [["bill", "New bill"], ["bills", "Bills"], ["customers", "Customers"], ["suppliers", "Suppliers"], ["dealers", "Trade orders"], ["vouchers", "Vouchers"]] },
-  { key: "stock", label: "Stock", icon: "stock", tabs: [["products", "Products"], ["add", "Add inventory"], ["stockin", "Stock in"], ["scan", "Scan & record"], ["recheck", "Recheck"], ["rfid", "RFID count"], ["labels", "Labels"], ["photos", "Photos"], ["catalogue", "Catalogue"], ["racks", "Racks"], ["move", "Move"], ["activity", "Activity"], ["import", "Import"]] },
+  { key: "sell", label: "Sell", icon: "sell", tabs: [["bill", "New bill"], ["bills", "Bills"], ["customers", "Customers"], ["tour", "Map & tour"], ["desk", "Repairs"], ["suppliers", "Suppliers"], ["dealers", "Trade orders"], ["vouchers", "Vouchers"]] },
+  { key: "stock", label: "Stock", icon: "stock", tabs: [["products", "Products"], ["add", "Add inventory"], ["stockin", "Stock in"], ["scan", "Scan & record"], ["recheck", "Recheck"], ["rfid", "RFID count"], ["labels", "Labels"], ["photos", "Photos"], ["catalogue", "Catalogue"], ["screen", "Floor TV"], ["racks", "Racks"], ["move", "Move"], ["activity", "Activity"], ["import", "Import"]] },
   { key: "reports", label: "Reports", icon: "sales" },
   { key: "ask", label: "Ask", icon: "ask" },
   { key: "settings", label: "Settings", icon: "settings" },
 ];
-const sectionOf = (r: string) => (["bill", "bills", "customers", "suppliers", "dealers", "vouchers"].includes(r) ? "sell" : ["products", "product", "add", "stockin", "scan", "recheck", "rfid", "labels", "photos", "catalogue", "racks", "move", "activity", "import"].includes(r) ? "stock" : r === "ask" || r === "settings" || r === "reports" || r === "purchase" ? r : r === "roles" ? "settings" : "home");
+const sectionOf = (r: string) => (["bill", "bills", "customers", "tour", "desk", "suppliers", "dealers", "vouchers"].includes(r) ? "sell" : ["products", "product", "add", "stockin", "scan", "recheck", "rfid", "labels", "photos", "catalogue", "screen", "racks", "move", "activity", "import"].includes(r) ? "stock" : r === "ask" || r === "settings" || r === "reports" || r === "purchase" ? r : r === "roles" ? "settings" : "home");
 const lastTab: Record<string, string> = { sell: "bill", stock: "products" };
 
 function useSync() {
@@ -207,6 +210,9 @@ function Shell() {
     case "add": page = <AddInventory />; break;
     case "dealers": page = <Dealers />; break;
     case "purchase": page = <Purchase />; break;
+    case "tour": page = <Tour />; break;
+    case "desk": page = <Desk />; break;
+    case "screen": page = <FloorScreen floor={args[0] || ""} />; break;
     default: page = <Home />;
   }
   if (!ok(route) || (route === "stores" && !master)) page = <NoAccess />;

@@ -3,7 +3,9 @@ import { counterCode, fy } from "./billing";
 import { assertUnlocked } from "./finance";
 import { requirePerm } from "./scope";
 
-export const EXPENSES: ExpenseCategory[] = ["rent", "salary", "electricity", "transport", "tea", "other"];
+export const EXPENSES: ExpenseCategory[] = ["rent", "salary", "incentive", "bonus", "stationery", "packing", "gift", "electricity", "transport", "tea", "other"];
+/* staff money (owner's list R-44, R-45, R-46, R-58): these categories ask whose account it goes to */
+export const STAFF_EXPENSES: ExpenseCategory[] = ["salary", "incentive", "bonus", "stationery"];
 export const VOUCHER_MODES: MoneyMode[] = ["cash", "upi", "bank", "cheque"];
 
 export async function nextSeries(prefix: string, at = new Date()) {

@@ -95,6 +95,21 @@ export async function printDocument(source: Document, frame: () => Promise<void>
       try { await native.printHtml({ html, name: source.title || "Rungnna bill" }); } finally { remove(); onDone(); }
       return remove;
     }
+    // Windows app with a printer chosen for this kind of page: straight to it, no Print box (owner, 14 Nov)
+    const desk = typeof window !== "undefined" ? (window as any).rungnnaDesktop : undefined;
+    if (desk?.printHtml && directPrinter(jobKind(root))) {
+      const device = directPrinter(jobKind(root));
+      const page = root.querySelector<HTMLStyleElement>("style[data-thermal-width]");
+      if (page?.dataset.contentPx) page.textContent = thermalPage(Number(page.dataset.thermalWidth), Number(page.dataset.contentPx), 3000);
+      const size = pageSizeOf(root);
+      const css = Array.from(doc.querySelectorAll("style")).map(x => x.textContent).join("\n");
+      const html = "<!doctype html><html><head><meta charset=\"utf-8\"><base href=\"" + source.baseURI + "\"><style>" + css + "</style></head><body>" + root.outerHTML + "</body></html>";
+      try {
+        await desk.printHtml({ html, deviceName: device, widthMm: size?.[0], heightMm: size?.[1] });
+        sent = true; remove(); setTimeout(onDone, SLIP_GAP_MS);
+        return remove;
+      } catch { /* printer offline / renamed: fall back to the normal Print box below */ }
+    }
     win.addEventListener("afterprint", () => { sent = true; remove(); setTimeout(onDone, SLIP_GAP_MS); }, { once: true });
     win.focus(); win.print();
     return remove;
@@ -130,7 +145,11 @@ export async function preparePrint(doc: Document, frame: () => Promise<void>) {
       root.style.cssText = `display:block;position:absolute;left:-10000px;top:0;visibility:hidden;width:${width - 4}mm;height:auto;min-height:0`;
       const receipt = root.querySelector<HTMLElement>(".inv");
       const height = receipt ? Math.max(receipt.getBoundingClientRect().height, receipt.scrollHeight) : 0;
+      page.dataset.contentPx = String(height);
       page.textContent = thermalPage(width, height);
+      // Owner, 14 Nov (photo): a 45-line bill came out in two pieces with a gap and a cut between them.
+      const mm = height * 25.4 / 96;
+      if (mm + 8 > rollMax && !directPrinter("bill")) void import("./app").then(m => m.toast(`This bill is ${Math.round(mm / 10)} cm long, so it prints in pieces. For one piece: Windows printer → Printing preferences → Paper 80 x 3276 mm, then Settings › Printing › Longest bill page → 3 m.`, true));
     } finally { root.style.cssText = old; }
   }
 }
@@ -177,4 +196,25 @@ export function usePrintJob(active: boolean, onDone: () => void, job = "", onErr
     }).catch(e => { if (!cancelled) error.current?.(e.message || "Could not prepare print"); finish(); });
     return () => { cancelled = true; clean?.(); };
   }, [active, job]);
+}
+
+/* ---- direct printing in the Windows app (per computer) ---- */
+export type PrintKind = "bill" | "label" | "a4";
+export const PRINT_KINDS: [PrintKind, string][] = [["bill", "Bills (roll printer, e.g. POS-80)"], ["label", "Stickers (TSC)"], ["a4", "A4 / A5 bills and reports (e.g. Canon)"]];
+export function directPrinter(kind: PrintKind): string {
+  try { return typeof localStorage === "undefined" ? "" : localStorage.getItem("rj_printer_" + kind) || ""; } catch { return ""; }
+}
+export function setDirectPrinter(kind: PrintKind, name: string) {
+  try { name ? localStorage.setItem("rj_printer_" + kind, name) : localStorage.removeItem("rj_printer_" + kind); } catch { /* private mode */ }
+}
+/** The page's own size from its @page rule, in mm (null for auto / named sizes like A4). */
+export function pageSizeOf(root: HTMLElement): [number, number] | null {
+  const css = Array.from(root.querySelectorAll("style")).map(x => x.textContent || "").join(" ");
+  const m = css.match(/size:\s*([\d.]+)mm\s+([\d.]+)mm/);
+  return m ? [Number(m[1]), Number(m[2])] : null;
+}
+export function jobKind(root: HTMLElement): PrintKind {
+  if (root.querySelector("style[data-thermal-width]")) return "bill";
+  const s = pageSizeOf(root);
+  return s && s[0] <= 110 && s[1] <= 110 ? "label" : "a4";
 }

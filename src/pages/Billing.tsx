@@ -1,3 +1,7 @@
+import { SpeakText } from "../components/Voice";
+import { saveFollow } from "../lib/followup";
+import { rupees } from "../lib/format";
+import { balances } from "../lib/ledger";
 import { companyKindNow, typeForCompany, estimatesOnly } from "../lib/scope";
 import { upiAccounts, qrAccount, NO_QR, type UpiAccount } from "../lib/upi";
 import { askText } from "../components/AskHost";
@@ -622,6 +626,21 @@ export default function Billing({ args }: { args: string[] }) {
       const ok = pin && (await db.staff.filter(x => !!x.active && !x.deleted && x.login !== "role" && !!x.pin && x.pin === pin && can(x, "billing.discount_over")).count());
       if (!ok) return toast("Discount not approved", true);
     }
+    /* Credit lock (owner's list R-167): a customer over their credit limit (₹2 lakh if none is set) or with
+       a bill unpaid for more than 45 days can get more goods on credit only with an owner / manager PIN. */
+    const unpaid = t.net - (t.advance || 0) - (t.payments || []).reduce((a, p) => a + (p.mode === "credit" ? 0 : p.amount), 0);
+    if (t.party_id && unpaid > 100 && t.bill_type !== "return" && !can(me, "billing.discount_over") && (await db.bills.get(t.id))?.status !== "final") {
+      const party = await db.parties.get(t.party_id);
+      const owed = (await balances()).get(t.party_id) || 0;
+      const lim = party?.credit_limit || 200000_00;
+      const old = owed > 0 ? await db.bills.where("party_id").equals(t.party_id).filter(x => !x.deleted && x.status === "final" && x.bill_type !== "return" && Date.now() - Date.parse(x.at) > 45 * 86400000).count() : 0;
+      const why = owed + unpaid > lim ? `${rupees(owed)} already due + ${rupees(unpaid)} on this bill is over the ${rupees(lim)} credit limit` : old && owed > 0 ? `${rupees(owed)} is due, with bills older than 45 days` : "";
+      if (why) {
+        const pin = await askText(`${party?.name || "This customer"}: ${why}. Take payment, or owner / manager PIN to give credit:`);
+        const ok = pin && (await db.staff.filter(x => !!x.active && !x.deleted && x.login !== "role" && !!x.pin && x.pin === pin && can(x, "billing.discount_over")).count());
+        if (!ok) return toast("Credit not approved — take payment first", true);
+      }
+    }
     // never stop a sale over a setting: warn, and save the bill
     if (b.bill_type === "gst" && !shop.gstin?.trim()) toast("Add the shop's GSTIN in Settings → Shop profile: tax invoices should carry it.", true);
     let ready = t;
@@ -1031,6 +1050,7 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
   /* Owner, 5 Nov (voice): a new customer stands at the counter and tells everything at once — the whole profile opens
      here, not just name and number. Enter goes to the next box; the bill stays as it is underneath. */
   const [form, setForm] = useState<Party | null>(null);
+  const [fu, setFu] = useState({ wants: "", callback: "" });
   const create = () => {
     const isPhone = /^\+?\d[\d\s]{7,}$/.test(q.trim());
     setForm({ ...newParty(isPhone ? "" : q.trim().toUpperCase(), isPhone ? q.replace(/\D/g, "") : ""), photo_id: photo, state: "Delhi" } as Party);
@@ -1043,7 +1063,9 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
     const same = phone ? parties.find(p => p.phone.replace(/\D/g, "").endsWith(phone)) : undefined;
     if (same) { toast(`${same.name} already has ${phone} — picked them`); return pick(same); }
     const p = { ...form, name: form.name.trim().toUpperCase(), phone, gstin: form.gstin.trim().toUpperCase() };
-    await put("parties", p); pick(p);
+    await put("parties", p);
+    if (fu.wants.trim() || fu.callback) await saveFollow(p.id, { wants: fu.wants.trim(), callback: fu.callback, note: "", by: "" });
+    pick(p);
   };
   if (form) {
     const f = <K extends keyof Party>(k: K, v: Party[K]) => setForm({ ...form, [k]: v });
@@ -1062,7 +1084,7 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
           <label className="f">Name<input className="in" autoFocus={!!form.phone} value={form.name} onChange={e => f("name", e.target.value.toUpperCase())} /></label>
           <label className="f">Shop / firm name<input className="in" value={form.alt_name} onChange={e => f("alt_name", e.target.value.toUpperCase())} /></label>
           <label className="f">City / area<input className="in" value={form.city} onChange={e => f("city", e.target.value.toUpperCase())} /></label>
-          <label className="f">Address<input className="in" value={form.address} onChange={e => f("address", e.target.value)} /></label>
+          <label className="f">Address <SpeakText label="🎙" onText={t => setForm(x => x && { ...x, address: (x.address ? x.address + " " : "") + t })} /><input className="in" value={form.address} onChange={e => f("address", e.target.value)} /></label>
           <PinField pin={form.pin} address={[form.address, form.city, form.state].join(" ")} onPin={v => setForm(x => x && { ...x, pin: v })}
             onPlace={pl => setForm(x => x && { ...x, city: x.city || pinCity(pl), state: x.state || pl.state })} />
           <label className="f">State<input className="in" value={form.state} onChange={e => f("state", e.target.value)} /></label>
@@ -1070,7 +1092,11 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
           <label className="f">Type<select className="in" value={form.kind} onChange={e => f("kind", e.target.value as Party["kind"])}><option value="customer">Customer</option><option value="dealer">Dealer</option></select></label>
           <label className="f">Price<select className="in" value={form.tier} onChange={e => f("tier", e.target.value as Party["tier"])}><option value="retail">Retail</option><option value="wholesale">Wholesale</option><option value="dealer">Dealer</option></select></label>
         </div>
-        <label className="f">Notes<input className="in" value={form.notes} onChange={e => f("notes", e.target.value)} placeholder="Likes kundan sets, pays on Saturdays…" /></label>
+        <label className="f">Notes <SpeakText label="🎙 Speak" onText={t => setForm(x => x && { ...x, notes: (x.notes ? x.notes + " " : "") + t })} /><input className="in" value={form.notes} onChange={e => f("notes", e.target.value)} placeholder="Likes kundan sets, pays on Saturdays…" /></label>
+        <div className="grid g2">
+          <label className="f">Products they want / buy <SpeakText label="🎙" onText={t => setFu(x => ({ ...x, wants: (x.wants ? x.wants + ", " : "") + t }))} /><input className="in" value={fu.wants} onChange={e => setFu({ ...fu, wants: e.target.value })} placeholder="bracelets, finger rings" /></label>
+          <label className="f">Call back on<input className="in" type="date" value={fu.callback} onChange={e => setFu({ ...fu, callback: e.target.value })} /></label>
+        </div>
         <PhotoButton webcam value={form.photo_id} onChange={v => f("photo_id", v)} label="Customer photo" />
         <div className="row"><button className="btn p" onClick={saveNew}>Save & use on this bill</button>
           <button className="btn" onClick={() => setForm(null)}>Back</button>

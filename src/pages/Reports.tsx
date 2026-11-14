@@ -1,3 +1,4 @@
+import { StaffPoints } from "../components/StaffPoints";
 import { useEffect, useMemo, useState } from "react";
 import { reportData, exportExcel, type ReportRow } from "../lib/reports";
 import { localDay } from "../lib/ledger";
@@ -83,6 +84,7 @@ export default function Reports() {
     </div>
     <ReportTable rows={view} />
     {tab === "gstr" && <div className="note sm" style={{ marginTop: 12 }}>GSTR-1 summary groups GST invoices into B2B/B2C and HSN-wise taxable value. Estimates are excluded unless private estimates are unlocked.</div>}
+    {(tab === "bySalesman" || tab === "byHelper") && <StaffPoints from={from} to={to} />}
   </div>;
 }
 

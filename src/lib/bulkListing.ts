@@ -1,6 +1,7 @@
 import { db, type Product } from "./db";
 import { saveProduct } from "./products";
 import { generateListing, slugFor, cloudImage, publishBlockers } from "./listing";
+import { templateListing } from "../../api/_listing";
 import { requirePerm } from "./scope";
 
 /* ===========================================================================
@@ -127,4 +128,20 @@ export function describePlan(products: Product[]) {
   const withPhoto = products.filter(p => !!cloudImage(p)).length;
   const { ready } = planPublish(products);
   return { total: products.length, withPage, withPhoto, ready: ready.length };
+}
+
+/* Quick catalogue (owner, 14 Nov): any design with a photo can go in a shared link,
+   without waiting for an AI page. A plain page is written from what we already know
+   (item, style, colour, size, pack) — no AI call, no cost, works in a second. */
+export const photoReady = (p: Product) => !p.deleted && !!cloudImage(p);
+export async function quickPublish(products: Product[]): Promise<number> {
+  requirePerm("catalogue.share", "publishing to the catalogue");
+  let n = 0;
+  for (const p of products) {
+    if (!photoReady(p) || (p.catalogue === 1 && p.slug && p.content?.title)) continue;
+    const content = p.content?.title ? p.content : templateListing({ code: p.code, item: p.item, type: p.type, style: p.style, color: p.color, category: p.category, size: p.size, pack: p.pack });
+    await saveProduct({ ...p, content, catalogue: 1, slug: p.slug || slugFor(p, content.title || p.item) });
+    n++;
+  }
+  return n;
 }

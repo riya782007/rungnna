@@ -2,7 +2,7 @@ import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
 import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, setSetting, type ExpenseCategory, type MoneyMode, type VoucherType } from "../lib/db";
-import { EXPENSES, saveVoucher } from "../lib/vouchers";
+import { EXPENSES, STAFF_EXPENSES, saveVoucher } from "../lib/vouchers";
 import { useApp, toast } from "../lib/app";
 import { rupees, billAmount, toPaise, when } from "../lib/format";
 import { Head } from "../components/common";
@@ -15,6 +15,8 @@ export default function Vouchers() {
   const [mode, setMode] = useState<MoneyMode>("cash");
   const [party, setParty] = useState("");
   const [category, setCategory] = useState<ExpenseCategory>("other");
+  const [who, setWho] = useState("");
+  const staffList = useLiveQuery(() => db.staff.filter(s => !s.deleted && s.login !== "role").toArray(), [], []);
   const [note, setNote] = useState("");
   const parties = useLiveQuery(() => db.parties.filter(p => !p.deleted).toArray(), [], []);
   const vouchers = useLiveQuery(() => db.vouchers.orderBy("at").filter(inStore).reverse().limit(80).toArray(), [], []);
@@ -26,7 +28,7 @@ export default function Vouchers() {
     const a = toPaise(amount);
     if (!a) return toast("Enter amount", true);
     if ((type === "payment" || type === "receipt") && !picked) return toast("Choose party", true);
-    const v = await saveVoucher({ type, amount: a, mode, party: picked, category: type === "expense" ? category : undefined, note, by: me?.id || "" });
+    const v = await saveVoucher({ type, amount: a, mode, party: picked, category: type === "expense" ? category : undefined, note: type === "expense" && STAFF_EXPENSES.includes(category) && who ? `Staff: ${who} — ${note}` : note, by: me?.id || "" });
     toast("Saved " + v.no);
     setAmount(""); setNote("");
   };
@@ -39,6 +41,7 @@ export default function Vouchers() {
         {type !== "journal" && <div className="seg">{(["cash", "upi", "bank", "cheque"] as MoneyMode[]).map(m => <button key={m} aria-pressed={mode === m} onClick={() => setMode(m)}>{m.toUpperCase()}</button>)}</div>}
         {(type === "payment" || type === "receipt") && <label className="f">Party<select className="in" value={party} onChange={e => setParty(e.target.value)}><option value="">Choose</option>{parties.map(p => <option key={p.id} value={p.id}>{p.name} · {p.kind}</option>)}</select></label>}
         {type === "expense" && <label className="f">Category<select className="in" value={category} onChange={e => setCategory(e.target.value as ExpenseCategory)}>{EXPENSES.map(x => <option key={x} value={x}>{x}</option>)}</select></label>}
+        {type === "expense" && STAFF_EXPENSES.includes(category) && <label className="f">For staff member<select className="in" value={who} onChange={e => setWho(e.target.value)}><option value="">Choose</option>{staffList.map(s => <option key={s.id}>{s.name}</option>)}</select></label>}
         {type === "journal" && <div className="grid g2"><input className="in" placeholder="Debit account" onChange={e => setNote(n => n || e.target.value)} /><input className="in" placeholder="Credit account" /></div>}
         <input className="in" placeholder="Note" value={note} onChange={e => setNote(e.target.value)} />
         <button className="btn p big" onClick={save}><Icon n="plus" size={18} />Save voucher</button>
