@@ -607,9 +607,12 @@ export default function Billing({ args }: { args: string[] }) {
     const offPct = list ? ((list - t.gross + t.discount) / list) * 100 : 0;
     // the shop's own usual estimate discount (Settings: e.g. 50% + 3% less = 51.5% off) is the owner's decision,
     // so on an estimate the PIN is asked only above it (or above the plain limit, whichever is higher)
-    const usualPct = b.bill_type === "estimate" ? (() => { const d = Math.min(100, shop.est_disc_pct || 0), l = Math.min(100, shop.est_less_pct || 0); return 100 - (100 - d) * (100 - l) / 100; })() : 0;
+    /* Owner, 14 Nov (voice): "the manager PIN is asked again and again for the discount — customers are stuck waiting".
+       The usual 50% (now on by default) plus the "less" given to good customers (up to 5%, or the shop's own usual
+       less if higher) never asks; and a few paise of rounding on a small bill (50.2% on ₹3.41) is not a discount. */
+    const usualPct = b.bill_type === "estimate" ? (() => { const d = Math.min(100, shop.est_disc_pct || 0), l = Math.min(100, Math.max(shop.est_less_pct || 0, 5)); return 100 - (100 - d) * (100 - l) / 100; })() : 0;
     const limit = Math.max(shop.max_disc ?? 10, usualPct);
-    if (offPct > limit + 0.01 && !can(me, "discount")) {
+    if (offPct > limit + 0.5 && !can(me, "discount")) {
       const pin = await askText(`Discount is ${offPct.toFixed(1)}% — above the ${+limit.toFixed(1)}% limit. Owner or manager PIN:`);
       const ok = pin && (await db.staff.filter(x => !!x.active && !x.deleted && x.login !== "role" && !!x.pin && x.pin === pin && can(x, "billing.discount_over")).count());
       if (!ok) return toast("Discount not approved", true);
