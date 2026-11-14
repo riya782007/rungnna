@@ -1093,7 +1093,7 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
           <label className="f">Shop / firm name<input className="in" value={form.alt_name} onChange={e => f("alt_name", e.target.value.toUpperCase())} /></label>
           <label className="f">City / area<input className="in" value={form.city} onChange={e => f("city", e.target.value.toUpperCase())} /></label>
           <label className="f">Address <SpeakText label="🎙" onText={t => setForm(x => x && { ...x, address: (x.address ? x.address + " " : "") + t })} /><input className="in" value={form.address} onChange={e => f("address", e.target.value)} /></label>
-          <PinField pin={form.pin} address={[form.address, form.city, form.state].join(" ")} onPin={v => setForm(x => x && { ...x, pin: v })}
+          <PinField pin={form.pin} address={form.address || form.city ? [form.address, form.city, form.state].join(" ") : ""} onPin={v => setForm(x => x && { ...x, pin: v })}
             onPlace={pl => setForm(x => x && { ...x, city: x.city || pinCity(pl), state: x.state || pl.state })} />
           <label className="f">State<input className="in" value={form.state} onChange={e => f("state", e.target.value)} /></label>
           <label className="f">GSTIN<input className="in mono" value={form.gstin} onChange={e => f("gstin", e.target.value.toUpperCase())} placeholder="if they have one" /></label>

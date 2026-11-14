@@ -32,3 +32,9 @@ it("reads scale lines and counts pieces by weight", () => {
   expect(piecesFromWeight(4100, 4, 100)).toMatchObject({ pieces: 1000, sure: true });
   expect(piecesFromWeight(1002, 4).sure).toBe(false);
 });
+
+import { pinsForAddress } from "../src/lib/pincode";
+it("suggests no PIN code when only the state is known", () => {
+  const t = { byWord: new Map([["delhi", [0]]]), rows: [] } as any;
+  expect(pinsForAddress(t, "", 4, "Delhi")).toEqual([]);
+});

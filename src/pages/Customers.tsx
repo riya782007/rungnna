@@ -210,7 +210,7 @@ function PartyView({ id }: { id: string }) {
             <label className="f">State<input className={"in" + (p.state && !stateCode(p.state) ? " bad" : "")} list="gst-states" value={p.state} onChange={e => set("state", e.target.value)} placeholder="Delhi" title={p.state && !stateCode(p.state) ? "Not a recognised state — pick from the list so GST is right" : ""} />
               <datalist id="gst-states">{Object.entries(GST_STATES).map(([c, n]) => <option key={c} value={n} />)}</datalist></label>
             <label className="f">City<input className="in" value={p.city} onChange={e => set("city", e.target.value)} /></label>
-            <PinField pin={p.pin || ""} address={[p.address, p.city, p.state].join(" ")} onPin={v => set("pin", v)}
+            <PinField pin={p.pin || ""} address={p.address || p.city ? [p.address, p.city, p.state].join(" ") : ""} onPin={v => set("pin", v)}
               onPlace={pl => setP(x => x && { ...x, city: x.city || pinCity(pl), state: x.state || pl.state })} />
             <label className="f">Credit limit ₹<MoneyInput className="in mono" paise={p.credit_limit} onPaise={v => set("credit_limit", v)} /></label>
             <label className="f">Opening balance ₹ (old khata)<MoneyInput signed className="in mono" placeholder="0" paise={p.opening_balance || 0} onPaise={v => set("opening_balance", v)} /></label>

@@ -480,11 +480,17 @@ export function useScanOnlyIn(
         return;
       }
       if (!printable) { first = ""; snap = null; return; }
+      /* Owner, 14 Nov (video): "I type the name once, it goes back, I have to type it again and again". Two keys
+         pressed together by a fast typist (key roll-over) came within 35 ms and were taken for a scanner, and the
+         box was put back. A form in a pop-up is for typing, so it is left alone; elsewhere a scan is only decided
+         on the THIRD quick key — people don't roll three keys in a row, a scanner always does. */
+      if (e.target instanceof Element && e.target.closest(".modal, dialog[open], .new-customer")) { first = ""; snap = null; return; }
       if (!first || gap > maxGapMs) {               // could be a person typing — let it through, remember the field
         first = e.key; snap = snapshot(e.target);
         return;
       }
-      // Second key within a few ms: this is a scanner, not a person.
+      if (first.length < 2) { first += e.key; return; }
+      // Third key within a few ms of each other: this is a scanner, not a person.
       block(e);
       restore(snap);
       from = snap?.el || (e.target instanceof Element ? e.target : null);
