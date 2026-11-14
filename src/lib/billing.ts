@@ -50,7 +50,12 @@ export async function getShop(store = currentStore()): Promise<Shop> {
   /* The shop is in Sadar Bazar, Delhi. A blank state (as saved on 16 Oct) made every out-of-state tax invoice charge
      CGST + SGST while printing "Place of supply: Rajasthan": the state decides IGST, so it is never left blank. */
   const v = { ...DEFAULT_SHOP, ...(c?.value || {}) };
-  return { ...v, state: v.state || DEFAULT_SHOP.state };
+  /* Owner, 14 Nov, 13:57 (voice + photo of the old software: "DISCOUNT 50" already filled): "why can't you pre-enable
+     50%? We change it on the bill when needed." A shop profile saved while that box was blank kept 0%, so estimates
+     still opened at 0% after the default became 50%. The usual estimate discount is now always 50% unless a
+     different number is saved. */
+  const est = Number(v.est_disc_pct);
+  return { ...v, est_disc_pct: est > 0 && est <= 100 ? est : 50, state: v.state || DEFAULT_SHOP.state };
 }
 export async function saveShop(v: Shop) {
   requireAnyPerm(["settings.manage", "settings.shop"], "changing shop settings");

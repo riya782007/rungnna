@@ -51,6 +51,11 @@ const KEYS: [string, string][] = [["F2", "New"], ["F3", "Hold"], ["F4", "Held"],
 const ManualItems = lazy(() => import("../components/PosTools").then(m => ({ default: m.ManualItems })));
 const PosCalculator = lazy(() => import("../components/PosTools").then(m => ({ default: m.PosCalculator })));
 
+/* An estimate that is still empty, with no discount yet, opens with the shop's usual 50% (owner, 14 Nov: drafts
+   started before the default came on kept opening at 0%). A retail bill, or one with lines, is left as it is. */
+const usualOn = (x: Bill, shop: Shop): Bill =>
+  x.bill_type === "estimate" && !x.items.length && !x.discount_pct && !x.discount && !x.less_pct && x.price_level !== "retail" ? withEstimateDiscount(x, shop) : x;
+
 export default function Billing({ args }: { args: string[] }) {
   const { me } = useApp();
   // the custom-item row stays open on the counter PC; phones open it with "Add item"
@@ -311,7 +316,7 @@ export default function Billing({ args }: { args: string[] }) {
       const restored = d && fits(d) && d.status === "hold" && !d.no && (d.bill_type !== "estimate" || isOpen()) ? d : await resumeBillingDraft(want);
       setBox(restored ? selectedBox(restored) : 1);
       if (restored) delete (restored as BillingDraft).selected_box;   // draft-only field: never saved onto the bill
-      setB(restored ? { ...restored, items: mergeBillLines(restored.items) } : withEstimateDiscount(newBill(me?.id || "", s, want), s));
+      setB(restored ? usualOn({ ...restored, items: mergeBillLines(restored.items) }, s) : withEstimateDiscount(newBill(me?.id || "", s, want), s));
     })();
   }, [args[0]]);
   useEffect(() => { if (b && !b.no) setSetting("draft_bill", { ...b, selected_box: box }); }, [b, box]);
@@ -342,7 +347,7 @@ export default function Billing({ args }: { args: string[] }) {
       const draft = held || await resumeBillingDraft(type);
       if ((type === "estimate" || (draft && isEstimate(draft))) && !isOpen()) throw new Error("Unlock estimates before resuming");
       if (billRef.current?.id !== current?.id) throw new Error("Bill changed — choose the document again");
-      const next = draft || withEstimateDiscount(newBill(me?.id || "", shop, type), shop);
+      const next = draft ? usualOn(draft, shop) : withEstimateDiscount(newBill(me?.id || "", shop, type), shop);
       setBox(selectedBox(next));
       const clean = { ...next }; delete (clean as BillingDraft).selected_box;
       setB({ ...clean, items: mergeBillLines(clean.items) });
