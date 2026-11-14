@@ -6,5 +6,6 @@ contextBridge.exposeInMainWorld("rungnnaDesktop", {
   build: () => ipcRenderer.sendSync("rj-build"),
   onUpdateReady: cb => { ipcRenderer.on("rj-update-ready", () => cb()); },
   applyUpdate: () => ipcRenderer.invoke("rj-apply-update"),
+  checkNow: () => ipcRenderer.invoke("rj-check-now"),
   started: () => ipcRenderer.send("rj-started"),
 });

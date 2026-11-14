@@ -2,6 +2,7 @@ import { setViewCode } from "../lib/viewCode";
 import { PersonPerms } from "../components/PersonPerms";
 import { currentStore } from "../lib/scope";
 import { askText } from "../components/AskHost";
+import { appStatus, checkAppNow, applyUpdate, type AppStatus } from "../lib/update";
 import { DeleteButton } from "../components/DeleteButton";
 import { confirmDelete } from "../lib/confirm-delete";
 import { useEffect, useRef, useState } from "react";
@@ -183,6 +184,7 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
               {admin && /@/.test(sync.user) && <div className="xs mut">Another computer asks for this email's password? Press “Change password” here and set a new one — the old one is not needed — or use “Forgot password?” there to get a code on {sync.user}.</div>}</>
               : <ShopLogin />}
           </div></div>
+        <ThisAppCard />
         {boss && <div className="card"><header><h3>Backup file</h3></header>
           <div className="pad stack">
             <div className="set-intro">Everything on this device in one file. Keep a copy on a pen drive every week.</div>
@@ -233,6 +235,30 @@ function OperationsCard({ by }: { by: string }) {
         <div className="xs mut">Locked vouchers cannot be edited, deleted or voided on any role. Year close carries customer and supplier balances forward as opening balances.</div>
       </div></div>
   );
+}
+
+/* Windows / Android app (owner, 14 Nov): which version it runs, the website's version, and why it may be behind.
+   Updates download by themselves and switch over when the app is opened or idle; "Check now" looks at once. */
+function ThisAppCard() {
+  const [s, setS] = useState<AppStatus | null | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { void appStatus().then(setS); }, []);
+  if (!s) return null;
+  const short = (id: string) => (id ? id.slice(0, 7) : "—");
+  const same = !!s.live && s.live === s.active;
+  const when = (t: string) => { const d = new Date(t); return isNaN(+d) ? t : d.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); };
+  return <div className="card"><header><h3>This app</h3><span className="grow" />
+    <span className={"pill " + (same ? "ok" : s.ready ? "warn" : "bad")}>{same ? "✓ up to date" : s.ready ? "update ready" : s.live ? "older version" : "can't check"}</span></header>
+    <div className="pad stack">
+      <div className="sm">{s.kind === "windows" ? "Windows app" : "Android app"}{s.version ? " " + s.version : ""} · screens <span className="mono">{short(s.active)}</span> · website <span className="mono">{short(s.live)}</span></div>
+      {!!s.lastCheck && <div className="xs mut">Last looked {when(s.lastCheck)}{s.lastError ? " — " : ""}{s.lastError && <span className="bad-text">{s.lastError}</span>}</div>}
+      <div className="xs mut">New versions download by themselves and switch over when the app is opened, or when it is left on Home or the sign-in screen. Bills in progress are never interrupted.</div>
+      {s.shell < 2 && <div className="note warn xs">This is an older installer: it updates only while it runs, never as it opens. Install the latest {s.kind === "windows" ? "Windows installer" : "app"} once (ask Riya) — after that every update is automatic.</div>}
+      <div className="row" style={{ gap: 8 }}>
+        {s.ready && <button className="btn p sm" onClick={() => void applyUpdate()}>Update now</button>}
+        <button className="btn sm" disabled={busy} onClick={async () => { setBusy(true); try { setS(await checkAppNow()); } finally { setBusy(false); } }}>{busy ? "Checking…" : "Check now"}</button>
+      </div>
+    </div></div>;
 }
 
 /* On a connected computer: a new password for the shop login, the old one not asked (owner, 10 Nov). */

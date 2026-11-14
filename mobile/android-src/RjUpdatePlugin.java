@@ -31,7 +31,7 @@ public class RjUpdatePlugin extends Plugin {
     static final String PREFS = "RjUpdate";
     // Capacitor's own setting for where the screens are served from
     static final String CAP_PREFS = "CapWebViewSettings", CAP_PATH = "serverBasePath";
-    static final int SHELL_API = 1;
+    static final int SHELL_API = 2;   // 2: applies a downloaded version at start, reports the last check
     private volatile boolean busy = false;
 
     static File root(Context c) { return new File(c.getFilesDir(), "web-updates"); }
@@ -43,6 +43,9 @@ public class RjUpdatePlugin extends Plugin {
         o.put("active", p.getString("active", "bundled"));
         o.put("ready", p.getString("pending", ""));
         o.put("shell", SHELL_API);
+        o.put("live", p.getString("live", ""));
+        o.put("lastCheck", p.getString("lastCheck", ""));
+        o.put("lastError", p.getString("lastError", ""));
         call.resolve(o);
     }
 
@@ -57,6 +60,7 @@ public class RjUpdatePlugin extends Plugin {
                 SharedPreferences p = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
                 JSONObject m = new JSONObject(new String(get(origin + "/app-build.json?t=" + System.currentTimeMillis()), "UTF-8"));
                 String id = m.optString("id", "");
+                p.edit().putString("live", id).putString("lastCheck", new java.util.Date().toString()).putString("lastError", "").apply();
                 JSObject out = new JSObject();
                 String active = p.getString("active", "bundled"), pending = p.getString("pending", "");
                 if (id.isEmpty() || id.equals(active) || id.equals(pending) || p.getString("bad", "").contains("," + id + ",")
@@ -94,6 +98,8 @@ public class RjUpdatePlugin extends Plugin {
                 out.put("ready", id);
                 call.resolve(out);
             } catch (Exception e) {
+                getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                    .putString("lastCheck", new java.util.Date().toString()).putString("lastError", String.valueOf(e.getMessage())).apply();
                 call.reject("Update check failed: " + e.getMessage());
             } finally { busy = false; }
         }).start();
@@ -134,6 +140,17 @@ public class RjUpdatePlugin extends Plugin {
     /* Called from MainActivity before the screens load: roll back a release that never started. */
     static void watchdog(Context c) {
         SharedPreferences p = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        /* Owner, 14 Nov: apps update by themselves like the website. A version downloaded earlier is switched to as the
+           app opens (nobody is in a bill yet), as a trial: if it doesn't start, the next opening goes back. */
+        String pending = p.getString("pending", "");
+        File pendingDir = new File(root(c), pending);
+        if (!pending.isEmpty() && !p.getString("bad", "").contains("," + pending + ",") && new File(pendingDir, "index.html").exists()) {
+            String active = p.getString("active", "bundled");
+            p.edit().putString("good", p.getBoolean("trial", false) ? p.getString("good", "bundled") : active)
+                .putString("active", pending).putString("pending", "").putBoolean("trial", true).putInt("starts", 1).commit();
+            c.getSharedPreferences(CAP_PREFS, Context.MODE_PRIVATE).edit().putString(CAP_PATH, pendingDir.getAbsolutePath()).commit();
+            return;
+        }
         if (!p.getBoolean("trial", false)) return;
         int starts = p.getInt("starts", 0);
         if (starts < 2) { p.edit().putInt("starts", starts + 1).commit(); return; }

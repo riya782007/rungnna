@@ -66,7 +66,7 @@ export async function applyUpdate() {
 }
 
 export function startUpdates() {
-  if (isDesktop() || isNativeApp()) { startAppUpdates(); return; }
+  if (isDesktop() || isNativeApp()) { startAppUpdates(); watchBehind(); return; }
   if (!/^https?:$/.test(location.protocol)) return;
   apply = registerSW({
     immediate: true,
@@ -82,4 +82,57 @@ export function startUpdates() {
     },
     onRegisteredSW(_url, reg) { if (reg) setInterval(() => reg.update().catch(() => {}), 30 * 60_000); },
   });
+}
+
+/* ---------- Windows / Android app: what it runs, what the website has, and why it may be behind ----------
+   Owner, 14 Nov: "make sure the downloaded apps update by themselves, smoothly, just like the website". One computer
+   kept an old version and nobody could tell why. Settings › This app shows it, a check can be started there, and a
+   bar says so when the app is behind the website for a while. */
+export type AppStatus = { kind: "windows" | "android"; version: string; active: string; ready: string; shell: number;
+  live: string; lastCheck: string; lastError: string; canCheck: boolean };
+const liveBuild = async () => {
+  try { const r = await fetch(WEB_ORIGIN + "/app-build.json?t=" + Date.now(), { cache: "no-store" }); return r.ok ? String((await r.json())?.id || "") : ""; }
+  catch { return ""; }
+};
+export async function appStatus(): Promise<AppStatus | null> {
+  const d = desk(), n = nativeUpd();
+  if (d) {
+    const b = d.build?.() || {};
+    return { kind: "windows", version: String(d.version || ""), active: String(b.active || ""), ready: String(b.ready || ""), shell: Number(b.shell || 1),
+      live: String(b.live || "") || await liveBuild(), lastCheck: String(b.lastCheck || ""), lastError: String(b.lastError || ""), canCheck: !!d.checkNow };
+  }
+  if (n) {
+    let i: any = {};
+    try { i = await n.info(); } catch { /* an old app */ }
+    let version = "";
+    try { version = String((await (window as any).Capacitor?.Plugins?.App?.getInfo?.())?.version || ""); } catch { /* none */ }
+    return { kind: "android", version, active: String(i.active || ""), ready: String(i.ready || ""), shell: Number(i.shell || 1),
+      live: String(i.live || "") || await liveBuild(), lastCheck: String(i.lastCheck || ""), lastError: String(i.lastError || ""), canCheck: true };
+  }
+  return null;
+}
+/** Looks for a new version now; a version found is downloaded and the "New version ready" bar comes up. */
+export async function checkAppNow(): Promise<AppStatus | null> {
+  const d = desk(), n = nativeUpd();
+  try {
+    if (d?.checkNow) { const b = await d.checkNow(); if (b?.ready) { waiting = true; notify(); scheduleIdle(); } }
+    else if (n) { const r = await n.check({ origin: WEB_ORIGIN }); if (r?.ready) { waiting = true; notify(); scheduleIdle(); } }
+  } catch { /* the reason is in the status */ }
+  return appStatus();
+}
+/** True when this app has been on an older version than the website, with nothing downloaded to switch to. */
+const behindSubs = new Set<(behind: boolean) => void>();
+let behind = false;
+export const onBehind = (f: (b: boolean) => void) => { behindSubs.add(f); f(behind); return () => { behindSubs.delete(f); }; };
+export function watchBehind() {
+  if (!desk() && !nativeUpd()) return;
+  let seen = "";   // the live version that was already newer last time: one more check before saying so
+  const look = async () => {
+    const s = await checkAppNow();
+    if (!s || !s.live || s.live === s.active || s.ready) { seen = ""; if (behind) { behind = false; behindSubs.forEach(f => f(false)); } return; }
+    if (seen === s.live && !behind) { behind = true; behindSubs.forEach(f => f(true)); }
+    seen = s.live;
+  };
+  setTimeout(look, 3 * 60_000);
+  setInterval(look, 15 * 60_000);
 }

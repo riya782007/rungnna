@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState, Component, type ReactNode } from "react";
-import { onUpdate, applyUpdate } from "./lib/update";
+import { onUpdate, applyUpdate, onBehind, checkAppNow } from "./lib/update";
 import { AppProvider, useApp, useRoute, Toasts, go, toast } from "./lib/app";
 import { startSync, onSync, type SyncState } from "./lib/sync";
 import { warmScanner } from "./components/Scanner";
@@ -293,9 +293,20 @@ class Guard extends Component<{ children: ReactNode }, { err: Error | null }> {
 
 function UpdateBar() {
   const [ready, setReady] = useState(false);
+  const [behind, setBehind] = useState(false);
+  const [looking, setLooking] = useState(false);
   useEffect(() => onUpdate(setReady), []);
-  if (!ready) return null;
-  return <div className="updatebar">New version ready<button className="btn sm" onClick={() => { setReady(false); void applyUpdate(); }}>Update</button></div>;
+  useEffect(() => onBehind(setBehind), []);
+  if (ready) return <div className="updatebar">New version ready<button className="btn sm" onClick={() => { setReady(false); void applyUpdate(); }}>Update</button></div>;
+  // Windows / Android app still on an older version than the website, with nothing downloaded (owner, 14 Nov)
+  if (behind) return <div className="updatebar">This app has an older version
+    <button className="btn sm" disabled={looking} onClick={async () => {
+      setLooking(true);
+      const s = await checkAppNow().finally(() => setLooking(false));
+      if (s && !s.ready && s.live !== s.active) toast(s.lastError ? "Could not download it: " + s.lastError + ". Close the app and open it again." : "Close the app and open it again to update.", true);
+    }}>{looking ? "Checking…" : "Get it"}</button>
+    <a className="btn sm" href="#/settings/backup">Why?</a></div>;
+  return null;
 }
 
 /* Owner, 6 Nov (voice): what a person may not use, they should not know about — no "ask the owner". A screen they

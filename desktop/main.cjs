@@ -24,7 +24,7 @@ const crypto = require("node:crypto");
    to it only when the owner taps Update (or the app is idle on Home / next start). The running
    screen keeps its own files until then, so a bill in progress is never disturbed. A release
    that fails to start is rolled back to the last good one automatically. */
-const SHELL_API = 1;                           // bump when main/preload gain features new screens rely on
+const SHELL_API = 2;                           // bump when main/preload gain features new screens rely on (2: check now, status)
 const UPD_DIR = () => path.join(app.getPath("userData"), "web-updates");
 const STATE = () => path.join(UPD_DIR(), "state.json");
 const readState = () => { try { return JSON.parse(fs.readFileSync(STATE(), "utf8")); } catch { return {}; } };
@@ -41,7 +41,13 @@ function pickActive() {
     if (st.trial === st.active) { st.trialStarts = (st.trialStarts || 0) + 1; writeState(st); }
     activeDir = buildDir(st.active); activeId = st.active;
   } else { activeDir = WEB_DIR; activeId = bundledId(); }
-  if (st.pending && st.pending !== activeId && fs.existsSync(path.join(buildDir(st.pending), "index.html"))) readyId = st.pending;
+  /* Owner, 14 Nov: "make sure the apps update by themselves, just like the website". A version downloaded while the app
+     was running is switched to as the app opens — nobody is in a bill yet — instead of waiting for a tap or idle time.
+     It starts as a trial: if it doesn't start, the app goes back to this one by itself. */
+  if (st.pending && st.pending !== activeId && !(st.bad || []).includes(st.pending) && fs.existsSync(path.join(buildDir(st.pending), "index.html"))) {
+    writeState({ ...st, good: st.active && st.trial !== st.active ? st.active : st.good || "", active: st.pending, trial: st.pending, trialStarts: 1, pending: "" });
+    activeDir = buildDir(st.pending); activeId = st.pending;
+  }
 }
 
 async function downloadBuild(m) {
@@ -69,21 +75,26 @@ async function downloadBuild(m) {
   fs.renameSync(tmp, dir);
 }
 
+// what the last check found, for Settings › This app (so a computer that stopped updating says why)
+let lastCheck = "", lastError = "", liveId = "";
 async function checkWebUpdate() {
   if (updating) return;
   updating = true;
   try {
     const r = await net.fetch(WEB_ORIGIN + "/app-build.json?t=" + Date.now(), { cache: "no-store" });
-    if (!r.ok) return;
+    if (!r.ok) throw new Error("the website answered " + r.status);
     const m = await r.json();
+    liveId = m?.id || "";
     const st = readState();
-    if (!m?.id || !Array.isArray(m.files) || m.id === activeId || m.id === readyId || (st.bad || []).includes(m.id)) return;
-    if ((m.minShell || 1) > SHELL_API) return;           // needs a newer installer: checkForUpdate() offers it
+    lastCheck = new Date().toISOString(); lastError = "";
+    if (!m?.id || !Array.isArray(m.files) || m.id === activeId || m.id === readyId) return;
+    if ((st.bad || []).includes(m.id)) { lastError = "this version did not start on this computer before"; return; }
+    if ((m.minShell || 1) > SHELL_API) { lastError = "a new installer is needed for this version"; return; }   // checkForUpdate() offers it
     await downloadBuild(m);
     writeState({ ...readState(), pending: m.id });
     readyId = m.id;
     if (win && !win.isDestroyed()) win.webContents.send("rj-update-ready", m.id);
-  } catch (e) { console.warn("update check failed", e?.message || e); }
+  } catch (e) { lastCheck = new Date().toISOString(); lastError = String(e?.message || e); console.warn("update check failed", lastError); }
   finally { updating = false; }
 }
 
@@ -231,11 +242,15 @@ async function checkForUpdate() {
     const r = await net.fetch(RELEASES, { headers: { "user-agent": "rungnna-desktop", accept: "application/vnd.github+json" } });
     if (!r.ok) return;
     const rel = await r.json();
-    const latest = String(rel.tag_name || "").replace(/^desktop-v/, "");
+    const latest = String(rel.tag_name || "").replace(/^(desktop|apps)-v/, "");
     const newer = (a, b) => { const x = a.split(".").map(Number), y = b.split(".").map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
-    if (!latest || !newer(latest, app.getVersion())) return;
-    // screens update by themselves; a new installer is only needed when the live screens require it
-    try { const m = await (await net.fetch(WEB_ORIGIN + "/app-build.json?t=" + Date.now())).json(); if ((m.minShell || 1) <= SHELL_API) return; } catch { return; }
+    if (!/^\d+(\.\d+)*$/.test(latest) || !newer(latest, app.getVersion())) return;
+    // screens update by themselves; a newer installer is offered once per version (always, when the screens need it)
+    let needed = false;
+    try { const m = await (await net.fetch(WEB_ORIGIN + "/app-build.json?t=" + Date.now())).json(); needed = (m.minShell || 1) > SHELL_API; } catch { /* offline */ }
+    const st = readState();
+    if (!needed && st.offered === latest) return;
+    writeState({ ...st, offered: latest });
     const { response } = await dialog.showMessageBox(win, { type: "info", buttons: ["Download now", "Later"], defaultId: 1, title: "Update available",
       message: `Rungnna Shop OS ${latest} is ready.`, detail: "Finish the current bill, download the new version and run it. Your bills and settings stay on this computer." });
     if (response === 0) void shell.openExternal(rel.html_url);
@@ -243,7 +258,8 @@ async function checkForUpdate() {
 }
 
 ipcMain.on("rj-version", e => { e.returnValue = app.getVersion(); });
-ipcMain.on("rj-build", e => { e.returnValue = { active: activeId, ready: readyId, shell: SHELL_API }; });
+ipcMain.on("rj-build", e => { e.returnValue = { active: activeId, ready: readyId, shell: SHELL_API, live: liveId, lastCheck, lastError, checking: updating }; });
+ipcMain.handle("rj-check-now", async () => { await checkWebUpdate(); return { active: activeId, ready: readyId, shell: SHELL_API, live: liveId, lastCheck, lastError }; });
 ipcMain.handle("rj-apply-update", () => applyWebUpdate());
 ipcMain.on("rj-started", () => startedOk());
 app.on("second-instance", () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
@@ -253,7 +269,10 @@ app.whenReady().then(() => {
   permissions(session.defaultSession);
   createWindow();
   setTimeout(checkForUpdate, 20_000);
+  setInterval(checkForUpdate, 6 * 60 * 60_000);
   setTimeout(checkWebUpdate, 15_000);
-  setInterval(checkWebUpdate, 20 * 60_000);
+  setInterval(checkWebUpdate, 10 * 60_000);
+  // back at the computer after a while (or the internet came back): look again
+  app.on("browser-window-focus", () => { if (!lastCheck || Date.now() - Date.parse(lastCheck) > 5 * 60_000) void checkWebUpdate(); });
 });
 app.on("window-all-closed", () => app.quit());
