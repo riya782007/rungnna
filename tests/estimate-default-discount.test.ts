@@ -14,7 +14,8 @@ describe("a new estimate starts with the shop's usual discount", () => {
   });
   it("leaves tax invoices and challans alone, and a shop with no usual discount", () => {
     expect(withEstimateDiscount({ ...newBill("t", shop, "estimate"), bill_type: "gst" } as any, shop).discount_pct).toBe(0);
-    const plain = withEstimateDiscount(newBill("t", DEFAULT_SHOP, "estimate"), DEFAULT_SHOP);
+    // a shop that saved 0% (14 Nov: the default is 50%, so "none" is a saved 0)
+    const plain = withEstimateDiscount(newBill("t", DEFAULT_SHOP, "estimate"), { ...DEFAULT_SHOP, est_disc_pct: 0 });
     expect(plain.discount_pct).toBe(0);
     expect(plain.less_pct).toBeFalsy();
   });

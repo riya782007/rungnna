@@ -31,6 +31,11 @@ export const DEFAULT_SHOP: Shop = {
   name: "RUNGNNA JEWELLERY & CO", tagline: "Fashion & Imitation Jewellery", address: "", phone: "", whatsapp: "", gstin: "",
   state: "Delhi", upi: "", bank: "", terms: "Goods once sold will not be taken back. Subject to local jurisdiction.",
   hsn: "7117", gst_rate: 3, gst_mode: "exclusive", max_disc: 10,
+  /* Owner, 14 Nov (voice): "the 50% doesn't come by itself any more — we put it by hand every time, and a customer
+     argued over a bill without it. It should be on from the start; we change it ourselves when needed." A counter
+     whose shop details came without the setting (not yet synced, or saved from such a counter) started estimates at
+     0%. 50% is now the shop's default; a different value saved in Settings (0 included) still wins. */
+  est_disc_pct: 50,
 };
 /* Companies (owner, 27 Oct): every company other than the main one has its own details and GSTIN on its bills
    (config "shop_<id>", started from the main company's when it is made). A branch saved before that has none yet
