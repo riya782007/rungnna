@@ -172,9 +172,12 @@ export function thermalPage(width: number, heightPx: number, max = rollMax) {
      always printed at full size) and split a long bill into EQUAL pages sized to the bill, so the last page is not a
      full blank one (4 Nov: the reason the cap had been removed). Each page keeps 4 mm for its margins and 10 mm so a
      line that does not fit moves whole to the next page instead of pushing out one more page. */
-  const content = heightPx * 25.4 / 96;
-  const pages = content + 8 <= max ? 1 : Math.ceil(content / (max - 14));
-  const height = pages === 1 ? Math.max(30, Math.ceil(content + 8)) : Math.ceil(content / pages + 14);
+  /* Owner, 15 Nov (photo): the last line of a bill ("Total due") came out alone on a second slip. The printer drew
+     the bill a little longer than the screen measured it, so it spilled over. Each page now keeps 3% + 12 mm spare;
+     the spare is blank paper after the bill, never a cut through it. */
+  const content = heightPx * 25.4 / 96 * 1.03;
+  const pages = content + 12 <= max ? 1 : Math.ceil(content / (max - 18));
+  const height = pages === 1 ? Math.max(30, Math.ceil(content + 12)) : Math.ceil(content / pages + 18);
   return `@page{size:${width}mm ${height}mm;margin:2mm 1mm}@page rj-receipt{size:${width}mm ${height}mm;margin:2mm 1mm}`;
 }
 

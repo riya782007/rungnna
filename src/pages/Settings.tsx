@@ -682,6 +682,7 @@ function ShopProfile() {
           {/* Owner, 27 Oct: "the discount didn't come by itself like we were used to, so the boy didn't give it" */}
           <label className="f">Usual estimate discount (%)<input className="in" inputMode="decimal" placeholder="e.g. 50" value={s.est_disc_pct || ""} onChange={e => setS({ ...s, est_disc_pct: Math.min(100, Number(e.target.value.replace(/[^\d.]/g, "")) || 0) })} />
             <span className="xs mut">Every new estimate starts with it; change it on the bill when needed. No PIN for it.</span></label>
+          <label className="f row" style={{ gap: 8 }}><input type="checkbox" checked={!!s.old_balance_on_bill} onChange={e => setS({ ...s, old_balance_on_bill: e.target.checked })} /> Print the customer's old balance on new bills (can be changed on each bill)</label>
           <label className="f">Usual less after it (%)<input className="in" inputMode="decimal" placeholder="e.g. 3" value={s.est_less_pct || ""} onChange={e => setS({ ...s, est_less_pct: Math.min(100, Number(e.target.value.replace(/[^\d.]/g, "")) || 0) })} />
             <span className="xs mut">Cut on what is left after the discount (50% then 3% = 51.5% off). Blank = none.</span></label>
           <label className="f">GST on rates<select className="in" value={s.gst_mode} onChange={e => setS({ ...s, gst_mode: e.target.value as any })}><option value="exclusive">Added on top of rate</option><option value="inclusive">Already included in rate</option></select></label>

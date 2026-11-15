@@ -1,3 +1,4 @@
+import { GST_STATES } from "../lib/states";
 import { sendToFloors, listPicks, ticketLeft, floorName } from "../lib/picking";
 import { SpeakText } from "../components/Voice";
 import { saveFollow } from "../lib/followup";
@@ -26,7 +27,7 @@ import { ShopDetailsAsk, shopNeedsTaxDetails } from "../components/ShopDetailsAs
 import { NameItemCodes, unnamedCodes } from "../components/NameItemCodes";
 import { isRfidTag, normTag, soldBill, TagSet, Recent } from "../lib/rfid";
 import { PinField, pinCity } from "../components/PinField";
-import { discError, newBill, withEstimateDiscount, lineFrom, priceFor, totals, gstLabel, fixLine, finalize, due, getShop, newParty, partyDue, shareBill, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
+import { discError, newBill, withEstimateDiscount, lineFrom, priceFor, totals, gstLabel, fixLine, finalize, due, getShop, newParty, partyDue, shareBill, isSale, DEFAULT_SHOP, seriesOf, fy, counterCode, type Shop } from "../lib/billing";
 import { voiceBill } from "../lib/ai";
 import { useApp, toast, beep, go } from "../lib/app";
 import { can } from "../lib/roles";
@@ -976,6 +977,7 @@ export default function Billing({ args }: { args: string[] }) {
           <Payments pays={b.payments} left={t.net - b.advance} onChange={payments => set({ payments })}
             accounts={b.bill_type === "return" ? [] : upiAccounts(shop)} qr={qrAccount(b, shop)?.name || NO_QR} onQr={pay_to => set({ pay_to })} />
           <div className={"sumrow " + (balance > 0 ? "due" : "")}><span>{balance > 0 ? "Balance (credit)" : balance < 0 ? "Return to customer" : "Balance"}</span><b className="mono">{billAmount(Math.abs(balance))}</b></div></>}
+          {b.party_id && isSale(b) && <OldBalance bill={b} shop={shop} onChange={v => set({ prev_due: v ? undefined : 0 })} />}
           </div>
         </aside>
       </div>
@@ -1094,8 +1096,9 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
           <label className="f">City / area<input className="in" value={form.city} onChange={e => f("city", e.target.value.toUpperCase())} /></label>
           <label className="f">Address <SpeakText label="🎙" onText={t => setForm(x => x && { ...x, address: (x.address ? x.address + " " : "") + t })} /><input className="in" value={form.address} onChange={e => f("address", e.target.value)} /></label>
           <PinField pin={form.pin} address={form.address || form.city ? [form.address, form.city, form.state].join(" ") : ""} onPin={v => setForm(x => x && { ...x, pin: v })}
-            onPlace={pl => setForm(x => x && { ...x, city: x.city || pinCity(pl), state: x.state || pl.state })} />
-          <label className="f">State<input className="in" value={form.state} onChange={e => f("state", e.target.value)} /></label>
+            onPlace={pl => setForm(x => x && { ...x, city: x.city || pinCity(pl), state: pl.state || x.state })} />
+          <label className="f">State<input className="in" list="gst-state-list" value={form.state} onChange={e => f("state", e.target.value)} onBlur={e => { const m = Object.values(GST_STATES).find(n => n.toLowerCase() === e.target.value.trim().toLowerCase()); if (m) f("state", m); }} />
+            <datalist id="gst-state-list">{Object.values(GST_STATES).map(n => <option key={n} value={n} />)}</datalist></label>
           <label className="f">GSTIN<input className="in mono" value={form.gstin} onChange={e => f("gstin", e.target.value.toUpperCase())} placeholder="if they have one" /></label>
           <label className="f">Type<select className="in" value={form.kind} onChange={e => f("kind", e.target.value as Party["kind"])}><option value="customer">Customer</option><option value="dealer">Dealer</option></select></label>
           <label className="f">Price<select className="in" value={form.tier} onChange={e => f("tier", e.target.value as Party["tier"])}><option value="retail">Retail</option><option value="wholesale">Wholesale</option><option value="dealer">Dealer</option></select></label>
@@ -1214,4 +1217,13 @@ function PickStatus({ billId }: { billId: string }) {
   const ts = useLiveQuery(() => listPicks().then(r => r.filter(t => t.source_id === billId && t.status !== "cancelled")), [billId], []);
   if (!ts.length) return null;
   return <span className="row" style={{ gap: 4 }}>{ts.map(t => <span key={t.id} className={"pill " + (t.status === "done" ? "ok" : "warn")}>{floorName(t.floor)} {t.status === "done" ? "✓" : ticketLeft(t)}</span>)}</span>;
+}
+
+/* The customer's old balance on this bill: shown here, printed only when ticked (owner, 15 Nov). */
+function OldBalance({ bill, shop, onChange }: { bill: Bill; shop: Shop; onChange: (add: boolean) => void }) {
+  const owed = useLiveQuery(() => balances().then(m => m.get(bill.party_id!) || 0), [bill.party_id], 0);
+  const add = bill.prev_due !== 0;
+  useEffect(() => { if (bill.prev_due === undefined && bill.status !== "final" && !shop.old_balance_on_bill) onChange(false); }, [bill.id, bill.party_id]);
+  if (!owed || bill.status === "final") return null;
+  return <label className="sumrow" style={{ cursor: "pointer" }}><span><input type="checkbox" checked={add} onChange={e => onChange(e.target.checked)} /> Add old balance on the bill</span><b className="mono">{billAmount(owed)}</b></label>;
 }

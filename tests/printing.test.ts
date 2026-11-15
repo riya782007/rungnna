@@ -7,9 +7,9 @@ import { manualLine } from "../src/lib/pos";
 import { preparePrint, thermalPage, receiptCut, receiptCutSetup, MAX_ROLL_PAGE } from "../src/lib/printing";
 describe("thermal invoices", () => {
   it("splits a long receipt into equal pages the driver prints at full size", () => {
-    // 2400 px = 635 mm of bill → 3 pages of 226 mm, not one 643 mm page the driver shrinks
-    expect(thermalPage(80, 2400)).toBe("@page{size:80mm 226mm;margin:2mm 1mm}@page rj-receipt{size:80mm 226mm;margin:2mm 1mm}");
-    expect(thermalPage(58, 100)).toContain("size:58mm 35mm");
+    // 2400 px = 635 mm of bill (+3% spare) → 3 pages of 237 mm, not one 643 mm page the driver shrinks
+    expect(thermalPage(80, 2400)).toBe("@page{size:80mm 237mm;margin:2mm 1mm}@page rj-receipt{size:80mm 237mm;margin:2mm 1mm}");
+    expect(thermalPage(58, 100)).toContain("size:58mm 40mm");
   });
   it("defaults to the confirmed half-cut profile without accepting invalid settings", () => {
     for (const value of [undefined, null, "partial", "unknown", "toString"]) expect(receiptCut(value)).toBe("partial");
@@ -37,14 +37,14 @@ describe("thermal invoices", () => {
     expect(events).toEqual(["fonts", "image", "frame", "frame"]);
   });
   it("uses valid measured thermal dimensions instead of width plus auto", () => {
-    expect(thermalPage(80, 960)).toBe("@page{size:80mm 262mm;margin:2mm 1mm}@page rj-receipt{size:80mm 262mm;margin:2mm 1mm}");
-    expect(thermalPage(80, 6000)).toBe("@page{size:80mm 279mm;margin:2mm 1mm}@page rj-receipt{size:80mm 279mm;margin:2mm 1mm}");
+    expect(thermalPage(80, 960)).toBe("@page{size:80mm 274mm;margin:2mm 1mm}@page rj-receipt{size:80mm 274mm;margin:2mm 1mm}");
+    expect(thermalPage(80, 6000)).toBe("@page{size:80mm 252mm;margin:2mm 1mm}@page rj-receipt{size:80mm 252mm;margin:2mm 1mm}");
     for (let px = 50; px < 20000; px += 37) {
       const mm = Number(/size:80mm (\d+)mm/.exec(thermalPage(80, px))![1]), content = px * 25.4 / 96;
       expect(mm).toBeLessThanOrEqual(MAX_ROLL_PAGE);
-      const pages = content + 8 <= MAX_ROLL_PAGE ? 1 : Math.ceil(content / (MAX_ROLL_PAGE - 14));
-      expect(pages * (mm - 14)).toBeGreaterThanOrEqual(pages === 1 ? content - 6 : content);   // the bill fits
-      expect(pages * mm - content).toBeLessThan(Math.max(30, 15 * pages));                     // no blank page at the end
+      const pages = content * 1.03 + 12 <= MAX_ROLL_PAGE ? 1 : Math.ceil(content * 1.03 / (MAX_ROLL_PAGE - 18));
+      expect(pages * (mm - 12)).toBeGreaterThanOrEqual(content * 1.03 - 1);                    // the bill fits, with 3% spare
+      expect(pages * mm - content).toBeLessThan(Math.max(30, 0.03 * content + 20 * pages));      // no blank page at the end
     }
     expect(() => thermalPage(90, 100)).toThrow();
     expect(() => thermalPage(80, 0)).toThrow();
@@ -82,6 +82,6 @@ describe("thermal invoices", () => {
 describe("longest page per computer", () => {
   it("keeps a 30-line bill on one page when the printer takes long pages", () => {
     expect(thermalPage(80, 1200)).toMatch(/size:80mm 1\d\dmm/);         // ~317 mm at 28 cm pages → two pieces
-    expect(thermalPage(80, 1200, 3000)).toContain("size:80mm 326mm");     // one piece on long roll paper
+    expect(thermalPage(80, 1200, 3000)).toContain("size:80mm 340mm");     // one piece on long roll paper
   });
 });

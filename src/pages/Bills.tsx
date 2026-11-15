@@ -47,7 +47,12 @@ function BillList() {
   const since = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - range); return d.toISOString(); }, [range]);
   const bills = useLiveQuery(() => db.bills.where("at").aboveOrEqual(since).reverse().sortBy("at"), [since], []);
   useEffect(() => { if (!open) { setSel(new Set()); if (type === "estimate") setType(""); } }, [open]);
-  const list = bills.filter(b => inStore(b) && visibleBill(b, open) && (!type || b.bill_type === type) && (!status || b.status === status) &&
+  /* Owner, 14 Nov 18:06 (said "2-3 times before"): the billing counter must be able to reprint one customer's bill,
+     but not see everybody's bills and the day's totals. Without "See all bills" the list stays empty until a
+     customer name, mobile or bill number is typed, and the totals are not shown. */
+  const all = can(me, "bills.all");
+  const searchOnly = !all && q.trim().length < 3;
+  const list = searchOnly ? [] : bills.filter(b => inStore(b) && visibleBill(b, open) && (!type || b.bill_type === type) && (!status || b.status === status) &&
     (!q || (b.no + " " + b.party_name + " " + b.party_phone).toLowerCase().includes(q.toLowerCase())));
   const fin = list.filter(b => b.status === "final" && isSale(b));
   const sum = (f: (b: Bill) => number) => fin.reduce((a, b) => a + f(b), 0);
@@ -73,19 +78,19 @@ function BillList() {
         {manage && <DeleteButton className="btn bad" onDelete={() => setDelAll(true)}>Delete all estimates</DeleteButton>}
         <button className="btn p" onClick={() => go("bill")}><Icon n="plus" size={18} />New bill</button>
       </Head>
-      <div className={"grid " + (open ? "g4" : "g3")} style={{ marginBottom: 12 }}>
+      {all && <div className={"grid " + (open ? "g4" : "g3")} style={{ marginBottom: 12 }}>
         <div className="tile"><div className="k">Sales</div><div className="v">{rupees(sum(b => b.net))}</div><div className="xs mut">{fin.length} bills{cns.length ? ` · returns ${rupees(cns.reduce((a, b) => a + b.net, 0))}` : ""}</div></div>
         <div className="tile"><div className="k">GST invoices</div><div className="v">{rupees(fin.filter(b => b.bill_type === "gst").reduce((a, b) => a + b.net, 0))}</div><div className="xs mut">GST {rupees(sum(b => b.gst))}</div></div>
         {open && <div className="tile"><div className="k">Estimates</div><div className="v">{rupees(fin.filter(b => b.bill_type === "estimate").reduce((a, b) => a + b.net, 0))}</div><div className="xs mut">{fin.filter(b => b.bill_type === "estimate").length} bills</div></div>}
         <div className="tile"><div className="k">Credit given</div><div className="v" style={{ color: "var(--rose)" }}>{rupees(sum(b => Math.max(0, due(b))))}</div><div className="xs mut">{sum(b => b.total_qty)} pieces sold</div></div>
-      </div>
+      </div>}
       <div className="card pad stack" style={{ marginBottom: 12 }}>
         <div className="row">
           <div className="chips">{RANGES.map(([l, n]) => <button key={l} className="chip" aria-pressed={range === n} onClick={() => setRange(n)}>{l}</button>)}</div>
           <select className="in" style={{ width: "auto" }} value={type} onChange={e => setType(e.target.value as any)}>
             <option value="">All types</option><option value="gst">GST invoices</option>{open && <option value="estimate">Estimates</option>}<option value="challan">Challans</option><option value="return">Credit notes</option></select>
           <select className="in" style={{ width: "auto" }} value={status} onChange={e => setStatus(e.target.value as any)}><option value="">All status</option><option value="final">Final</option><option value="hold">On hold</option><option value="merged">Merged / invoiced</option><option value="void">Cancelled</option>{open && <option value="converted">Converted</option>}</select>
-          <input className="in grow" placeholder="Bill no, customer, phone" value={q} onChange={e => setQ(e.target.value)} />
+          <input className="in grow" autoFocus={!all} placeholder={all ? "Bill no, customer, phone" : "Type customer name, mobile or bill no. to find the bill"} value={q} onChange={e => setQ(e.target.value)} />
         </div>
         {canBill && <div className="row"><SelectAll ids={list.filter(tickable).map(b => b.id)} selected={sel} onChange={setSel} label="Select all eligible bills shown" />
           <span className="sm mut grow">{selected.length
@@ -111,7 +116,7 @@ function BillList() {
             <td><span className={"pill " + (b.status === "void" ? "bad" : b.status === "hold" ? "warn" : b.status === "final" ? "ok" : "")}>{statusText(b)}</span></td>
           </tr>))}
           {!list.length && <tr><td colSpan={8} className="empty">No bills in this range.</td></tr>}
-        </tbody></table></div>
+        </tbody></table>{searchOnly && <div className="empty"><b>Find a customer's bill</b>Type the customer's name, mobile or the bill number above.</div>}</div>
       {del && <DeleteEstimates bills={del} onClose={() => { setDel(null); setSel(new Set()); }} />}
       {delAll && <DeleteEstimates all onClose={() => { setDelAll(false); setSel(new Set()); }} />}
       {slips && <ManyBagLabels bills={slips} onClose={() => { setSlips(null); setSel(new Set()); }} />}

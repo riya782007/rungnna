@@ -29,6 +29,7 @@ export interface Shop {
   /** Owner, 27 Oct: every new estimate starts with the shop's usual discount (e.g. 50%) and less (e.g. 3%), as the
       old software did, so the counter never forgets it. 0 / blank = none. Changeable on each bill. */
   est_disc_pct?: number; est_less_pct?: number;
+  old_balance_on_bill?: boolean;   // owner, 15 Nov: print the customer's old balance + total due on new bills by default
 }
 export const DEFAULT_SHOP: Shop = {
   name: "RUNGNNA JEWELLERY & CO", tagline: "Fashion & Imitation Jewellery", address: "", phone: "", whatsapp: "", gstin: "",
@@ -312,7 +313,10 @@ export async function finalize(b: Bill, shopState: string, customerName = "", af
   const num = t.no ? { no: t.no, series: t.series } : await nextNo(t.bill_type, t.src_type);
   const bill: Bill = { ...t, ...num, status: "final", oversold: undefined, at: t.status === "hold" ? now() : t.at };
   // frozen the first time the bill is saved: a reprint next month still shows what was owed on the day
-  if (isSale(bill) && bill.party_id) bill.prev_due = before0?.status === "final" && before0.party_id === bill.party_id && before0.prev_due !== undefined ? before0.prev_due : await balanceBefore(bill);
+  /* Owner, 15 Nov (voice): "the customer's last balance — there should be an option to add it or not; the old
+     accounts are not all in the software yet". prev_due 0 set on the bill screen means "don't add it on this bill". */
+  if (isSale(bill) && bill.party_id && b.prev_due === 0 && !(before0?.status === "final" && before0.prev_due)) bill.prev_due = 0;
+  else if (isSale(bill) && bill.party_id) bill.prev_due = before0?.status === "final" && before0.party_id === bill.party_id && before0.prev_due !== undefined ? before0.prev_due : await balanceBefore(bill);
   else bill.prev_due = undefined;
   const oversold: { product_id: string; item: string; qty: number }[] = [];
   const bucket = new Set((await db.locations.filter(l => l.kind === "bucket").toArray()).map(l => l.id));

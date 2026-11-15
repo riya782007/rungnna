@@ -1,3 +1,5 @@
+import { createPortal } from "react-dom";
+import { usePrintJob } from "../lib/printing";
 import { TallyButton } from "../components/TallyExport";
 import { StaffPoints } from "../components/StaffPoints";
 import { useEffect, useMemo, useState } from "react";
@@ -61,10 +63,14 @@ export default function Reports() {
   const rows: ReportRow[] = data?.[tab] || [];
   const total = useMemo(() => rows.reduce((a, r) => a + (Number(r.sales) || Number(r.amount) || Number(r.cost_value) || 0), 0), [rows]);
   const view = useMemo(() => shown(rows, divisor), [rows, divisor]);
+  /* Owner, 15 Nov: "the per-day sale can't be printed — there is Tally, Excel, download, share, but no print". */
+  const [printing, setPrinting] = useState(false);
+  usePrintJob(printing, () => setPrinting(false));
   return <div>
     <Head title="Reports" sub={`${from} to ${to}${busy ? " · loading" : ""}`}>
       <button className="btn p" onClick={() => exportExcel(`${tab}-${from}-to-${to}`, shown(rows, divisor, true))}><Icon n="download" size={18} />Excel</button>
       <TallyButton from={from} to={to} store={branch} />
+      <button className="btn" onClick={() => setPrinting(true)}>Print</button>
       <button className="btn g" onClick={async () => {
         const text = view.slice(0, 20).map(r => Object.values(r).join(" · ")).join("\n");
         try { await navigator.share?.({ title: "Rungnna report", text }); } catch { await navigator.clipboard?.writeText(text); toast("Copied report text"); }
@@ -79,6 +85,11 @@ export default function Reports() {
       </div>
       <div className="tabs">{tabs.map(([k, l]) => <a key={k} href={"#/reports"} className={tab === k ? "on" : ""} onClick={e => { e.preventDefault(); setTab(k); }}>{l}</a>)}</div>
     </div>
+    {printing && createPortal(<div className="inv"><style>{"@page{size:A4;margin:10mm}"}</style>
+      <h2 style={{ margin: 0 }}>Rungnna · {tabs.find(t => t[0] === tab)?.[1]}</h2><div>{from} to {to}{divisor !== 1 ? ` · ÷ ${divisor}` : ""}</div>
+      <table className="inv-t" style={{ width: "100%", marginTop: 8 }}><thead><tr>{Object.keys(view[0] || {}).map(k => <th key={k} style={{ textAlign: "left" }}>{k}</th>)}</tr></thead>
+        <tbody>{view.map((r, i) => <tr key={i}>{Object.values(r).map((v, j) => <td key={j}>{String(v ?? "")}</td>)}</tr>)}</tbody></table>
+    </div>, document.getElementById("printroot")!)}
     <div className="hero three">
       <div><span className="k">Rows</span><b>{rows.length}</b></div>
       <div><span className="k">Primary total</span><b>{billAmount(Math.round(total / divisor))}</b></div>

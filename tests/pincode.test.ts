@@ -28,3 +28,10 @@ describe("PIN code from the address", () => {
     expect(placeOfPin(t, "500001")?.state).toBe("Telangana");
   });
 });
+
+describe("PIN code from the address, another state (owner, 15 Nov)", () => {
+  it("keeps to the state the address names", () => {
+    expect(pinsForAddress(t, "shop no 7 guru kripa market ROHTAK haryana", 4, "07")[0].pin).toBe("124001");
+    expect(pinsForAddress(t, "KAROL BAGH Delhi", 4, "07").every(p => p.state === "Delhi")).toBe(true);
+  });
+});

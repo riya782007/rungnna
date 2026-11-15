@@ -40,6 +40,7 @@ export const PERMISSION_GROUPS: PermGroup[] = [
   ]},
   { key: "sales", label: "Sales & customers", perms: [
     { key: "sales.today", label: "See today's sales" },
+    { key: "bills.all", label: "See all bills and sales totals", desc: "without it: Bills only finds one customer's bills by name / mobile / bill no., for a duplicate (owner, 14 Nov)" },
     { key: "reports.view", label: "Reports & GST returns" },
     { key: "customers.manage", label: "Customers & khata", desc: "add / edit customers" },
     { key: "customers.dues", label: "See how much customers owe", desc: "amounts in the Customers list and page (owner, 14 Nov: not for the billing counter)" },
@@ -105,7 +106,7 @@ const SEARCH = "search.use";
 export const BUILTIN_DEFAULT: Record<Staff["role"], string[]> = {
   owner: ALL_PERMS,
   // a manager already runs suppliers and purchases, so reading a supplier's bill photo belongs here
-  manager: [...STOCK, ...COUNTER, SEARCH, "sales.today", "customers.dues", "billing.rates", "billing.discount_over", "billing.void", "estimates.delete", "settings.manage", "rates.view", "suppliers.manage", "purchases.photo", "dealers.manage", "ai.use"],
+  manager: [...STOCK, ...COUNTER, SEARCH, "sales.today", "customers.dues", "bills.all", "billing.rates", "billing.discount_over", "billing.void", "estimates.delete", "settings.manage", "rates.view", "suppliers.manage", "purchases.photo", "dealers.manage", "ai.use"],
   cashier: [...STOCK, ...COUNTER, SEARCH, "sales.today"],
   salesman: [...STOCK, ...COUNTER, SEARCH],
   helper: [...STOCK, SEARCH],

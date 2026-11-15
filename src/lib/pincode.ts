@@ -48,6 +48,10 @@ export function placeOfPin(t: Table, pin: string): PinPlace | undefined {
     specific names first, and those in a district or state the address also names. */
 export function pinsForAddress(t: Table, address: string, max = 4, near = ""): PinPlace[] {
   const have = new Set(words(address)); if (!have.size) return [];
+  /* Owner, 15 Nov (photo): "Shop 7 Guru Kripa Market, Rohtak, Haryana" offered a post office called "Haryana" in
+     Moradabad and one called "Guru" in Ranchi before Rohtak. When the address names a state, only that state's
+     offices count; its district already counts extra. */
+  const states = new Set(Object.entries(GST_STATES).filter(([, n]) => { const w = words(n); return w.length && w.every(x => have.has(x)); }).map(([c]) => c));
   const scored = new Map<number, number>();
   for (const w of have) {
     if (w.length < 3 || /^\d+$/.test(w)) continue;
@@ -66,7 +70,8 @@ export function pinsForAddress(t: Table, address: string, max = 4, near = ""): P
       if (need.length && o.words.every(x => have.has(x))) score += 1;
       if (t.districtWords[o.d]?.length && t.districtWords[o.d].every(x => have.has(x))) score += 6;
       if (words(GST_STATES[o.s] || "").every(x => have.has(x))) score += 4;
-      if (near && o.s === near) score += 4;              // the shop's own state, when the address names no other
+      if (near && o.s === near && !states.size) score += 4;   // the shop's own state, when the address names no other
+      if (states.size && !states.has(o.s)) continue;
       scored.set(k, score);
     }
   }

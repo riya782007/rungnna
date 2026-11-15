@@ -224,7 +224,8 @@ function Shell() {
     default: page = <Home />;
   }
   if (!ok(route) || (route === "stores" && !master)) page = <NoAccess />;
-  else if (VIEW_ROUTES.includes(route) && me.role !== "owner" && !viewOpen) page = <ViewCodeGate />;
+  // a counter person without "See all bills" only searches one customer's bills, so needs no view code for that
+  else if (VIEW_ROUTES.includes(route) && me.role !== "owner" && !viewOpen && !(route === "bills" && !can(me, "bills.all"))) page = <ViewCodeGate />;
 
   return (
     <div className={"shell" + (compact ? " compact-menu" : "") + (route === "bill" ? " billing-shell" : "")}>
