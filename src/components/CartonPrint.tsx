@@ -30,7 +30,7 @@ const up = (v?: string) => (v || "").trim().toUpperCase();
 /* Owner, 29 Oct (voice): "a mistake in the item or the rate — how do I correct it and print just that again?" Fix opens
    the line in place: item, code, rate, pieces per box and stickers. Save & print puts it right on the saved bill and
    on the product (stock and cost are not touched) and prints that line again. */
-export type LineFix = { item: string; style: string; rate: string; pack: string; stickers: string };
+export type LineFix = { item: string; style: string; rate: string; pack: string; stickers: string; sr?: string };
 /** One change for many ticked lines (owner, 13 Nov): blank fields are left as they are. */
 export type BulkLineFix = { item?: string; type?: string; pack?: string };
 export function CartonPrint({ purchase, jobs, print, busy, autoSr, onAutoDone, onFix, onFixMany, times = 1 }: { purchase: Purchase; jobs: Job[]; print: (queue: Job[]) => Promise<unknown>; busy?: boolean; autoSr?: string; onAutoDone?: () => void; onFix?: (index: number, fix: LineFix) => Promise<Job[]>; onFixMany?: (indexes: number[], fix: BulkLineFix) => Promise<Job[]>; times?: number }) {
@@ -198,7 +198,7 @@ export function CartonPrint({ purchase, jobs, print, busy, autoSr, onAutoDone, o
     </div>}
     <div className="tw"><table className="pos-t carton-t"><thead><tr><th></th><th>Sr.</th><th>Item</th><th>Code</th><th className="r">Qty</th><th className="r">Rate</th><th className="r">X</th><th className="r">Stickers</th><th>Carton</th><th>Photo</th><th></th></tr></thead><tbody>
       {lines.map(l => editing?.i === l.i ? <tr key={l.sr} className="fixing" onClick={e => e.stopPropagation()}>
-        <td></td><td className="mono b">{l.sr}</td>
+        <td></td><td><input className="in mono" style={{ maxWidth: 60 }} aria-label="Fix line number" title="Bill Sr. — the small boxed number on this line's stickers" value={editing.f.sr ?? l.sr} onChange={e => setEditing({ ...editing, f: { ...editing.f, sr: e.target.value.replace(/[^0-9A-Za-z+\-/]/g, "").slice(0, 9) } })} /></td>
         <td><input className="in" aria-label="Fix item" value={editing.f.item} onChange={e => setEditing({ ...editing, f: { ...editing.f, item: e.target.value } })} /></td>
         <td><input className="in mono" aria-label="Fix code" value={editing.f.style} onChange={e => setEditing({ ...editing, f: { ...editing.f, style: e.target.value } })} /></td>
         <td className="r">{l.qty}</td>
@@ -221,7 +221,7 @@ export function CartonPrint({ purchase, jobs, print, busy, autoSr, onAutoDone, o
           <button type="button" data-sr={l.sr} className={"btn sm" + (prog.done[l.sr] ? "" : " p")} disabled={working || !l.stickers}
             onClick={e => { e.stopPropagation(); void printLine(l); }}>{prog.done[l.sr] ? "Print again" : "Print"} {l.stickers}</button>
           {onFix && <button type="button" className="btn sm" disabled={working} title="Correct the item, code, rate or packet of this line and print it again"
-            onClick={e => { e.stopPropagation(); setEditing({ i: l.i, f: { item: l.item, style: l.style, rate: l.rate ? (l.rate / 100).toFixed(2) : "", pack: String(l.pack), stickers: l.print_qty !== undefined ? String(l.print_qty) : "" } }); }}>Fix</button>}
+            onClick={e => { e.stopPropagation(); setEditing({ i: l.i, f: { item: l.item, style: l.style, rate: l.rate ? (l.rate / 100).toFixed(2) : "", pack: String(l.pack), stickers: l.print_qty !== undefined ? String(l.print_qty) : "", sr: l.sr } }); }}>Fix</button>}
         </div></td>
       </tr>)}
     </tbody></table></div>

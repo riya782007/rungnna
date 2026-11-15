@@ -160,24 +160,28 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
     });
     return out;
   }
+  /* Owner, 15 Nov (voice): "the copy command is only in the manual — no button for it". Ctrl+D and the
+     "Same as above" button both copy the cell above into the cell the cursor is in (or into all ticked lines). */
+  function copyAbove(): boolean {
+    const m = /^(\w+) line (\d+)$/.exec((document.activeElement as HTMLElement | null)?.getAttribute("aria-label") || "");
+    if (!m) { toast("Click in a box of a line first (Item, Style, Qty…), then Same as above", true); return false; }
+    const k = m[1] as Field, at = Number(m[2]) - 1, rows = draftRef.current.rows;
+    const ticked = rows.map((r, i) => (selection.has(r.review_id || "") ? i : -1)).filter(i => i >= 0 && i !== at);
+    const value = ticked.length ? String((rows[at] as any)[k] ?? "") : String((rows[at - 1] as any)?.[k] ?? "");
+    if (!ticked.length && at < 1) return false;
+    const targets = new Set(ticked.length ? ticked : [at]);
+    set({ rows: rows.map((r, i) => targets.has(i) ? { ...r, [k]: value, ...(k === "style" ? { autoStyle: false } : {}), ...(k === "pack" ? { packSource: "manual" as const, stickers: "" } : {}), ...(["item", "unit"].includes(k) ? { item_code: undefined } : {}) } : r) });
+    toast(ticked.length ? `Copied to ${ticked.length} ticked line${ticked.length === 1 ? "" : "s"}` : "Copied from the line above");
+    return true;
+  }
   function onPurchaseGridKey(e: React.KeyboardEvent<HTMLDivElement>) {
     const key = e.key;
     /* Owner, 29 Oct (voice): "like Excel — copy it down so the same item isn't typed letter by letter again".
        Ctrl+D in a cell copies the cell above (as in Excel). With lines ticked, it copies this cell to all of them. */
     if ((e.ctrlKey || e.metaKey) && !e.altKey && key.toLowerCase() === "d") {
-      const m = /^(\w+) line (\d+)$/.exec((document.activeElement as HTMLElement | null)?.getAttribute("aria-label") || "");
-      if (!m) return;
-      e.preventDefault();
-      const k = m[1] as Field, at = Number(m[2]) - 1, rows = draftRef.current.rows;
-      const ticked = rows.map((r, i) => (selection.has(r.review_id || "") ? i : -1)).filter(i => i >= 0 && i !== at);
-      const value = ticked.length ? String((rows[at] as any)[k] ?? "") : String((rows[at - 1] as any)?.[k] ?? "");
-      if (!ticked.length && at < 1) return;
-      const targets = new Set(ticked.length ? ticked : [at]);
-      set({ rows: rows.map((r, i) => targets.has(i) ? { ...r, [k]: value, ...(k === "style" ? { autoStyle: false } : {}), ...(k === "pack" ? { packSource: "manual" as const, stickers: "" } : {}), ...(["item", "unit"].includes(k) ? { item_code: undefined } : {}) } : r) });
-      toast(ticked.length ? `Copied to ${ticked.length} ticked line${ticked.length === 1 ? "" : "s"}` : "Copied from the line above");
+      if (copyAbove()) e.preventDefault();
       return;
-    }
-    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Enter"].includes(key)) return;
+    }    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Enter"].includes(key)) return;
     if (key === "Enter" && (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.nativeEvent.isComposing)) return;
     const el = document.activeElement as HTMLElement | null;
     const td = el?.closest("td");
@@ -712,7 +716,10 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
     const prod = await db.products.get(line.product_id);
     if (prod) await saveProduct({ ...prod, item, style, model: style || prod.model, ...(even ? { rate: even } : {}), pack, cost_code: prod.cost_code?.replace(/X\d+[A-Z]+$/i, `X${pack}${prod.type || "PCS"}`) }, true);
     const { print_qty: _old, ...rest } = line;
-    const items = p.items.map((l, i) => i === index ? { ...rest, item, style, ...(even ? { rate: even } : {}), label_pack: pack, ...(stickers !== undefined && !odd ? { print_qty: stickers } : {}) } : l);
+    const sr = f.sr?.trim();
+    let items = p.items.map((l, i) => i === index ? { ...rest, item, style, ...(even ? { rate: even } : {}), label_pack: pack, ...(stickers !== undefined && !odd ? { print_qty: stickers } : {}), ...(sr ? { bill_sr: sr } : {}) } : l);
+    // owner, 15 Nov: a corrected line number also puts the line in its place
+    if (sr && sr !== (line.bill_sr || "")) { const n = (x: typeof items[number], i: number) => /^\d+$/.test(x.bill_sr || "") ? Number(x.bill_sr) : i + 1; items = items.map((x, i) => [x, n(x, i)] as const).sort((a, b) => a[1] - b[1]).map(x => x[0]); }
     const next = { ...p, items, updated_at: now() };
     await put("purchases", next);
     const q = await jobsFor(next);
@@ -962,7 +969,9 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
           (document.querySelector(`input[aria-label="style line ${i + 1}"]`) as HTMLInputElement | null)?.focus();
         }}>{x.style} on Sr. {x.lines.join(" & ")}</button>)}
       </div>}
-      <div className="selection-bar"><SelectAll ids={d.rows.map(r => r.review_id!)} selected={selection} onChange={setSelection} label="Select all purchase lines" /><span className="sm">{d.rows.filter(r => selection.has(r.review_id!)).length} selected</span><DeleteButton className="btn sm bad" disabled={busy || !d.rows.some(r => selection.has(r.review_id!))} onDelete={() => removeRows(d.rows.filter(r => selection.has(r.review_id!)).map(r => r.review_id!))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }} title="↑↓ lines · ←→ fields · Enter on the last line: next line, copied · Space select · Shift+↑↓ range">Ctrl+D: same as the line above · Ctrl+Enter: approve &amp; print</span></div>
+      <div className="selection-bar"><SelectAll ids={d.rows.map(r => r.review_id!)} selected={selection} onChange={setSelection} label="Select all purchase lines" /><span className="sm">{d.rows.filter(r => selection.has(r.review_id!)).length} selected</span><DeleteButton className="btn sm bad" disabled={busy || !d.rows.some(r => selection.has(r.review_id!))} onDelete={() => removeRows(d.rows.filter(r => selection.has(r.review_id!)).map(r => r.review_id!))}>Delete selected</DeleteButton><button type="button" className="btn sm" style={{ marginLeft: "auto" }} title="Copies the box above into the box the cursor is in (Ctrl+D). With lines ticked: copies this box to all of them." onMouseDown={e => e.preventDefault()} onClick={() => copyAbove()}>⇩ Same as above</button>
+        <button type="button" className="btn sm" title="Put the lines in order of their Bill Sr. number" onClick={() => { const n = (r: PhotoRow, i: number) => /^\d+$/.test((r.sr || "").trim()) ? Number(r.sr) : 1e6 + i; set({ rows: draftRef.current.rows.map((r, i) => [r, n(r, i)] as const).sort((x, y) => x[1] - y[1]).map(x => x[0]) }); toast("Lines put in Bill Sr. order"); }}>Sort by Bill Sr.</button>
+        <span className="xs mut keys-hint" title="↑↓ lines · ←→ fields · Enter on the last line: next line, copied · Space select · Shift+↑↓ range">Ctrl+D: same as the line above · Ctrl+Enter: approve &amp; print</span></div>
       <datalist id="purchase-item-names">{itemChoices.map(n => <option key={n} value={n} />)}</datalist>
       <div ref={linesRef} className="tw purchase-lines" onKeyDown={onPurchaseGridKey}><table className="pos-t"><thead><tr>{["No.", "Print", ...lineFields.map(f => captions[f]), ...(more ? ["Jewellery photo"] : []), ""].map((x, i) => <th key={i}>{x}</th>)}</tr></thead><tbody>
         {d.rows.map((r, i) => <tr key={r.review_id || i}>
