@@ -26,7 +26,7 @@ describe("estimate presentation", () => {
       expect(html).not.toContain("upi://"); expect(html).not.toContain("÷10"); expect(html).not.toContain("5,952.00");
     }
     const text=billText(b,shop);
-    expect(text).toContain("48 × 12.40 = 595.20"); expect(text).toContain("Discount: -297.60");
+    expect(text).toContain("48 × 12.40 = 595.20"); expect(text).toMatch(/Discount( [\d.]+%)?: -297.60/);
     expect(text).toContain("Packing: 0.50"); expect(text).toContain("Advance: -1.00");
     expect(text).toContain("UPI 2.00 received by Karan"); expect(text).not.toContain("upi://");
     expect(JSON.stringify(b)).toBe(before);

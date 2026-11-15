@@ -427,10 +427,11 @@ export function billText(b: Bill, shop: Shop) {
   const billAmount = (value: number) => documentAmount(b, value);
   const L = [`*${shop.name}*`, `${docName(b)} ${b.no}${b.return_of_no ? " (against " + b.return_of_no + ")" : ""}`, new Date(b.at).toLocaleString("en-IN"), ""];
   if (b.bill_type === "estimate") L.push("APPROVAL CHALLAN · SALE NOT EXECUTED · बिक्री निष्पादित नहीं", "");
-  b.items.forEach((l, i) => L.push(`${i + 1}. ${[l.item, l.style, l.color].filter(Boolean).join(" ")} — ${l.pkts ? l.pkts + "×" + l.pack + "=" : ""}${l.qty} × ${billAmount(l.rate)} = ${billAmount(l.amount)}`));
+  // the same lines as the printed bill: item name only, unless Settings › Printing says item + style + colour
+  b.items.forEach((l, i) => L.push(`${i + 1}. ${(shop.bill_lines === "full" ? [l.item, l.style, l.color] : [l.item]).filter(Boolean).join(" ")} — ${l.pkts && l.pack > 1 ? l.pkts + "×" + l.pack + "=" : ""}${l.qty} × ${billAmount(l.rate)} = ${billAmount(l.amount)}`));
   L.push("", `Pieces: ${b.total_qty} · Boxes: ${b.box_count}`);
   L.push(`Gross: ${billAmount(b.gross)}`);
-  if (b.discount) L.push(`Discount: -${billAmount(b.discount)}`);
+  if (b.discount) L.push(`Discount${b.discount_pct ? " " + b.discount_pct + "%" : ""}${b.less_pct ? " + " + b.less_pct + "% less" : ""}: -${billAmount(b.discount)}`);
   if (b.packing) L.push(`Packing: ${billAmount(b.packing)}`);
   if (b.gst) L.push(`GST${gstLabel(b)}: ${billAmount(b.gst)}`);
   if (b.adjust) L.push(`Round off: ${billAmount(b.adjust)}`);
@@ -584,7 +585,7 @@ export async function shareBill(b: Bill, shop: Shop, by = ""): Promise<"shared" 
     blob = await billImage(b, shop);
     const file = new File([blob], `${b.no.replace(/\//g, "-") || "bill"}.png`, { type: "image/png" });
     const nav = navigator as any;
-    if (nav.canShare?.({ files: [file] })) { await nav.share({ files: [file], text: billSummary(b, shop) }); return "shared"; }
+    if (nav.canShare?.({ files: [file] })) { await nav.share({ files: [file], text: billText(b, shop) }); return "shared"; }
   } catch (e: any) { if (e?.name === "AbortError") return "cancelled"; }
   // a computer: the bill picture goes on the clipboard and the chat opens with the short message; Ctrl+V adds the picture
   /* Owner, 12 Nov (photo): the message went but the picture did not — nobody saw the "press Ctrl + V" note, because
@@ -592,7 +593,9 @@ export async function shareBill(b: Bill, shop: Shop, by = ""): Promise<"shared" 
   if (blob && await copyPicture(blob)) {
     if (!await confirmAsk("The bill picture is copied. When WhatsApp opens, press Ctrl + V in the chat to add the picture, then press Enter to send.",
       { title: "Send the bill picture", yes: "Open WhatsApp", no: "Cancel", startYes: true })) return "cancelled";
-    window.open(waLink(b.party_phone, billSummary(b, shop)), "_blank");
+    /* Owner, 15 Nov (photo + voice): "only the amount and quantity go to the customer, not the whole bill with serial
+       numbers — I copy-paste it myself". The message is now the full bill, line by line; the picture is extra. */
+    window.open(waLink(b.party_phone, billText(b, shop)), "_blank");
     return "pasted";
   }
   window.open(waLink(b.party_phone, billText(b, shop)), "_blank");
