@@ -109,14 +109,16 @@ function EstimateLock() {
   const open = usePrivate();
   const [hid, setHid] = useState(isHidden());
   useEffect(() => { setHid(isHidden()); }, [open]);
-  if (open) return <button className="btn sm" title="Hide all estimates on this screen now (Ctrl+Q)" onClick={() => { hideEstimates(); toast("Estimates hidden on this screen"); }}>🔒 Hide estimates</button>;
+  /* Owner, 16 Nov (photo): the words "Hide estimates" on the counter screen tell every customer there are estimates,
+     and the button pushed the sync status off the edge. A small plain lock icon now; Ctrl+Q does the same. */
+  if (open) return <button className="iconbtn" aria-label="Lock" title="Lock (Ctrl+Q)" onClick={() => { hideEstimates(); toast("Locked"); }}><Icon n="lock" size={16} /></button>;
   if (!hid || !me || !(me.role === "owner" || can(me, "estimates.open"))) return null;
-  return <button className="btn sm" title="Show estimates again" onClick={async () => {
+  return <button className="iconbtn" aria-label="Unlock" title="Unlock" onClick={async () => {
     const code = await askText("Your PIN or the estimate code", "", { secret: true }); if (!code) return;
     if (me.pin && code === me.pin) { showEstimates(); return; }
     if (await unlock(code)) { showEstimates(); return; }
-    toast("Not the PIN or the estimate code", true);
-  }}>Show estimates</button>;
+    toast("Not the PIN or the code", true);
+  }}><Icon n="unlock" size={16} /></button>;
 }
 
 function Loading() { return <div className="stack"><div className="skel" style={{ height: 40, width: 220 }} /><div className="skel" style={{ height: 180 }} /><div className="skel" style={{ height: 120 }} /></div>; }

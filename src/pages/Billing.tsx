@@ -938,9 +938,9 @@ export default function Billing({ args }: { args: string[] }) {
             {paymentNarration(b.payments) && <div className="xs payment-narration" aria-label="Automatic payment narration">{paymentNarration(b.payments)}</div>}
             {/* Owner, 16 Nov (photo + voice): helper / packing / rechecking were folded under "More" and got missed —
                 always here, in one line under the remarks, and printed on the bill */}
-            <div className="grid g3" style={{ gap: 6 }}>{([["Helper", "helper", "helper"], ["Packing done by", "packed_by", "packer"], ["Rechecked by", "checked_by", ""]] as const).map(([title, key, prefer]) =>
-              <label key={key} className="f xs">{title}
-                <input className="in" list={"pos-names-" + key} autoComplete="off" placeholder="Type or pick" value={b[key] || ""} onChange={e => set({ [key]: e.target.value.toUpperCase().slice(0, 60) } as Partial<Bill>)} />
+            <div className="grid g3" style={{ gap: 6 }}>{([["Helper", "helper", "helper"], ["Packed by", "packed_by", "packer"], ["Checked by", "checked_by", ""]] as const).map(([title, key, prefer]) =>
+              <label key={key} className="f xs" style={{ minWidth: 0 }}>{title}
+                <input className="in" style={{ minWidth: 0 }} list={"pos-names-" + key} autoComplete="off" placeholder="Name" value={b[key] || ""} onChange={e => set({ [key]: e.target.value.toUpperCase().slice(0, 60) } as Partial<Bill>)} />
                 <datalist id={"pos-names-" + key}>
                   {[...staff].sort((x, y) => Number(!!prefer && y.role === prefer) - Number(!!prefer && x.role === prefer)).map(s => <option key={s.id} value={s.name}>{prefer && s.role === prefer ? prefer : ""}</option>)}</datalist></label>)}</div>
           </div>

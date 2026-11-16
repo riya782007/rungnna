@@ -18,6 +18,7 @@ const P: Record<string, string> = {
   download: "M12 3v12M7 10l5 5 5-5M5 21h14",
   cloud: "M7 18a4 4 0 0 1-.6-8A6 6 0 0 1 18 9a4.5 4.5 0 0 1-.5 9z",
   lock: "M6 11h12v10H6zM9 11V8a3 3 0 0 1 6 0v3",
+  unlock: "M6 11h12v10H6zM9 11V8a3 3 0 0 1 6 0",
 };
 export function Icon({ n, size = 20, sw = 1.8 }: { n: keyof typeof P | string; size?: number; sw?: number }) {
   return (
