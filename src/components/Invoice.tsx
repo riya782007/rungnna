@@ -70,7 +70,7 @@ export function InvoiceSheet({ b, shop, format, copy, feed = 0 }: { b: Bill; sho
         <div><div className="inv-shop">{estimate ? initials(shop.name) : shop.name}</div>{!estimate && <div className="inv-sub">{shop.tagline}</div>}
           {!estimate && <div className="inv-sub">{[shop.address, shop.phone, shop.email].filter(Boolean).join(" · ")}</div>}
           {shop.gstin && taxDoc && <div className="inv-sub">GSTIN: <b>{shop.gstin}</b>{shop.state ? " · State: " + shop.state + (shopCode ? " (" + shopCode + ")" : "") : ""}</div>}</div>
-        <div className="inv-title">{title}{estimate && <div className="inv-approval">APPROVAL CHALLAN</div>}{copy && <div className="inv-copy">{copy}</div>}{b.status === "void" && <div className="inv-void">CANCELLED</div>}
+        <div className="inv-title">{title}{estimate && <div className="inv-approval">APPROVAL CHALLAN</div>}{b.price_level === "retail" && <div className="inv-approval">RETAIL</div>}{copy && <div className="inv-copy">{copy}</div>}{b.status === "void" && <div className="inv-void">CANCELLED</div>}
           {notExecuted && <div><span className="inv-notexec">SALE NOT EXECUTED · बिक्री निष्पादित नहीं</span></div>}</div>
       </div>
       {b.compliance && format !== "packing" && <div className="inv-compliance">

@@ -425,7 +425,7 @@ export async function partyDue(party_id: string) {
 export const normPhone = (p: string) => { const d = (p || "").replace(/\D/g, ""); return d.length === 10 ? "91" + d : d; };
 export function billText(b: Bill, shop: Shop) {
   const billAmount = (value: number) => documentAmount(b, value);
-  const L = [`*${shop.name}*`, `${docName(b)} ${b.no}${b.return_of_no ? " (against " + b.return_of_no + ")" : ""}`, new Date(b.at).toLocaleString("en-IN"), ""];
+  const L = [`*${shop.name}*`, `${docName(b)} ${b.no}${b.return_of_no ? " (against " + b.return_of_no + ")" : ""}${b.price_level === "retail" ? " · RETAIL" : ""}`, new Date(b.at).toLocaleString("en-IN"), ""];
   if (b.bill_type === "estimate") L.push("APPROVAL CHALLAN · SALE NOT EXECUTED · बिक्री निष्पादित नहीं", "");
   // the same lines as the printed bill: item name only, unless Settings › Printing says item + style + colour
   b.items.forEach((l, i) => L.push(`${i + 1}. ${(shop.bill_lines === "full" ? [l.item, l.style, l.color] : [l.item]).filter(Boolean).join(" ")} — ${l.pkts && l.pack > 1 ? l.pkts + "×" + l.pack + "=" : ""}${l.qty} × ${billAmount(l.rate)} = ${billAmount(l.amount)}`));
@@ -481,6 +481,13 @@ async function copyPicture(blob: Blob): Promise<boolean> {
     await navigator.clipboard.write([new C({ "image/png": blob })]);
     return true;
   } catch { return false; }
+}
+/* Owner, 16 Nov (photo: a row of "Share on WhatsApp" tabs, "it asks Continue every time"): on a computer the chat
+   opens straight in WhatsApp Web, in the same tab each time; phones keep wa.me, which opens the app. */
+export function openWhatsApp(phone: string, text: string) {
+  if (isPhoneLike()) { window.open(waLink(phone, text), "_blank"); return; }
+  const n = normPhone(phone);
+  window.open(`https://web.whatsapp.com/send?${n ? "phone=" + n + "&" : ""}text=${encodeURIComponent(text)}`, "rj_whatsapp");
 }
 export function waLink(phone: string, text: string) {
   const n = normPhone(phone);
@@ -595,10 +602,10 @@ export async function shareBill(b: Bill, shop: Shop, by = ""): Promise<"shared" 
       { title: "Send the bill picture", yes: "Open WhatsApp", no: "Cancel", startYes: true })) return "cancelled";
     /* Owner, 15 Nov (photo + voice): "only the amount and quantity go to the customer, not the whole bill with serial
        numbers — I copy-paste it myself". The message is now the full bill, line by line; the picture is extra. */
-    window.open(waLink(b.party_phone, billText(b, shop)), "_blank");
+    openWhatsApp(b.party_phone, billText(b, shop));
     return "pasted";
   }
-  window.open(waLink(b.party_phone, billText(b, shop)), "_blank");
+  openWhatsApp(b.party_phone, billText(b, shop));
   return "wa";
 }
 

@@ -1,4 +1,3 @@
-import { DeleteButton } from "./DeleteButton";
 import { confirmDelete } from "../lib/confirm-delete";
 import { useEffect, useState } from "react";
 import { db, type Bill } from "../lib/db";
@@ -52,11 +51,13 @@ export function DeleteEstimates({ bills, all = false, onClose }: { bills?: Bill[
         </ul>
         <Switch on={back} onChange={setBack} label="Put the pieces back on the racks" hint="Only if the goods never left the shop (quotations). Leave off if they were delivered." />
         <label className="f">Type {word} to confirm<input className="in mono" value={typed} onChange={e => setTyped(e.target.value.toUpperCase())} /></label>
-        {hasCode && <label className="f">Estimate code<input className="in mono" type="password" autoComplete="off" value={code} onChange={e => setCode(e.target.value)} /></label>}
+        {hasCode && <label className="f">{me?.role === "owner" ? "Estimate code (or your PIN)" : "Estimate code"}<input className="in mono" type="password" autoComplete="off" value={code} onChange={e => setCode(e.target.value)} /></label>}
         <button className="btn" autoFocus disabled={busy} onClick={onClose}>No, keep estimates</button>
-        <DeleteButton className="btn bad big" disabled={typed.trim() !== word || (hasCode && !code) || busy} onDelete={async () => {
+        {/* Owner, 16 Nov (photos: "not getting deleted"): this box already asks for the word, the code and a final
+            No-first confirm, so one click is enough here — the double-click rule only confused it. */}
+        <button type="button" className="btn bad big" disabled={typed.trim() !== word || (hasCode && !code) || busy} onClick={async () => {
           if (!await confirmDelete("Permanently delete " + list.length + " estimate document(s)?")) return;
-          if (hasCode && !(await codeIs(code))) return toast("That is not the estimate code", true);
+          if (hasCode && !(await codeIs(code)) && !(me?.role === "owner" && !!me.pin && code === me.pin)) return toast("That is not the estimate code" + (me?.role === "owner" ? " or your PIN" : ""), true);
           setBusy(true);
           try {
             // re-read: something may have changed while the box was open
@@ -67,7 +68,8 @@ export function DeleteEstimates({ bills, all = false, onClose }: { bills?: Bill[
             void removeCloudVoice(r.voiceFiles).catch(() => 0);
           } catch (e: any) { toast(e.message || "Could not delete", true); }
           finally { setBusy(false); }
-        }}>{busy ? "Deleting…" : all ? "Delete all estimates permanently" : "Delete permanently"}</DeleteButton>
+        }}>{busy ? "Deleting…" : all ? "Delete all estimates permanently" : "Delete permanently"}</button>
+        {(typed.trim() !== word || (hasCode && !code)) && <div className="xs mut">To delete: type {word}{hasCode ? " and the estimate code" : ""} above.</div>}
       </div>
     </Modal>
   );

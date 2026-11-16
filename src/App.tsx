@@ -1,3 +1,4 @@
+import { usePrivate, isHidden, hideEstimates, showEstimates, unlock } from "./lib/privacy";
 import { waitingWa, markWaSent, type WaJob } from "./lib/waRelay";
 import { shareBill, getShop } from "./lib/billing";
 import { lazy, Suspense, useEffect, useState, Component, type ReactNode } from "react";
@@ -100,6 +101,22 @@ function useSync() {
 function Status() {
   const s = useSync();
   return <a href="#/settings" className="status"><i className={"dot " + s.cls} />{s.txt}{s.pending ? ` · ${s.pending}` : ""}</a>;
+}
+
+/* Close every estimate on this screen at once (Ctrl+Q), and open them again with a PIN or the estimate code. */
+function EstimateLock() {
+  const { me } = useApp();
+  const open = usePrivate();
+  const [hid, setHid] = useState(isHidden());
+  useEffect(() => { setHid(isHidden()); }, [open]);
+  if (open) return <button className="btn sm" title="Hide all estimates on this screen now (Ctrl+Q)" onClick={() => { hideEstimates(); toast("Estimates hidden on this screen"); }}>🔒 Hide estimates</button>;
+  if (!hid || !me || !(me.role === "owner" || can(me, "estimates.open"))) return null;
+  return <button className="btn sm" title="Show estimates again" onClick={async () => {
+    const code = await askText("Your PIN or the estimate code", "", { secret: true }); if (!code) return;
+    if (me.pin && code === me.pin) { showEstimates(); return; }
+    if (await unlock(code)) { showEstimates(); return; }
+    toast("Not the PIN or the estimate code", true);
+  }}>Show estimates</button>;
 }
 
 function Loading() { return <div className="stack"><div className="skel" style={{ height: 40, width: 220 }} /><div className="skel" style={{ height: 180 }} /><div className="skel" style={{ height: 120 }} /></div>; }
@@ -258,13 +275,14 @@ function Shell() {
           <span className="brandm"><span className="mark">R</span>{cur.label === "Home" ? "Rungnna" : t(cur.label)}</span>
           <span className="grow" />
           {companies.length > 1 && <select aria-label="Company" className="in mobile-store" value={store} onChange={e => void switchStore(e.target.value)}>{companies.map(s => <option key={s.id} value={s.id}>{s.code}</option>)}</select>}
+          <EstimateLock />
           {canSearch && <button className="iconbtn" aria-label="Search" onClick={() => setPal(true)}><Icon n="search" size={18} /></button>}
           <button className="avatar" onClick={() => go("settings")} aria-label="Me">{me.name.slice(0, 1).toUpperCase()}</button>
         </div>
         {tabs && tabs.length > 1 && (
           <div className={"subnav" + (scrolled ? " scrolled" : "")}>
             <nav className="tabs">{tabs.map(([k, label]) => <a key={k} href={"#/" + k} className={tabOn(k) ? "on" : ""} ref={el => { if (el && tabOn(k)) el.scrollIntoView({ block: "nearest", inline: "center" }); }}>{t(label)}</a>)}</nav>
-            <span className="grow" /><Status />
+            <span className="grow" /><EstimateLock /><Status />
           </div>)}
         <main className={"page" + (route === "bill" ? " wide" : "")}>
           <Guard key={store + route + (args[0] || "")}>

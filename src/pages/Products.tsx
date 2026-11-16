@@ -1,9 +1,9 @@
 import { locCode } from "../lib/stock-adjustment";
 import { DeleteButton } from "../components/DeleteButton";
 import { SelectAll } from "../components/SelectAll";
-import { confirmDelete } from "../lib/confirm-delete";
+import { confirmDelete, confirmAsk } from "../lib/confirm-delete";
 import { can } from "../lib/roles";
-import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
+import { inStore, storeStock, currentStore, MAIN_STORE, dispatchTransfer } from "../lib/stores";
 import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, type Product } from "../lib/db";
@@ -62,7 +62,8 @@ function ProductList() {
       </div>
       {editable && <div className="selection-bar"><SelectAll ids={list.map(p => p.id)} selected={selection} onChange={setSelection} label={"Select all " + list.length + " matching products"} />{hiddenView
         ? <button className="btn sm p" disabled={!list.some(p => selection.has(p.id))} onClick={async () => { const ids = list.filter(p => selection.has(p.id)).map(p => p.id); try { await showProducts(ids); setSelection(new Set()); toast(ids.length + " product" + (ids.length === 1 ? "" : "s") + " showing again, with their stock"); } catch (e: any) { toast(e.message, true); } }}>Show again</button>
-        : <DeleteButton className="btn sm bad" disabled={!list.some(p => selection.has(p.id))} onDelete={async () => { const ids = list.filter(p => selection.has(p.id)).map(p => p.id); if (!await confirmDelete("Take " + ids.length + " selected products off the list? They and their stock leave Products and Stock until brought back (Products › Off the list). Bill history stays.")) return; try { await hideProducts(ids); setSelection(new Set()); toast("Taken off the list · Products › Off the list brings them back"); } catch (e: any) { toast(e.message, true); } }}>Take off list</DeleteButton>}</div>}
+        : <DeleteButton className="btn sm bad" disabled={!list.some(p => selection.has(p.id))} onDelete={async () => { const ids = list.filter(p => selection.has(p.id)).map(p => p.id); if (!await confirmDelete("Take " + ids.length + " selected products off the list? They and their stock leave Products and Stock until brought back (Products › Off the list). Bill history stays.")) return; try { await hideProducts(ids); setSelection(new Set()); toast("Taken off the list · Products › Off the list brings them back"); } catch (e: any) { toast(e.message, true); } }}>Take off list</DeleteButton>}
+        {!hiddenView && <SendToCompany ids={list.filter(p => selection.has(p.id)).map(p => p.id)} onDone={() => setSelection(new Set())} />}</div>}
       <div className="stack" style={{ gap: 6 }}>
         {list.slice(0, limit).map(p => (
           <div key={p.id} className="item">{editable && <input type="checkbox" aria-label={"Select product " + label(p)} checked={selection.has(p.id)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(p.id) : next.delete(p.id); return next; })} />}<a className="row grow" style={{ textDecoration: "none" }} href={"#/product/" + p.id}>
@@ -181,4 +182,26 @@ function ProductDetail({ id }: { id: string }) {
       </div>
     </div>
   );
+}
+
+/* Owner, 16 Nov (photo + voice): ticked products → send their stock to the other company in one go, so this
+   company's stock goes down by itself and the other receives it (Companies & transfers › Receive). */
+function SendToCompany({ ids, onDone }: { ids: string[]; onDone: () => void }) {
+  const { me } = useApp();
+  const stores = useLiveQuery(() => db.stores.filter(s => !s.deleted && !!s.active && s.id !== currentStore()).toArray(), [], []);
+  const [busy, setBusy] = useState(false);
+  if (!can(me, "stores.transfer") || !stores.length) return null;
+  return <select className="in" style={{ width: "auto" }} disabled={!ids.length || busy} value="" aria-label="Send ticked products to another company" onChange={async e => {
+    const to = e.target.value; if (!to) return;
+    const dest = stores.find(s => s.id === to);
+    const want = new Set(ids);
+    const racks = new Set((await db.locations.filter(l => !l.deleted && l.kind !== "bucket").toArray()).map(l => l.id));
+    const items = (await storeStock()).filter(c => want.has(c.product_id) && racks.has(c.loc_id) && c.qty > 0).map(c => ({ product_id: c.product_id, qty: c.qty, from_loc: c.loc_id }));
+    if (!items.length) return toast("The ticked products have no stock on the racks here", true);
+    const pcs = items.reduce((a, x) => a + x.qty, 0);
+    if (!await confirmAsk(`Send all stock of ${ids.length} products (${pcs} pieces) to ${dest?.name}? It leaves this company now and is received there (Companies & transfers).`, { title: "Send to company", yes: "Send", no: "Cancel" })) return;
+    setBusy(true);
+    try { const t = await dispatchTransfer(to, items, me?.id || ""); onDone(); toast(`${t.no}: ${pcs} pieces on the way to ${dest?.name}`); }
+    catch (x: any) { toast(x.message, true); } finally { setBusy(false); }
+  }}><option value="">{busy ? "Sending…" : `Send to company… (${ids.length})`}</option>{stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>;
 }

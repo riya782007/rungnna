@@ -484,7 +484,7 @@ export function useScanOnlyIn(
          pressed together by a fast typist (key roll-over) came within 35 ms and were taken for a scanner, and the
          box was put back. A form in a pop-up is for typing, so it is left alone; elsewhere a scan is only decided
          on the THIRD quick key — people don't roll three keys in a row, a scanner always does. */
-      if (e.target instanceof Element && e.target.closest(".modal, dialog[open], .new-customer")) { first = ""; snap = null; return; }
+      if (e.target instanceof Element && e.target.closest(".modal, dialog[open], .new-customer, .ask-back")) { first = ""; snap = null; return; }
       if (!first || gap > maxGapMs) {               // could be a person typing — let it through, remember the field
         first = e.key; snap = snapshot(e.target);
         return;

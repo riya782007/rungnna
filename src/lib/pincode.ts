@@ -60,8 +60,11 @@ export function pinsForAddress(t: Table, address: string, max = 4, near = ""): P
       const o = t.offices[k];
       // "DELHI SADAR BAZAR" is found from "Sadar Bazar" too: the city/state words in an office name may be left out
       const where = new Set([...(t.districtWords[o.d] || []), ...words(GST_STATES[o.s] || "")]);
-      const need = o.words.filter(x => !where.has(x));
-      const must = need.length ? need : o.words;
+      // "MEERUT CITY", "ROHTAK TOWN": a district office with only a weak word left is found from the city name alone
+      const core = o.words.filter(x => !WEAK.has(x));
+      const cityOnly = core.length > 0 && core.every(x => where.has(x));
+      const need = cityOnly ? [] : o.words.filter(x => !where.has(x));
+      const must = need.length ? need : cityOnly ? core : o.words;
       if (!must.every(x => have.has(x))) continue;
       const strong = must.filter(x => !WEAK.has(x) && x.length > 2);
       if (!strong.length) continue;                     // "NEW MARKET" alone says nothing

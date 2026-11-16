@@ -30,8 +30,19 @@ export const isOwnerOpen = () => ownerOpen;
 // in the estimate company, estimates are its everyday bills: open for whoever may open that company
 let companyOpen = false;
 export function setCompanyOpen(v: boolean) { if (companyOpen !== v) { companyOpen = v; emit(); } }
-export const isOpen = () => ownerOpen || companyOpen || Date.now() < until;
+/* Owner, 16 Nov (voice): "I set 5 idle minutes but after 5 minutes everything about estimates was still on the
+   screen — and give a button or a key that closes it all at once". Hidden = estimates closed on this screen for
+   everyone, the owner too, until shown again with a PIN or the estimate code. It also happens by itself after the
+   idle minutes of the estimate code (Settings), and when someone presses Ctrl+Q or the lock button. */
+const KEEP = "rj_est_hidden";   // a reload must not open them again
+let hidden = (() => { try { return localStorage.getItem(KEEP) === "1"; } catch { return false; } })();
+const keep = (v: boolean) => { try { v ? localStorage.setItem(KEEP, "1") : localStorage.removeItem(KEEP); } catch { /* private mode */ } };
+export const isHidden = () => hidden;
+export const isOpen = () => !hidden && (ownerOpen || companyOpen || Date.now() < until);
 export function lockNow() { until = 0; clearTimeout(timer); emit(); }
+export function hideEstimates() { hidden = true; keep(true); lockNow(); }
+export function showEstimates() { if (hidden) { hidden = false; keep(false); lastPoke = Date.now(); lastActive = Date.now(); emit(); } }
+let lastActive = Date.now();
 function arm(min: number) {
   until = Date.now() + min * 60_000; clearTimeout(timer);
   timer = setTimeout(lockNow, min * 60_000); emit();
@@ -49,10 +60,13 @@ export async function codeIs(code: string): Promise<boolean> {
 /* any tap or key while open keeps it open (idle lock, not a hard timer) */
 let lastPoke = 0;
 if (typeof window !== "undefined") {
-  const poke = () => { if (isOpen() && Date.now() - lastPoke > 20_000) { lastPoke = Date.now(); getPrivate().then(c => arm(c?.minutes || 10)); } };
+  const poke = () => { lastActive = Date.now(); if (Date.now() < until && Date.now() - lastPoke > 20_000) { lastPoke = Date.now(); getPrivate().then(c => arm(c?.minutes || 10)); } };
+  // the owner's always-open estimates close too after the idle minutes
+  setInterval(() => { if (!hidden && (ownerOpen || companyOpen)) getPrivate().then(c => { if (Date.now() - lastActive > (c?.minutes || 10) * 60_000) hideEstimates(); }); }, 30_000);
+  addEventListener("keydown", (ev: Event) => { const e = ev as KeyboardEvent; if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "q") { e.preventDefault(); hideEstimates(); } });
   addEventListener("pointerdown", poke, { passive: true }); addEventListener("keydown", poke);
   let hiddenAt = 0; // a quick trip to the camera app must not lock; leaving the app for a minute does
-  document.addEventListener("visibilitychange", () => { if (document.hidden) hiddenAt = Date.now(); else if (hiddenAt && Date.now() - hiddenAt > 60_000) lockNow(); });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) hiddenAt = Date.now(); else if (hiddenAt && Date.now() - hiddenAt > 60_000) { lockNow(); if (ownerOpen || companyOpen) hideEstimates(); } });
 }
 export function usePrivate() {
   const [open, setOpen] = useState(isOpen());

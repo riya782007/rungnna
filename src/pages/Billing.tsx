@@ -818,13 +818,9 @@ export default function Billing({ args }: { args: string[] }) {
           <textarea ref={remarksRef} className="in" rows={2} aria-label="Remarks (phone)" value={b.remarks} onChange={e => set({ remarks: e.target.value })} placeholder="Narration, reason, what is pending…" /></label>}
         {/* Owner, 25 Oct (voice): "after 3–4 scans the lines go below and I scroll up and down — at least 8–10 lines
             must be in front of me". The rarely-changed fields fold away under "More" so the lines get the screen. */}
-        <button type="button" className="linkbtn sm" aria-expanded={moreOpen} onClick={() => { setMoreOpen(o => !o); void setSetting("bill_more_open", !moreOpen); }}>{moreOpen ? "Less ▴" : `More ▾${[b.helper, b.packed_by, b.checked_by].filter(Boolean).length ? " (" + [b.helper, b.packed_by, b.checked_by].filter(Boolean).length + ")" : ""}`}</button>
+        <button type="button" className="linkbtn sm" aria-expanded={moreOpen} onClick={() => { setMoreOpen(o => !o); void setSetting("bill_more_open", !moreOpen); }}>{moreOpen ? "Less ▴" : "More ▾"}</button>
         {/* who worked the bill, in counter order: salesman → helper → packed by → rechecked by */}
-        {moreOpen && ([["Helper", "helper", "helper"], ["Packing done by", "packed_by", "packer"], ["Rechecked by", "checked_by", ""]] as const).map(([title, key, prefer]) =>
-          <label key={key} className="f" style={{ minWidth: 130 }}>{title}
-            <input className="in" list={"pos-names-" + key} autoComplete="off" placeholder="Type or pick" value={b[key] || ""} onChange={e => set({ [key]: e.target.value.toUpperCase().slice(0, 60) } as Partial<Bill>)} />
-            <datalist id={"pos-names-" + key}>
-              {[...staff].sort((x, y) => Number(!!prefer && y.role === prefer) - Number(!!prefer && x.role === prefer)).map(s => <option key={s.id} value={s.name}>{prefer && s.role === prefer ? prefer : ""}</option>)}</datalist></label>)}
+
         {moreOpen && <div className="pos-box"><span className="xs mut">Box qty: {b.box_count} · Current box {box}</span>
           <div className="row" style={{ gap: 4 }}>{boxes.map(x => <button key={x} className="chip" aria-pressed={x === box} onClick={() => setBox(x)}>{x}</button>)}
             <button className="chip" onClick={() => setBox(Math.max(...boxes) + 1)}>+</button></div></div>}
@@ -940,6 +936,13 @@ export default function Billing({ args }: { args: string[] }) {
           <div className="counter-box-tools stack">          <div className={"pos-notes" + (small ? " pos-notes-phone" : "")}>
             <label className="f"><textarea ref={small ? undefined : remarksRef} className="in" rows={2} aria-label="Remarks" value={b.remarks} onChange={e => set({ remarks: e.target.value })} placeholder="Remarks / narration — required before Hold" /></label>
             {paymentNarration(b.payments) && <div className="xs payment-narration" aria-label="Automatic payment narration">{paymentNarration(b.payments)}</div>}
+            {/* Owner, 16 Nov (photo + voice): helper / packing / rechecking were folded under "More" and got missed —
+                always here, in one line under the remarks, and printed on the bill */}
+            <div className="grid g3" style={{ gap: 6 }}>{([["Helper", "helper", "helper"], ["Packing done by", "packed_by", "packer"], ["Rechecked by", "checked_by", ""]] as const).map(([title, key, prefer]) =>
+              <label key={key} className="f xs">{title}
+                <input className="in" list={"pos-names-" + key} autoComplete="off" placeholder="Type or pick" value={b[key] || ""} onChange={e => set({ [key]: e.target.value.toUpperCase().slice(0, 60) } as Partial<Bill>)} />
+                <datalist id={"pos-names-" + key}>
+                  {[...staff].sort((x, y) => Number(!!prefer && y.role === prefer) - Number(!!prefer && x.role === prefer)).map(s => <option key={s.id} value={s.name}>{prefer && s.role === prefer ? prefer : ""}</option>)}</datalist></label>)}</div>
           </div>
 
           {selectedLines.size > 0 && <div className="selection-bar"><span className="sm">{t.items.filter(l => selectedLines.has(l.id)).length} selected</span><DeleteButton className="btn sm bad" disabled={saving || !t.items.some(l => selectedLines.has(l.id))} onDelete={() => dropLines(t.items.filter(l => selectedLines.has(l.id)).map(l => l.id))}>Delete selected</DeleteButton><span className="xs mut keys-hint" style={{ marginLeft: "auto" }}>Keys: ↑↓ rows · ←→ fields · Space select · Shift+↑↓ range</span></div>}
@@ -1063,7 +1066,9 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
   const [fu, setFu] = useState({ wants: "", callback: "" });
   const create = () => {
     const isPhone = /^\+?\d[\d\s]{7,}$/.test(q.trim());
-    setForm({ ...newParty(isPhone ? "" : q.trim().toUpperCase(), isPhone ? q.replace(/\D/g, "") : ""), photo_id: photo, state: "Delhi" } as Party);
+    // State stays empty until the PIN fills it or it is typed (owner, 16 Nov: "Delhi" pre-filled sent a Meerut
+    // address to a Delhi PIN); a customer saved with no state is a Delhi customer
+    setForm({ ...newParty(isPhone ? "" : q.trim().toUpperCase(), isPhone ? q.replace(/\D/g, "") : ""), photo_id: photo, state: "" } as Party);
   };
   const saveNew = async () => {
     if (!form) return;
@@ -1072,7 +1077,7 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
     if (phone && phone.length !== 10) return toast("Mobile number should have 10 digits", true);
     const same = phone ? parties.find(p => p.phone.replace(/\D/g, "").endsWith(phone)) : undefined;
     if (same) { toast(`${same.name} already has ${phone} — picked them`); return pick(same); }
-    const p = { ...form, name: form.name.trim().toUpperCase(), phone, gstin: form.gstin.trim().toUpperCase() };
+    const p = { ...form, name: form.name.trim().toUpperCase(), phone, gstin: form.gstin.trim().toUpperCase(), state: form.state.trim() || "Delhi" };
     await put("parties", p);
     if (fu.wants.trim() || fu.callback) await saveFollow(p.id, { wants: fu.wants.trim(), callback: fu.callback, note: "", by: "" });
     pick(p);
