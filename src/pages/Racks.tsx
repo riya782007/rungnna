@@ -8,6 +8,8 @@ import { qrSvg } from "../lib/qr";
 import { toast, go } from "../lib/app";
 import { usePrintJob } from "../lib/printing";
 import { label } from "../lib/products";
+import { shownStock, onHand } from "../lib/stockView";
+import { usePrivate } from "../lib/privacy";
 import {
   DEFAULT_RACK_CFG, RACK_PRESETS, FONTS, TEMPLATE_VARS, SHEETS, normalizeCfg, varsFor, renderTemplate, payloadFor,
   sortLocs, floorRank, floorLabel, perPage, sheetOverflow, toUnit, fromUnit, type RackLabelCfg, type Unit, type Weight,
@@ -26,7 +28,8 @@ export default function Racks({ args }: { args: string[] }) {
 
 function RackList({ args }: { args: string[] }) {
   const locs = useLocations();
-  const cells = useLiveQuery(() => storeStock(), [], []);
+  const priv = usePrivate();
+  const cells = useLiveQuery(() => shownStock(priv), [priv], []);
   const [floor, setFloor] = useState("1");
   const [from, setFrom] = useState("1");
   const [to, setTo] = useState("12");
@@ -34,7 +37,7 @@ function RackList({ args }: { args: string[] }) {
   const [name, setName] = useState("");
   const open = args[0] ? locs.find(l => l.id === args[0]) : undefined;
 
-  const qtyAt = useMemo(() => { const m = new Map<string, number>(); cells.forEach(c => m.set(c.loc_id, (m.get(c.loc_id) || 0) + c.qty)); return m; }, [cells]);
+  const qtyAt = useMemo(() => { const m = new Map<string, number>(); cells.forEach(c => m.set(c.loc_id, (m.get(c.loc_id) || 0) + onHand(c.qty))); return m; }, [cells]);
 
   const create = async () => {
     const a = Number(from), b = Number(to), nb = Number(boxes);

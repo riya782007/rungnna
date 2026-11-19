@@ -15,6 +15,7 @@ import { due, isSale } from "../lib/billing";
 import { usePrivate, isEstimate } from "../lib/privacy";
 import { EndOfDay } from "../components/EndOfDay";
 import DailyTasks from "../components/DailyTasks";
+import { shownStock, onHand } from "../lib/stockView";
 
 type Period = "today" | "week" | "month";
 const PERIODS: [Period, string][] = [["today", "Today"], ["week", "This week"], ["month", "This month"]];
@@ -40,7 +41,7 @@ export default function Home() {
   const start = useMemo(() => periodStart(period).toISOString(), [period]);
 
   const products = useLiveQuery(() => db.products.filter(p => !p.deleted).toArray(), [], []);
-  const cells = useLiveQuery(() => storeStock(), [], []);
+  const cells = useLiveQuery(() => shownStock(priv), [priv], []);
   const recent = useLiveQuery(() => db.movements.orderBy("at").filter(inStore).reverse().limit(6).toArray(), [], []);
   const bills = useLiveQuery(() => db.bills.where("at").aboveOrEqual(start).filter(b => inStore(b) && !b.deleted && (priv || !isEstimate(b))).toArray(), [start, priv], []);
   const allFinal = useLiveQuery(() => db.bills.filter(b => inStore(b) && !b.deleted && b.status === "final" && (priv || !isEstimate(b))).toArray(), [priv], []);
@@ -57,9 +58,9 @@ export default function Home() {
     cells.forEach(c => {
       if (bucket.has(c.loc_id)) { flagged += c.qty; return; }
       const p = byId.get(c.product_id);
-      pcs += c.qty; value += c.qty * (p?.rate || 0);
-      if (p && isDead(p)) { deadPcs += c.qty; deadVal += c.qty * p.rate; }
-      floor.set(locs.find(l => l.id === c.loc_id)?.floor || "?", (floor.get(locs.find(l => l.id === c.loc_id)?.floor || "?") || 0) + c.qty);
+      pcs += onHand(c.qty); value += onHand(c.qty) * (p?.rate || 0);   // a count below zero (billed without stock) is not minus goods
+      if (p && isDead(p)) { deadPcs += onHand(c.qty); deadVal += onHand(c.qty) * p.rate; }
+      floor.set(locs.find(l => l.id === c.loc_id)?.floor || "?", (floor.get(locs.find(l => l.id === c.loc_id)?.floor || "?") || 0) + onHand(c.qty));
       perProd.set(c.product_id, (perProd.get(c.product_id) || 0) + c.qty);
     });
 

@@ -16,6 +16,7 @@ import { rupees, toPaise, when } from "../lib/format";
 import { describePhoto } from "../lib/ai";
 import { VoiceNotes } from "../components/Voice";
 import { usePrivate, maskNote } from "../lib/privacy";
+import { shownStock, onHand, shortBy, privateBill } from "../lib/stockView";
 import { getTaxonomy, allItems, type Taxonomy } from "../lib/taxonomy";
 import { OnlineListing } from "../components/OnlineListing";
 import { LinkRfid } from "../components/LinkRfid";
@@ -38,14 +39,17 @@ function ProductList() {
   const [hiddenView, setHiddenView] = useState(false);   // products hidden with "Hide", listed so they can be shown again
   useEffect(() => { setSelection(new Set()); }, [q, item, dead, hiddenView]);
   const all = useLiveQuery(() => db.products.orderBy("updated_at").reverse().toArray(), [], []);
-  const cells = useLiveQuery(() => storeStock(), [], []);
+  const priv = usePrivate();
+  const [short, setShort] = useState(false);   // sold more than was ever entered
+  const cells = useLiveQuery(() => shownStock(priv), [priv], []);
   const qty = useMemo(() => { const m = new Map<string, number>(); cells.forEach(c => m.set(c.product_id, (m.get(c.product_id) || 0) + c.qty)); return m; }, [cells]);
   const items = useMemo(() => [...new Set(all.filter(p => !p.deleted).map(p => p.item).filter(Boolean))].sort(), [all]);
   const list = useMemo(() => {
     const t = q.trim().toUpperCase().split(/\s+/).filter(Boolean);
-    return all.filter(p => (hiddenView ? !!p.deleted : !p.deleted) && (!item || p.item === item) && (!dead || !!p.tk?.trim()) &&
+    return all.filter(p => (hiddenView ? !!p.deleted : !p.deleted) && (!item || p.item === item) && (!dead || !!p.tk?.trim()) && (!short || (qty.get(p.id) || 0) < 0) &&
       t.every(w => (p.code + " " + p.item + " " + p.style + " " + p.color + " " + p.tk + " " + (p.barcodes || []).join(" ")).toUpperCase().includes(w)));
-  }, [all, q, item, dead, hiddenView]);
+  }, [all, q, item, dead, hiddenView, short, qty]);
+  const shortCount = useMemo(() => all.filter(p => !p.deleted && (qty.get(p.id) || 0) < 0).length, [all, qty]);
   const hiddenCount = all.filter(p => p.deleted).length;
   return (
     <div>
@@ -56,7 +60,8 @@ function ProductList() {
       <div className="card pad stack" style={{ marginBottom: 12 }}>
         <input className="in" placeholder="Search style, colour, item, code…" value={q} onChange={e => setQ(e.target.value)} />
         <WedgeInput autoFocus={false} placeholder="…or scan a label to open it" onCode={async raw => { const p = await findByScan(raw); p ? go("product/" + p.id) : toast("Not found", true); }} />
-        <div className="chips"><button className="chip" aria-pressed={!item && !dead && !hiddenView} onClick={() => { setItem(""); setDead(false); setHiddenView(false); }}>All</button>
+        <div className="chips"><button className="chip" aria-pressed={!item && !dead && !hiddenView && !short} onClick={() => { setItem(""); setDead(false); setHiddenView(false); setShort(false); }}>All</button>
+          {shortCount > 0 && <button className="chip" aria-pressed={short} title="More pieces were billed than were ever entered in stock (old stock not entered yet). Count them on the rack (Stock › Count) and the number corrects itself." onClick={() => setShort(!short)}>Stock not entered ({shortCount})</button>}
           {editable && hiddenCount > 0 && <button className="chip" aria-pressed={hiddenView} title="Products taken off the list with “Take off list”: their stock and history are kept. Open to bring any back." onClick={() => setHiddenView(!hiddenView)}>Off the list ({hiddenCount})</button>}<button className="chip" aria-pressed={dead} title="Old, slow-moving goods: the ones marked TK (the old software's dead-stock mark) on their stickers" onClick={() => setDead(!dead)}>Dead stock</button>
           {items.map(i => <button key={i} className="chip" aria-pressed={item === i} onClick={() => setItem(i)}>{i}</button>)}</div>
       </div>
@@ -69,7 +74,9 @@ function ProductList() {
           <div key={p.id} className="item">{editable && <input type="checkbox" aria-label={"Select product " + label(p)} checked={selection.has(p.id)} onChange={event => setSelection(old => { const next = new Set(old); event.target.checked ? next.add(p.id) : next.delete(p.id); return next; })} />}<a className="row grow" style={{ textDecoration: "none" }} href={"#/product/" + p.id}>
             <Thumb photo_id={p.photo_id} url={p.photo_url} text={p.item || p.style} />
             <div className="grow"><div className="b sm">{label(p)}</div><div className="xs mut mono">{p.code}{p.tk ? " · dead stock" : ""}</div></div>
-            <div style={{ textAlign: "right" }}><div className="mono b">{qty.get(p.id) || 0}</div><div className="xs mut">{p.rate ? rupees(p.rate) : "no rate"}</div></div>
+            <div style={{ textAlign: "right" }}><div className="mono b" title="Pieces in stock">{onHand(qty.get(p.id) || 0)} <span className="xs mut">pcs</span></div>
+              {shortBy(qty.get(p.id) || 0) > 0 && <div className="xs" style={{ color: "var(--bad)" }} title="Billed more than was entered in stock — count this design and enter it">{shortBy(qty.get(p.id) || 0)} billed without stock</div>}
+              <div className="xs mut">{p.rate ? "Rate " + rupees(p.rate) : "no rate"}</div></div>
           </a></div>))}
         {list.length > limit && <button className="btn" onClick={() => setLimit(limit + 100)}>Show more ({list.length - limit})</button>}
         {!list.length && <div className="card pad mut">Nothing matches.</div>}
@@ -83,8 +90,14 @@ function ProductDetail({ id }: { id: string }) {
   const priv = usePrivate();
   const locs = useLocations();
   const p0 = useLiveQuery(() => db.products.get(id), [id]);
-  const stock = useLiveQuery(() => storeStock().then(cells => cells.filter(c => c.product_id === id)), [id], []);
-  const moves = useLiveQuery(() => db.movements.where("product_id").equals(id).filter(inStore).reverse().sortBy("at"), [id], []);
+  const stock = useLiveQuery(() => shownStock(priv).then(cells => cells.filter(c => c.product_id === id)), [id, priv], []);
+  const moves = useLiveQuery(async () => {
+    const all = await db.movements.where("product_id").equals(id).filter(inStore).reverse().sortBy("at");
+    if (priv) return all;   // estimates closed: their sales leave the history too
+    const refs = [...new Set(all.map(m => m.ref_bill).filter(Boolean))] as string[];
+    const shut = new Set((await db.bills.bulkGet(refs)).filter(b => b && privateBill(b)).map(b => b!.id));
+    return all.filter(m => !m.ref_bill || !shut.has(m.ref_bill));
+  }, [id, priv], []);
   const staff = useLiveQuery(() => db.staff.toArray(), [], []);
   const [p, setP] = useState<Product | null>(null);
   const [tax, setTax] = useState<Taxonomy | null>(null);
@@ -100,7 +113,7 @@ function ProductDetail({ id }: { id: string }) {
   const locOf = (x: string | null) => (x ? locCode(locs.find(l => l.id === x)) || "?" : "");
   return (
     <div>
-      <Head eyebrow={p.code} title={label(p)} sub={`${total} pieces in the building`}>
+      <Head eyebrow={p.code} title={label(p)} sub={total < 0 ? `0 pieces entered · ${-total} billed more than were ever entered — count this design and enter the stock` : `${total} pieces in the building`}>
         <button className="btn" onClick={() => go("move/" + p.id)}>Move</button>
         <button className="btn g" onClick={() => go("labels/" + p.id)}>Print QR</button>
         <button className="btn" onClick={() => setRfid(true)}>Link RFID tag</button>
