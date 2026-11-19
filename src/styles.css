@@ -286,7 +286,7 @@ tr.click{cursor:pointer}tr.click:hover td{background:var(--bg)}
   .pos-top{gap:10px}.pos-cust{min-width:0;flex:1}
   .pos-mbar{display:flex;position:fixed;left:10px;right:10px;bottom:calc(74px + env(safe-area-inset-bottom));z-index:29;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border:1px solid var(--line);border-radius:18px;padding:10px 12px;gap:8px;align-items:center;box-shadow:0 12px 30px -14px rgba(0,0,0,.35)}
   .pos-mbar>div{flex:1;display:flex;flex-direction:column;line-height:1.2}.pos-mbar b{font-size:22px;font-weight:700;letter-spacing:-.02em}
-  .pos{padding-bottom:80px}
+  .pos{padding-bottom:190px}   /* the Save bar + bottom tabs cover ~170px: the last line, Rate and + Add stay reachable */
   .scanrow{flex-wrap:wrap}.scanrow .wedge{flex-basis:100%}
   .pos-t thead{display:none}
   .pos-t tr.ln{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px 8px;padding:12px 14px;border-bottom:1px solid var(--line-2)}
@@ -704,7 +704,7 @@ html{scrollbar-gutter:stable}
 .pos-quick-row .btn{height:36px;padding:0 12px}
 .pos-quick .note{margin-top:6px;padding:6px 10px}
 @media(max-width:860px){.pos-quick-row{grid-template-columns:repeat(2,minmax(0,1fr))}.pos-quick-row input:first-child,.pos-quick-row .btn{grid-column:1/-1}}
-.pos-lines{border:1px solid var(--line);background:#fff;overscroll-behavior:contain;scrollbar-gutter:stable}
+.pos-lines{border:1px solid var(--line);background:#fff;scrollbar-gutter:stable}
 .pos-lines .pos-t{table-layout:fixed;min-width:710px}
 .pos-lines .pos-t th:nth-child(1){width:30px}
 .pos-lines .pos-t th:nth-child(2){width:48px}
@@ -762,7 +762,7 @@ html{scrollbar-gutter:stable}
   .billing-shell .pos-workspace{height:100%;overflow:hidden;gap:8px}
   .billing-shell .pos-entry{flex:none}
   .billing-shell .pos-entry:has(video){max-height:55%;overflow-y:auto}
-  .billing-shell .pos-lines{flex:1;min-height:130px;overflow:auto}
+  .billing-shell .pos-lines{flex:1;min-height:130px;overflow:auto;overscroll-behavior:contain}
   .billing-shell .pos-sum{overflow:auto;overscroll-behavior:contain}
   .billing-shell .fkeys{flex:none;font-size:11px;gap:10px}
 }
@@ -771,6 +771,7 @@ html{scrollbar-gutter:stable}
   .billing-shell .pos{padding-bottom:0}
 }
 @media(max-width:860px){
+  .pos-lines{overflow:visible;overscroll-behavior:auto}
   .pos-entry-fields{grid-template-columns:repeat(2,minmax(0,1fr))}
   .pos-entry-actions{grid-column:1/-1}
   .pos-lines .pos-t{min-width:0;table-layout:auto}

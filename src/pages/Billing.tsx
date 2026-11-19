@@ -731,7 +731,7 @@ export default function Billing({ args }: { args: string[] }) {
       if (!/^F\d+$/.test(k)) return;
       e.preventDefault();
       if (calculator || savingRef.current || switchingRef.current || document.querySelector('.modal,dialog[open]')) return;
-      if (k === "F2") { const snapshot = billRef.current; void (async () => { if (snapshot?.items.length && !await confirmDelete("Clear the current bill and start a new one? Use Hold to keep it.")) return; if (billRef.current?.id !== snapshot?.id) return; setB(withEstimateDiscount(newBill(me?.id || "", shop, priv ? snapshot?.bill_type || "gst" : "gst"), shop)); setBox(1); })(); }
+      if (k === "F2") startNewBill();
       if (k === "F3") doHold();
       if (k === "F4") setHeld(true);
       if (k === "F5") setCalculator(true);
@@ -757,6 +757,17 @@ export default function Billing({ args }: { args: string[] }) {
   const boxLines = (n: number) => boxLineRange(byBox(t.items).map((l, k) => l.box_no === n ? k + 1 : 0).filter(Boolean));
   const balance = due(t);
   const lastScan = t.items.find(l => l.id === lastScanId);
+  /* F2, and the "New bill" button on phones (owner, 19 Nov: "on the mobile only the one estimate that was going on
+     opens, after that I don't know how to make another") */
+  function startNewBill() {
+    const snapshot = billRef.current;
+    void (async () => {
+      if (snapshot?.items.length && !await confirmDelete("Clear the current bill and start a new one? Use Hold to keep it.")) return;
+      if (billRef.current?.id !== snapshot?.id) return;
+      setB(withEstimateDiscount(newBill(me?.id || "", shop, priv ? snapshot?.bill_type || "gst" : "gst"), shop)); setBox(1);
+      window.scrollTo({ top: 0 });
+    })();
+  }
   const itemEditor = <Suspense fallback={<div className="pos-entry-loading" role="status">Loading items…</div>}><ManualItems key={b.id} inline persistent focusRequest={entryFocus} products={products} box={box} level={b.price_level || "wholesale"} canRates={can(me, "billing.rates")} codeDiv={cd} onClose={() => {}}
     onProduct={(p, count, pieces, rate) => {
       void learnFromPick(p).then(ok => ok && toast(`Learnt: this sticker now scans as ${label(p)}`));
@@ -796,6 +807,7 @@ export default function Billing({ args }: { args: string[] }) {
             <button aria-pressed={b.bill_type !== "challan"} onClick={() => void openDocument("gst")}>Invoice</button>
             <button aria-pressed={b.bill_type === "challan"} onClick={() => void openDocument("challan")} title="Send goods now, invoice later">Challan</button>
           </div></div>}
+        {small && <button type="button" className="btn sm" onClick={startNewBill} title="Start a new bill (Hold keeps this one)"><Plus size={16} />New bill</button>}
         <div className="pos-no"><span className="xs mut">{b.no ? "Bill no" : "Next no"}</span><b className="mono">{b.no || nextNo}</b>
           {b.bill_type === "estimate" && (moreOpen || !!b.inv_no) && <input className="in xs mono" style={{ marginTop: 4, maxWidth: 170 }} aria-label="Invoice no. for this estimate" placeholder="Invoice no. (optional)" value={b.inv_no || ""} onChange={e => set({ inv_no: e.target.value.toUpperCase().slice(0, 24) })} />}</div>
         {/* Owner, 12 Nov (voice): a retail customer's bill — tap Retail, scan, and type the rate we give for each item */}
@@ -841,7 +853,7 @@ export default function Billing({ args }: { args: string[] }) {
               <button className={"btn " + (cam || sheet ? "p" : "g")} onClick={() => (small ? setSheet(true) : setCam(!cam))} title="Scan with the camera"><Icon n="scan" size={20} />Scan</button>
               {!small && <button className={"btn " + (peers ? "p" : "")} onClick={() => setPairOpen(true)} title="Use a phone as the scanner"><Icon n="sell" size={18} />{peers ? "Phone linked" : "Phone as scanner"}</button>}
               <MicButton onAudio={a => doVoice(a)} busy={aiBusy} label="🎙 Speak order" />
-              <button className="btn" aria-pressed={editorOpen} aria-expanded={editorOpen} aria-controls="pos-item-entry" disabled={saving} onClick={() => { setEditorOpen(x => small ? !x : true); setEntryFocus(n => n + 1); }}><Plus size={18} />Add item</button>
+              <button className="btn" aria-pressed={editorOpen} aria-expanded={editorOpen} aria-controls="pos-item-entry" disabled={saving} onClick={() => { setEditorOpen(x => small ? !x : true); setEntryFocus(n => n + 1); if (small) setTimeout(() => { const el = document.getElementById("pos-item-entry"); if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 180, behavior: "smooth" }); }, 120); }}><Plus size={18} />Add item</button>
               <button className="btn" disabled={saving} title="POS calculator" aria-label="POS calculator" onClick={() => setCalculator(true)}><Calculator size={20} /></button>
             </div>
             <div className={"lastscan" + (lastScan ? " has-item" : "")} role="status" aria-live="polite" aria-atomic="true">
