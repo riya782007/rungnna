@@ -15,7 +15,7 @@ import { SelectAll } from "../components/SelectAll";
 import { placeCode } from "../lib/states";
 import { selectedBox, mergeBoxLine, mergeBillLines, type BillingDraft } from "../lib/billingBox";
 import { inStore, storeStock, currentStore, MAIN_STORE } from "../lib/stores";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Calculator, Plus } from "lucide-react";
 import { appendPosLine, repeatedPosLine, validatePosLines } from "../lib/pos";
 import type { CalcTarget } from "../components/PosTools";
@@ -266,7 +266,10 @@ export default function Billing({ args }: { args: string[] }) {
     return () => clearTimeout(timer);
   }, [flashId, b]);
   useEffect(() => { setLastScanId(null); setFlashId(null); setScanFeedback(null); pendingScan.current = null; }, [b?.id]);
-  const [q, setQ] = useState("");
+  // the scan box keeps its own text (ScanBox below): typing in it no longer redraws the whole bill screen
+  const setQRef = useRef<(v: string) => void>(() => {});
+  const setQ = (v: string) => setQRef.current(v);
+  const pickRef = useRef<(p: Product) => void>(() => {});
   const [cam, setCam] = useState(false);
   const [held, setHeld] = useState(false);
   const [custOpen, setCustOpen] = useState(false);
@@ -386,6 +389,9 @@ export default function Billing({ args }: { args: string[] }) {
     });
     setSelectedLines(new Set());
   };
+  // what a bill row may do: one object that never changes, so a row redraws only when its own line changes
+  const rowAct = useRef<RowAct>(null!);
+  rowAct.current = { setLine, dropLines, merge: id => setB(x => x ? { ...x, items: mergeBoxLine(x.items, id) } : x), select: (id, on) => setSelectedLines(old => { const next = new Set(old); on ? next.add(id) : next.delete(id); return next; }), rowRefs: rowRefs.current };
 
   /* RFID: one tag counts once per bill, however many times the reader sees it */
   const tagsRef = useRef(new TagSet());
@@ -544,6 +550,7 @@ export default function Billing({ args }: { args: string[] }) {
     return "Added · " + label(p);
   }
   const onCodeRef = useRef(onCode); onCodeRef.current = onCode;
+  pickRef.current = p => { addProduct(p); void learnFromPick(p).then(ok => ok && toast(`Learnt: this sticker now scans as ${label(p)}`)); };
 
   /* phone-as-scanner: codes from a paired phone land on this bill */
   const [pairId, setPairId] = useState("");
@@ -564,11 +571,6 @@ export default function Billing({ args }: { args: string[] }) {
     return () => media.removeEventListener("change", change);
   }, []);
 
-  const suggestions = useMemo(() => {
-    const w = q.trim().toUpperCase().split(/\s+/).filter(Boolean);
-    if (!w.length) return [];
-    return products.filter(p => w.every(x => (p.style + " " + p.item + " " + p.color + " " + p.code).toUpperCase().includes(x))).slice(0, 8);
-  }, [q, products]);
 
   /* Owner, 26 Oct: on the roll printer the bill is followed by a tag per carry bag and a cash-counter slip,
      each cut separately; sheets (A4 / A5) keep the bag stickers on the label printer. */
@@ -841,14 +843,7 @@ export default function Billing({ args }: { args: string[] }) {
             <div className="row scanrow">
               <div className="wedge grow" style={{ position: "relative" }}>
                 <Icon n="scan" size={16} />
-                <input ref={scanRef} autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Scan label, or type style / item (F7)"
-                  onKeyDown={e => { if (e.key === "Tab" && isRfidTag(q)) { e.preventDefault(); onCode(q); return; } if (e.key === "Enter") { e.preventDefault(); onCode(q); } }} />
-                {suggestions.length > 0 && q.length < 25 && (
-                  <div className="sugg">{suggestions.map(p => (
-                    <button key={p.id} onClick={() => { addProduct(p); setQ(""); scanRef.current?.focus(); void learnFromPick(p).then(ok => ok && toast(`Learnt: this sticker now scans as ${label(p)}`)); }}>
-                      <Thumb photo_id={p.photo_id} url={p.photo_url} text={p.item} size={34} />
-                      <span className="grow"><b>{p.style || p.code}</b> <span className="mut">{p.item} · {p.color}</span></span>
-                      <span className="mono">{p.rate ? coded(p.rate) : ""}{p.pack ? " ×" + p.pack : ""}</span></button>))}</div>)}
+                <ScanBox inputRef={scanRef} setRef={setQRef} onCodeRef={onCodeRef} pickRef={pickRef} products={products} cd={cd} />
               </div>
               <button className={"btn " + (cam || sheet ? "p" : "g")} onClick={() => (small ? setSheet(true) : setCam(!cam))} title="Scan with the camera"><Icon n="scan" size={20} />Scan</button>
               {!small && <button className={"btn " + (peers ? "p" : "")} onClick={() => setPairOpen(true)} title="Use a phone as the scanner"><Icon n="sell" size={18} />{peers ? "Phone linked" : "Phone as scanner"}</button>}
@@ -886,22 +881,11 @@ export default function Billing({ args }: { args: string[] }) {
             <table className="pos-t" aria-label="Bill items">
               <thead><tr><th>#</th><th>Box</th><th>Item</th><th>Type</th><th>Style</th><th>Colour / Art no.</th><th className="r">Pkt</th><th className="r">Qty</th><th className="r">Rate{cd ? <span className="trade-mark">{mark}</span> : null}</th><th className="r">Disc</th><th className="r">Amount{cd ? <span className="trade-mark">{mark}</span> : null}</th><th>{!small && <SelectAll compact ids={t.items.map(l => l.id)} selected={selectedLines} onChange={setSelectedLines} label="Select all bill lines" />}</th></tr></thead>
               <tbody>
-                {displayOrder(t.items).map(l => [l, t.items.indexOf(l)] as const).map(([l, i]) => (
-                  <tr key={l.id} className={"ln" + (lastScanId === l.id ? " scanned" : "") + (flashId === l.id ? " flash" : "") + (noQty(l) ? (qtyProblem.includes(l.id) ? " noqty stop" : " noqty") : "")} aria-current={lastScanId === l.id ? "true" : undefined} ref={row => { if (row) rowRefs.current.set(l.id, row); else rowRefs.current.delete(l.id); }}>
-                    <td className="mut" data-l="#"><span className="line-no">{printNo.get(l.id) ?? i + 1}</span></td>
-                    <td data-l="Box"><input className="cell" style={{ width: 38 }} inputMode="numeric" value={l.box_no} onChange={e => setLine(l.id, { box_no: Math.max(1, parseInt(e.target.value) || 1) })}
-                      onBlur={() => setB(x => x ? { ...x, items: mergeBoxLine(x.items, l.id) } : x)} /></td>
-                    <td data-l=""><input className="cell" style={{ width: "100%", fontWeight: 700 }} title={l.item} aria-label={`Product name for line ${i + 1}`} placeholder="Product name" value={/^ITEM\s+\d+$/i.test(l.item || "") ? "" : l.item || ""} onChange={e => setLine(l.id, { item: e.target.value })} />{!l.product_id && <span className="pill">Custom</span>}{l.product_id && pmap.get(l.product_id)?.tk?.trim() ? <span className="pill warn" style={{ marginLeft: 6 }}>dead stock</span> : null}</td>
-                    <td data-l="Type">{l.type}</td><td data-l="Style" className="mono">{l.style || "—"}</td><td data-l="Colour / Art no.">{l.color || "—"}</td>
-                    <td className="r" data-l="Packets">{l.pack > 1 ? <span className="row" style={{ gap: 2, justifyContent: "flex-end", flexWrap: "nowrap" }}>
-                      <input className="cell r" style={{ width: 44 }} inputMode="numeric" value={l.pkts || ""} onChange={e => setLine(l.id, { pkts: parseInt(e.target.value) || 0 })} /><span className="xs mut">×{l.pack}</span></span> : <span className="mut">—</span>}</td>
-                    <td className="r" data-l={l.type || "Quantity"}><input className="cell r" style={{ width: 56 }} inputMode="numeric" value={l.qty || ""} disabled={l.pack > 1 && l.pkts > 0}
-                      onChange={e => setLine(l.id, { qty: parseInt(e.target.value) || 0, pkts: 0 })} /></td>
-                    <td className="r" data-l="Rate"><MoneyInput className="cell r" style={{ width: 70 }} disabled={!can(me, "billing.rates") && !!(l.product_id && pmap.get(l.product_id)?.rate)} title={cd ? `Rate in the trade code (÷${cd}). Saved as the real rate ${billAmount(l.rate)}` : undefined} paise={toCode(l.rate, cd)} onPaise={v => setLine(l.id, { rate: fromCode(v, cd) })} /></td>
-                    <td className="r" data-l="Disc"><CodedDisc className={"cell r" + (discError(l.disc) ? " bad" : "")} style={{ width: 54 }} placeholder="—" title={discError(l.disc) || (cd ? `10% or amount ÷${cd}` : "10% or amount")} disc={l.disc} div={cd} onDisc={disc => setLine(l.id, { disc })} /></td>
-                    <td className="r mono b" data-l="Amount">{(toCode(l.amount, cd) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-                    <td data-l="Select" className="pos-line-actions"><input type="checkbox" aria-label={"Select bill line " + (i + 1)} checked={selectedLines.has(l.id)} onChange={event => setSelectedLines(old => { const next = new Set(old); event.target.checked ? next.add(l.id) : next.delete(l.id); return next; })} /><DeleteButton className="x" aria-label="Remove line" onDelete={() => dropLines([l.id])}>✕</DeleteButton></td>
-                  </tr>))}
+                {(() => { const at = new Map(t.items.map((l, k) => [l.id, k])); const rates = can(me, "billing.rates");
+                  return displayOrder(t.items).map(l => { const i = at.get(l.id) ?? 0; return <BillRow key={l.id} l={l} i={i} no={printNo.get(l.id) ?? i + 1} act={rowAct}
+                    cls={"ln" + (lastScanId === l.id ? " scanned" : "") + (flashId === l.id ? " flash" : "") + (noQty(l) ? (qtyProblem.includes(l.id) ? " noqty stop" : " noqty") : "")}
+                    current={lastScanId === l.id} selected={selectedLines.has(l.id)} cd={cd}
+                    rateLocked={!rates && !!(l.product_id && pmap.get(l.product_id)?.rate)} dead={!!(l.product_id && pmap.get(l.product_id)?.tk?.trim())} />; }); })()}
                 {!t.items.length && <tr><td colSpan={12} className="mut" style={{ padding: 28, textAlign: "center" }}>No items yet</td></tr>}
               </tbody>
             </table>
@@ -1152,6 +1136,64 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
 }
 
 /* A line discount box that shows and takes a rupee discount in the trade code (lib/tradeCode); "10%" is unchanged. */
+/* The scan box. Owner, 19 Nov (voice): "after every scan we have to wait for the screen before the next item can be
+   scanned". A scanner types a whole label (a QR is 40–60 letters) in a few milliseconds, and every letter used to
+   redraw the full bill screen; on the counter PC that was a second or two per scan. The box now keeps its own text,
+   so only the box redraws while a label comes in. The suggestions (with photos) wait for typing to pause, which a
+   scanner never does before its Enter. */
+const ScanBox = memo(function ScanBox({ inputRef, setRef, onCodeRef, pickRef, products, cd }: {
+  inputRef: React.RefObject<HTMLInputElement>; setRef: React.MutableRefObject<(v: string) => void>;
+  onCodeRef: React.MutableRefObject<(raw: string) => Promise<string>>; pickRef: React.MutableRefObject<(p: Product) => void>; products: Product[]; cd: number;
+}) {
+  const [q, setQ] = useState(""); setRef.current = setQ;
+  const [sq, setSq] = useState("");
+  useEffect(() => { if (!q) { setSq(""); return; } const timer = setTimeout(() => setSq(q), 160); return () => clearTimeout(timer); }, [q]);
+  const suggestions = useMemo(() => {
+    const w = sq.trim().toUpperCase().split(/\s+/).filter(Boolean);
+    if (!w.length || sq !== q || q.length >= 25) return [];
+    return products.filter(p => w.every(x => (p.style + " " + p.item + " " + p.color + " " + p.code).toUpperCase().includes(x))).slice(0, 8);
+  }, [sq, q, products]);
+  return <>
+    <input ref={inputRef} autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Scan label, or type style / item (F7)"
+      onKeyDown={e => { if (e.key === "Tab" && isRfidTag(q)) { e.preventDefault(); void onCodeRef.current(q); return; } if (e.key === "Enter") { e.preventDefault(); void onCodeRef.current(q); } }} />
+    {suggestions.length > 0 && (
+      <div className="sugg">{suggestions.map(p => (
+        <button key={p.id} onClick={() => { pickRef.current(p); setQ(""); inputRef.current?.focus(); }}>
+          <Thumb photo_id={p.photo_id} url={p.photo_url} text={p.item} size={34} />
+          <span className="grow"><b>{p.style || p.code}</b> <span className="mut">{p.item} · {p.color}</span></span>
+          <span className="mono">{p.rate ? billAmount(toCode(p.rate, cd)) + (cd ? ` ÷${cd}` : "") : ""}{p.pack ? " ×" + p.pack : ""}</span></button>))}</div>)}
+  </>;
+});
+
+type RowAct = { setLine: (id: string, patch: Partial<BillLine>) => void; dropLines: (ids: string[]) => void; merge: (id: string) => void; select: (id: string, on: boolean) => void; rowRefs: Map<string, HTMLTableRowElement> };
+type RowProps = { l: BillLine; i: number; no: number; cls: string; current: boolean; selected: boolean; cd: number; rateLocked: boolean; dead: boolean; act: React.MutableRefObject<RowAct> };
+const amountFmt = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2 });
+/* One bill line. Drawn again only when something about it changed: a 150-line bill no longer redraws every row for
+   each letter the scanner types or each new scan (owner, 19 Nov: "we have to wait for the screen after every scan"). */
+const BillRow = memo(function BillRow({ l, i, no, cls, current, selected, cd, rateLocked, dead, act }: RowProps) {
+  const a = () => act.current;
+  return <tr className={cls} aria-current={current ? "true" : undefined} ref={row => { if (row) a().rowRefs.set(l.id, row); else a().rowRefs.delete(l.id); }}>
+    <td className="mut" data-l="#"><span className="line-no">{no}</span></td>
+    <td data-l="Box"><input className="cell" style={{ width: 38 }} inputMode="numeric" value={l.box_no} onChange={e => a().setLine(l.id, { box_no: Math.max(1, parseInt(e.target.value) || 1) })}
+      onBlur={() => a().merge(l.id)} /></td>
+    <td data-l=""><input className="cell" style={{ width: "100%", fontWeight: 700 }} title={l.item} aria-label={`Product name for line ${i + 1}`} placeholder="Product name" value={/^ITEM\s+\d+$/i.test(l.item || "") ? "" : l.item || ""} onChange={e => a().setLine(l.id, { item: e.target.value })} />{!l.product_id && <span className="pill">Custom</span>}{dead ? <span className="pill warn" style={{ marginLeft: 6 }}>dead stock</span> : null}</td>
+    <td data-l="Type">{l.type}</td><td data-l="Style" className="mono">{l.style || "—"}</td><td data-l="Colour / Art no.">{l.color || "—"}</td>
+    <td className="r" data-l="Packets">{l.pack > 1 ? <span className="row" style={{ gap: 2, justifyContent: "flex-end", flexWrap: "nowrap" }}>
+      <input className="cell r" style={{ width: 44 }} inputMode="numeric" value={l.pkts || ""} onChange={e => a().setLine(l.id, { pkts: parseInt(e.target.value) || 0 })} /><span className="xs mut">×{l.pack}</span></span> : <span className="mut">—</span>}</td>
+    <td className="r" data-l={l.type || "Quantity"}><input className="cell r" style={{ width: 56 }} inputMode="numeric" value={l.qty || ""} disabled={l.pack > 1 && l.pkts > 0}
+      onChange={e => a().setLine(l.id, { qty: parseInt(e.target.value) || 0, pkts: 0 })} /></td>
+    <td className="r" data-l="Rate"><MoneyInput className="cell r" style={{ width: 70 }} disabled={rateLocked} title={cd ? `Rate in the trade code (÷${cd}). Saved as the real rate ${billAmount(l.rate)}` : undefined} paise={toCode(l.rate, cd)} onPaise={v => a().setLine(l.id, { rate: fromCode(v, cd) })} /></td>
+    <td className="r" data-l="Disc"><CodedDisc className={"cell r" + (discError(l.disc) ? " bad" : "")} style={{ width: 54 }} placeholder="—" title={discError(l.disc) || (cd ? `10% or amount ÷${cd}` : "10% or amount")} disc={l.disc} div={cd} onDisc={disc => a().setLine(l.id, { disc })} /></td>
+    <td className="r mono b" data-l="Amount">{amountFmt.format(toCode(l.amount, cd) / 100)}</td>
+    <td data-l="Select" className="pos-line-actions"><input type="checkbox" aria-label={"Select bill line " + (i + 1)} checked={selected} onChange={event => a().select(l.id, event.target.checked)} /><DeleteButton className="x" aria-label="Remove line" onDelete={() => a().dropLines([l.id])}>✕</DeleteButton></td>
+  </tr>;
+}, (x, y) => {
+  for (const k of Object.keys(y) as (keyof RowProps)[]) if (k !== "l" && x[k] !== y[k]) return false;
+  if (x.l === y.l) return true;
+  const kl = Object.keys(y.l) as (keyof BillLine)[];
+  return kl.length === Object.keys(x.l).length && kl.every(k => x.l[k] === y.l[k]);
+});
+
 function CodedDisc({ disc, div, onDisc, ...rest }: { disc: string; div: number; onDisc: (disc: string) => void } & Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange">) {
   const [text, setText] = useState<string | null>(null);
   return <input {...rest} value={text ?? discToCode(disc, div)} onChange={e => { setText(e.target.value); onDisc(discFromCode(e.target.value, div)); }} onBlur={() => setText(null)} />;
