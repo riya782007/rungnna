@@ -39,6 +39,7 @@ import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { getSetting, setSetting } from "./lib/db";
 import { getRule } from "./lib/pricing";
 import { loadOldCodes } from "./lib/old-codes";
+import { InstallBanner } from "./components/InstallApp";
 
 /* Pages load on first visit (fast start); the service worker keeps every piece for offline use. */
 const Billing = lazy(() => import("./pages/Billing"));
@@ -291,6 +292,7 @@ function Shell() {
             {sec === "stock" && route !== "labels" && <Suspense fallback={null}><StockAI route={route} /></Suspense>}
             {route !== "purchase" && <ShopPrintsWaiting />}
             <PhoneWhatsApp />
+            <InstallBanner />
             <Suspense fallback={<Loading />}><div className="pagein">{page}</div></Suspense>
           </Guard>
         </main>

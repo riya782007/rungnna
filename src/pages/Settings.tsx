@@ -31,6 +31,7 @@ import { SecuritySettings } from "../components/OwnerSecurity";
 import { CloudSyncControl } from "../components/CloudSyncControl";
 import { OldCodesCard } from "../components/OldCodesCard";
 import { PricingCard, TradeCodeCard, StickerLookCard, SupplierTermsCard, PrintingCard, GstCard, SaveState, NoLessCard } from "../components/SettingsCards";
+import { InstallCard } from "../components/InstallApp";
 
 /* Settings in five plain groups, one at a time (owner, 18 Oct: the long page left half the screen empty and
    things were hard to find). Each group is a tab; its cards flow into balanced columns. */
@@ -185,6 +186,7 @@ export default function Settings({ tab: tabArg }: { tab?: string } = {}) {
               : <ShopLogin />}
           </div></div>
         <ThisAppCard />
+        <InstallCard />
         {boss && <div className="card"><header><h3>Backup file</h3></header>
           <div className="pad stack">
             <div className="set-intro">Everything on this device in one file. Keep a copy on a pen drive every week.</div>
