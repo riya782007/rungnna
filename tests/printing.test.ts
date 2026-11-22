@@ -85,3 +85,17 @@ describe("longest page per computer", () => {
     expect(thermalPage(80, 1200, 3000)).toContain("size:80mm 340mm");     // one piece on long roll paper
   });
 });
+
+import { guessPrinterName } from "../src/lib/printing";
+describe("choosing the printer by itself (owner, 22 Nov: gap in the middle, 'app is busy')", () => {
+  const pcs = ["Canon LBP6030/6040/6018L", "POS-80C", "TSC TE244", "Microsoft Print to PDF", "OneNote (Desktop)", "Fax"];
+  it("bill → the one roll printer, stickers → the one label printer", () => {
+    expect(guessPrinterName("bill", pcs)).toBe("POS-80C");
+    expect(guessPrinterName("label", pcs)).toBe("TSC TE244");
+    expect(guessPrinterName("a4", pcs)).toBe("");
+  });
+  it("never guesses between two", () => {
+    expect(guessPrinterName("bill", [...pcs, "XP-80 Thermal"])).toBe("");
+    expect(guessPrinterName("bill", ["Canon LBP6030", "Microsoft Print to PDF"])).toBe("");
+  });
+});

@@ -232,7 +232,10 @@ function createWindow() {
 
   // never stay on a frozen or crashed screen at the counter: the bill is already saved on disk
   win.webContents.on("render-process-gone", (_e, d) => { if (d.reason !== "clean-exit") setTimeout(() => win && !win.isDestroyed() && win.reload(), 500); });
+  win.on("responsive", () => { printBoxAt = 0; });
   win.on("unresponsive", async () => {
+    // Owner, 22 Nov (photo): "The app is busy" came up while Windows' Print box was open — that is not a hang
+    if (Date.now() - printBoxAt < 5 * 60_000) return;
     const { response } = await dialog.showMessageBox(win, { type: "warning", buttons: ["Wait", "Reload"], defaultId: 0, title: "Rungnna Shop OS",
       message: "The app is busy.", detail: "Your bills are saved on this computer. Reload if it does not recover." });
     if (response === 1 && win && !win.isDestroyed()) win.reload();
@@ -273,6 +276,8 @@ ipcMain.on("rj-build", e => { e.returnValue = { active: activeId, ready: readyId
 ipcMain.handle("rj-check-now", async () => { await checkWebUpdate(); return { active: activeId, ready: readyId, shell: SHELL_API, live: liveId, lastCheck, lastError }; });
 ipcMain.handle("rj-apply-update", () => applyWebUpdate());
 ipcMain.on("rj-started", () => startedOk());
+let printBoxAt = 0;
+ipcMain.on("rj-printing", () => { printBoxAt = Date.now(); });
 let serialWant = "";
 ipcMain.on("rj-serial-for", (_e, kind) => { serialWant = String(kind || ""); });
 

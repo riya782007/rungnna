@@ -97,6 +97,7 @@ export async function printDocument(source: Document, frame: () => Promise<void>
     }
     // Windows app with a printer chosen for this kind of page: straight to it, no Print box (owner, 14 Nov)
     const desk = typeof window !== "undefined" ? (window as any).rungnnaDesktop : undefined;
+    if (desk?.printHtml && desk?.printers && !directPrinter(jobKind(root))) await guessPrinter(jobKind(root), desk);
     if (desk?.printHtml && directPrinter(jobKind(root))) {
       const device = directPrinter(jobKind(root));
       const page = root.querySelector<HTMLStyleElement>("style[data-thermal-width]");
@@ -110,6 +111,7 @@ export async function printDocument(source: Document, frame: () => Promise<void>
         return remove;
       } catch { /* printer offline / renamed: fall back to the normal Print box below */ }
     }
+    desk?.printing?.();   // the Print box holds the screen still: the Windows app must not call that "busy"
     win.addEventListener("afterprint", () => { sent = true; remove(); setTimeout(onDone, SLIP_GAP_MS); }, { once: true });
     win.focus(); win.print();
     return remove;
@@ -209,6 +211,30 @@ export function directPrinter(kind: PrintKind): string {
 }
 export function setDirectPrinter(kind: PrintKind, name: string) {
   try { name ? localStorage.setItem("rj_printer_" + kind, name) : localStorage.removeItem("rj_printer_" + kind); } catch { /* private mode */ }
+}
+/* Owner, 22 Nov (photos): an estimate printed from the Windows app still came out in two pieces with a long blank in
+   the middle, and an "app is busy" box came up. Both happen only through the Print box (the bill is cut into roll
+   pages, and the Print box holds the screen still). When no printer has been chosen for this kind of page yet and
+   exactly one printer on this computer is plainly that kind (POS-80 / thermal for bills, TSC / label for stickers),
+   it is chosen once and the page goes straight to it. Settings › Printing changes it. */
+const LOOKS: Partial<Record<PrintKind, RegExp>> = {
+  bill: /\bPOS|thermal|receipt|80\s?mm|58\s?mm|XP-?\d|TVS|\bRP[-\s]?\d|TM-?[TM]\d|Retsol|Everycom/i,
+  label: /\bTSC\b|TTP|TE ?2\d\d|\bTA ?2\d\d|Zebra|label|barcode/i,
+};
+export function guessPrinterName(kind: PrintKind, names: string[]): string {
+  const re = LOOKS[kind]; if (!re) return "";
+  const other = LOOKS[kind === "bill" ? "label" : "bill"]!;
+  const hits = names.filter(n => re.test(n) && !other.test(n) && !/PDF|OneNote|XPS|Fax|AnyDesk|Ultra/i.test(n));
+  return hits.length === 1 ? hits[0] : "";
+}
+async function guessPrinter(kind: PrintKind, desk: any) {
+  try {
+    const list: { name: string; label: string }[] = await desk.printers();
+    const name = guessPrinterName(kind, list.map(p => p.name));
+    if (!name) return;
+    setDirectPrinter(kind, name);
+    void import("./app").then(m => m.toast(`${kind === "bill" ? "Bills" : "Stickers"} now print straight to ${name} — one piece, no Print box. Change it in Settings › Printing.`));
+  } catch { /* no list: the Print box shows as before */ }
 }
 /** The page's own size from its @page rule, in mm (null for auto / named sizes like A4). */
 export function pageSizeOf(root: HTMLElement): [number, number] | null {
