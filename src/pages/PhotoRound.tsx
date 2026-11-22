@@ -1,10 +1,12 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, type Product } from "../lib/db";
 import { findByScan, saveProduct, label } from "../lib/products";
 import { getShop } from "../lib/billing";
-import { toast } from "../lib/app";
-import { Head, Thumb } from "../components/common";
+import { toast, go } from "../lib/app";
+import { Head, Thumb, Modal, PhotoButton } from "../components/common";
+import { photoSrc } from "../lib/image";
+import { confirmDelete } from "../lib/confirm-delete";
 import { WedgeInput } from "../components/Scanner";
 
 const Camera = lazy(() => import("../components/CustomerCamera"));
@@ -63,6 +65,7 @@ export default function PhotoRound() {
   const [picked, setPicked] = useState<Set<string> | null>(null);
   const [prices, setPrices] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState<Product | null>(null);   // the photo shown big, to change it
   const withPhotos = useLiveQuery(() => db.products.filter(p => !p.deleted && !!(p.photo_id || p.photo_url)).toArray(), [], [] as Product[]);
   const list = useMemo(() => [...withPhotos].sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1)), [withPhotos]);
   const today = day(new Date().toISOString());
@@ -123,11 +126,41 @@ export default function PhotoRound() {
         <button className="btn p" disabled={busy || !sel.length} onClick={() => void share()}>{busy ? "Making…" : "Share on WhatsApp"}</button>
       </div>
       {!list.length && <div className="xs mut">No photos yet — scan a sticker above.</div>}
-      <div className="photo-grid">{list.slice(0, 300).map(p => <label key={p.id} className={"photo-tile" + (chosen.has(p.id) ? " on" : "")}>
-        <input type="checkbox" checked={chosen.has(p.id)} onChange={e => setPicked(() => { const n = new Set(chosen); e.target.checked ? n.add(p.id) : n.delete(p.id); return n; })} />
-        <Thumb photo_id={p.photo_id} url={p.photo_url} text={p.item} size={120} />
+      {/* Owner, 22 Nov (voice + photo): "if we want to change something it doesn't open — it is just a thumbnail".
+          The tick box ticks; the picture opens big, to retake, replace or remove it. */}
+      <div className="photo-grid">{list.slice(0, 300).map(p => <div key={p.id} className={"photo-tile" + (chosen.has(p.id) ? " on" : "")}>
+        <input type="checkbox" aria-label={"Tick " + label(p)} checked={chosen.has(p.id)} onChange={e => setPicked(() => { const n = new Set(chosen); e.target.checked ? n.add(p.id) : n.delete(p.id); return n; })} />
+        <button type="button" className="linkbtn" title="Open the photo — retake, replace or remove it" style={{ padding: 0 }} onClick={() => setOpen(p)}><Thumb photo_id={p.photo_id} url={p.photo_url} text={p.item} size={120} /></button>
         <span className="xs"><b>{p.style || p.item}</b>{p.color ? " · " + p.color : ""}{p.rate ? <> · {rupees(p.rate)}</> : null}</span>
-      </label>)}</div>
+      </div>)}</div>
+      {open && <PhotoOpen product={open} onClose={() => setOpen(null)} />}
     </div>
   </div>;
+}
+
+/** One photo, big: retake it with the camera, put another picture from a file, or take it off the item. */
+function PhotoOpen({ product, onClose }: { product: Product; onClose: () => void }) {
+  const p = useLiveQuery(() => db.products.get(product.id), [product.id]) || product;
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => { let on = true; setSrc(null); photoSrc(p.photo_id, p.photo_url).then(s => on && setSrc(s || "")); return () => { on = false; }; }, [p.photo_id, p.photo_url]);
+  const put = async (photo_id: string | undefined) => {
+    const fresh = (await db.products.get(p.id)) || p;
+    await saveProduct({ ...fresh, photo_id, photo_url: undefined }, true);
+    toast(photo_id ? `New photo saved · ${label(fresh)}` : `Photo taken off · ${label(fresh)}`);
+    if (!photo_id) onClose();
+  };
+  return <Modal title={label(p)} onClose={onClose}>
+    <div className="stack">
+      <div style={{ background: "#111", borderRadius: 10, minHeight: 240, display: "grid", placeItems: "center", overflow: "hidden" }}>
+        {src ? <img src={src} alt={label(p)} style={{ maxWidth: "100%", maxHeight: "60vh", objectFit: "contain" }} />
+          : <div className="pad" style={{ color: "#eee", textAlign: "center" }}>{src === null ? "Loading…" : "This photo is not on this computer yet — it was taken on another phone or computer and hasn't arrived (check the sync light, top right). Retake it here, or wait for sync."}</div>}
+      </div>
+      <div className="xs mut">{[p.code, p.color, p.rate ? rupees(p.rate) : ""].filter(Boolean).join(" · ")}</div>
+      <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+        <PhotoButton webcam label="Retake / change photo" onChange={id => void put(id)} />
+        <button className="btn" onClick={() => go("product/" + p.id)}>Open product</button>
+        <button className="btn bad" onClick={async () => { if (await confirmDelete("Take this photo off " + label(p) + "?")) await put(undefined); }}>Remove photo</button>
+      </div>
+    </div>
+  </Modal>;
 }

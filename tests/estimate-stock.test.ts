@@ -46,3 +46,12 @@ describe("stock while estimates are closed", () => {
     expect([onHand(-4), shortBy(-4), onHand(6), shortBy(6)]).toEqual([0, 4, 6, 0]);
   });
 });
+
+import { wholesaleNet } from "../src/lib/billing";
+describe("retail bill · wholesale rates (owner, 22 Nov: 'the wholesale rate is wrong')", () => {
+  it("an estimate's wholesale price is after the usual 50% (and any less %)", () => {
+    expect(wholesaleNet(117600, { bill_type: "estimate" }, { est_disc_pct: 50, est_less_pct: 0 })).toBe(58800);
+    expect(wholesaleNet(100000, { bill_type: "estimate" }, { est_disc_pct: 50, est_less_pct: 10 })).toBe(45000);
+    expect(wholesaleNet(117600, { bill_type: "gst" }, { est_disc_pct: 50, est_less_pct: 0 })).toBe(117600);
+  });
+});

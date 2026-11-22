@@ -234,6 +234,13 @@ export function taxSummary(b: Bill, by: "rate" | "hsn", shopHsn = "7117"): TaxRo
 export const due = (b: Pick<Bill, "net" | "advance" | "paid"> & { bill_type?: BillType }) =>
   b.bill_type === "challan" ? 0 : b.net - b.advance - b.paid;   // a challan asks for no money
 
+/** What a wholesale customer really pays for one piece at this list rate: estimates get the usual discount (and less). */
+export const wholesaleNet = (listRate: number, bill: Pick<Bill, "bill_type">, shop: Pick<Shop, "est_disc_pct" | "est_less_pct">) => {
+  if (bill.bill_type !== "estimate") return listRate;
+  const ok = (n: unknown) => { const v = Number(n); return Number.isFinite(v) && v > 0 && v < 100 ? v : 0; };
+  return Math.round(listRate * (1 - ok(shop.est_disc_pct) / 100) * (1 - ok(shop.est_less_pct) / 100));
+};
+
 /** A new estimate with the shop's usual discount and less already on it; any other document is left as it is. */
 export function withEstimateDiscount(b: Bill, shop: Pick<Shop, "est_disc_pct" | "est_less_pct">): Bill {
   if (b.bill_type !== "estimate") return b;

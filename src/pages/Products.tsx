@@ -76,7 +76,8 @@ function ProductList() {
             <div className="grow"><div className="b sm">{label(p)}</div><div className="xs mut mono">{p.code}{p.tk ? " · dead stock" : ""}</div></div>
             <div style={{ textAlign: "right" }}><div className="mono b" title="Pieces in stock">{onHand(qty.get(p.id) || 0)} <span className="xs mut">pcs</span></div>
               {shortBy(qty.get(p.id) || 0) > 0 && <div className="xs" style={{ color: "var(--bad)" }} title="Billed more than was entered in stock — count this design and enter it">{shortBy(qty.get(p.id) || 0)} billed without stock</div>}
-              <div className="xs mut">{p.rate ? "Rate " + rupees(p.rate) : "no rate"}</div></div>
+              {/* Owner, 22 Nov (voice): "I locked the estimates and the stock list still writes everyone's money" — rates show only while open */}
+              {priv && <div className="xs mut">{p.rate ? "Rate " + rupees(p.rate) : "no rate"}</div>}</div>
           </a></div>))}
         {list.length > limit && <button className="btn" onClick={() => setLimit(limit + 100)}>Show more ({list.length - limit})</button>}
         {!list.length && <div className="card pad mut">Nothing matches.</div>}

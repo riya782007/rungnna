@@ -26,19 +26,18 @@ type Part = { text: string } | { inline_data: { mime_type: string; data: string 
 export async function gemini(parts: Part[], opts: { json?: boolean; system?: string; temperature?: number } = {}) {
   const key = env("GEMINI_API_KEY");
   if (!key) throw Object.assign(new Error("AI key not added yet: Vercel → rungnna_shop_os → Settings → Environment Variables → GEMINI_API_KEY"), { status: 503 });
-  const model = env("GEMINI_MODEL") || "gemini-2.5-flash";
-  const body: any = {
-    contents: [{ role: "user", parts }],
-    generationConfig: { temperature: opts.temperature ?? 0.2, ...(opts.json ? { responseMimeType: "application/json" } : {}) },
-  };
-  if (opts.system) body.systemInstruction = { parts: [{ text: opts.system }] };
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-    method: "POST", headers: { "content-type": "application/json", "x-goog-api-key": key }, body: JSON.stringify(body),
-    signal: AbortSignal.timeout(45000),
-  });
-  const j: any = await r.json().catch(() => ({}));
-  if (!r.ok) throw Object.assign(new Error(j?.error?.message || `Gemini error ${r.status}`), { status: r.status === 429 ? 429 : 502 });
-  const text = (j?.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || "").join("");
+  /* Owner, 22 Nov (voice): "tried the Google Gemini picture — refused because of the version". This helper still
+     asked for "gemini-2.5-flash", which Google has closed to new keys. It now goes through the same chain as the
+     bill reader: the models Google lists for this key, newest Flash first, skipping retired names. */
+  const { askOne, ProviderError } = await import("./_llm.js");
+  let text: string;
+  try {
+    text = await askOne("gemini", parts.map(p => "text" in p ? { text: p.text } : { image: { mime: p.inline_data.mime_type, data: p.inline_data.data } }),
+      { json: opts.json, system: opts.system, temperature: opts.temperature ?? 0.2, timeoutMs: 45000 });
+  } catch (e: any) {
+    const status = e instanceof ProviderError ? (e as any).status : 502;
+    throw Object.assign(new Error(e?.message || "Gemini error"), { status: status === 429 ? 429 : 502 });
+  }
   if (!opts.json) return text;
   try { return JSON.parse(text); } catch { const m = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/); return m ? JSON.parse(m[0]) : {}; }
 }
