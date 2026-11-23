@@ -13,6 +13,31 @@
 </head>
 <body>
 <div id="root"></div>
+<!-- Owner, 23 Nov: "the mobile app won't open" — a blank screen says nothing. If the app hasn't drawn anything after
+     12 seconds, this (old-style JavaScript, runs on any phone) shows why: the error, the phone's browser version, and
+     buttons to try again or open the website. A photo of this screen tells Riya what to fix. -->
+<script>
+(function () {
+  var errs = [];
+  window.addEventListener("error", function (e) { errs.push((e && (e.message || (e.target && e.target.src))) || "error"); }, true);
+  window.addEventListener("unhandledrejection", function (e) { errs.push("promise: " + (e && e.reason && (e.reason.message || e.reason))); });
+  setTimeout(function () {
+    var root = document.getElementById("root");
+    if (!root || root.children.length) return;
+    var ua = navigator.userAgent, chrome = (ua.match(/Chrome\/(\d+)/) || [])[1] || "?";
+    var box = document.createElement("div");
+    box.setAttribute("style", "font:16px/1.5 sans-serif;padding:24px;max-width:560px;margin:auto;color:#241B2E");
+    box.innerHTML = "<h2 style='margin:0 0 8px'>Rungnna did not start</h2>" +
+      "<p>Please send a photo of this screen to Riya.</p>" +
+      "<p style='font-size:13px;background:#F2EADA;padding:10px;border-radius:8px;word-break:break-word'>Browser version: Chrome " + chrome +
+      (Number(chrome) && Number(chrome) < 90 ? " (old — update <b>Android System WebView</b> and <b>Chrome</b> from the Play Store)" : "") +
+      "<br>" + (errs.length ? errs.slice(0, 4).map(function (x) { return String(x).replace(/</g, "&lt;"); }).join("<br>") : "No error message") + "</p>" +
+      "<p><button onclick='location.reload()' style='font-size:16px;padding:10px 16px'>Try again</button> " +
+      "<a href='https://rungnnashopos.vercel.app/' style='font-size:16px;padding:10px 16px'>Open the website</a></p>";
+    document.body.appendChild(box);
+  }, 12000);
+})();
+</script>
 <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>

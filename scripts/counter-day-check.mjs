@@ -87,11 +87,30 @@ const lines = page => page.locator(".pos-lines tbody tr.ln").count();
     const t = Date.now(); for (let i = 0; i < 30; i++) await scan(page, "CHKCODE-" + (i % 2 ? "e1" : "n1"));
     const per = (Date.now() - t) / 30; must(per < 1500, `scan took ${Math.round(per)} ms each`);
   });
-  await step(page, "estimate: save and print (one roll piece)", async () => {
+  await step(page, "estimate: save and print (one roll piece); short warning for billed-without-stock", async () => {
     await page.getByRole("button", { name: /^Print estimate/ }).click(); await page.waitForTimeout(2500);
     const body = await page.locator("body").innerText();
+    must(!/more than recorded\),.*more than recorded\),.*more than recorded\)/.test(body), "long red list of items on screen");
     must(/Saved|EST\//.test(body), "no saved estimate number");
     await page.getByText(/Print prepared|Printed|Sent to/).first().waitFor({ timeout: 8000 }).catch(() => { throw new Error("print not started"); });
+  });
+  await step(page, "box number always in sight; tap starts the next box", async () => {
+    const btn = page.locator("button.box-now"); must(await btn.isVisible(), "no box button by the scan box");
+    const before = Number((await btn.locator("b").innerText()).trim());
+    await btn.click(); await page.waitForTimeout(300);
+    must(Number((await btn.locator("b").innerText()).trim()) === before + 1, "box did not go up by one");
+    await scan(page, "CHKCODE-h1");
+    must((await page.locator(".pos-lines tr[aria-current=true] td[data-l=Box] input").inputValue()) === String(before + 1), "scan did not go into the new box");
+  });
+  await step(page, "new customer typed, form closes by itself, details come back", async () => {
+    await page.getByText("Walk-in / cash").first().click(); await page.waitForTimeout(400);
+    await page.keyboard.type("9827877149"); await page.getByRole("button", { name: /New customer/ }).click(); await page.waitForTimeout(400);
+    const name = page.locator(".modal input").nth(1); await name.fill("RISHAB RATHORE"); await page.waitForTimeout(300);
+    await page.evaluate(() => location.hash = "#/home"); await page.waitForTimeout(800);   // the form is gone
+    await page.evaluate(() => location.hash = "#/bill"); await page.waitForTimeout(1500);
+    await page.getByText("Walk-in / cash").first().click(); await page.waitForTimeout(600);
+    must(/RISHAB RATHORE/.test(await page.locator(".modal").evaluate(m => [...m.querySelectorAll("input")].map(i => i.value).join(" "))), "typed customer lost");
+    await page.getByRole("button", { name: "Close" }).first().click(); await page.waitForTimeout(300);
   });
   await step(page, "tax invoice: scan, CGST + SGST, save", async () => {
     await page.getByRole("button", { name: "GST Invoice", exact: true }).click(); await page.waitForTimeout(800);

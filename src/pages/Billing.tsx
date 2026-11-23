@@ -389,6 +389,8 @@ export default function Billing({ args }: { args: string[] }) {
     });
     setSelectedLines(new Set());
   };
+  // the current box stays in sight in the box list on the right, however many boxes the bill has
+  useEffect(() => { document.querySelector<HTMLElement>(".pos-box-totals [aria-pressed=true]")?.scrollIntoView({ block: "nearest", inline: "nearest" }); }, [box]);
   // what a bill row may do: one object that never changes, so a row redraws only when its own line changes
   const rowAct = useRef<RowAct>(null!);
   rowAct.current = { setLine, dropLines, merge: id => setB(x => x ? { ...x, items: mergeBoxLine(x.items, id) } : x), select: (id, on) => setSelectedLines(old => { const next = new Set(old); on ? next.add(id) : next.delete(id); return next; }), rowRefs: rowRefs.current };
@@ -457,6 +459,11 @@ export default function Billing({ args }: { args: string[] }) {
     try { return await job; } finally { setTimeout(() => creating.current.delete(r), 3000); }
   }
 
+  function nextBox() {
+    const used = Math.max(boxCountRef.current, boxRef.current, ...(billRef.current?.items.map(l => l.box_no || 1) || []));
+    const next = used + 1; boxCountRef.current = next; boxRef.current = next; setBox(next); set({ box_count: next });
+    return next;
+  }
   async function onCode(raw: string): Promise<string> {
     const r = raw.trim(); if (!r) return "";
     if (savingRef.current || switchingRef.current) return "Please wait for the bill";
@@ -474,8 +481,7 @@ export default function Billing({ args }: { args: string[] }) {
       /* Owner, 3 Nov: "pressing for box 2, it stayed on box 1 — only the second press moved it". A new bill counts 0
          boxes while its lines go in box 1, so the first press gave box 1 again. The next box is always one more than
          the highest box in use. */
-      const used = Math.max(boxCountRef.current, boxRef.current, ...(billRef.current?.items.map(l => l.box_no || 1) || []));
-      const next = used + 1; boxCountRef.current = next; boxRef.current = next; setBox(next); set({ box_count: next }); setQ("");
+      const next = nextBox(); setQ("");
       beep(); toast("Box " + next); return "Box " + next;
     }
     if (r.startsWith("#") && r.length > 1 && companyKindNow() !== "gst") { // typed code in the scan box (not in the tax-invoice company)
@@ -678,7 +684,10 @@ export default function Billing({ args }: { args: string[] }) {
     beep("saved");
     setLastSaved(done);
     toast(`Saved ${done.bill_type === "estimate" ? "estimate" : done.bill_type === "gst" ? "tax invoice" : "challan"} ${done.no} in Bills · ${billAmount(done.net)}`);
-    if (done.oversold?.length) toast("Saved with negative stock: " + done.oversold.map(o => `${o.item} (${o.qty} more than recorded)`).join(", "), true);
+    /* Owner, 23 Nov (photo): a 100-line estimate filled the whole screen with a red list of every item "1 more than
+       recorded". One short line now; the full list is on the bill (Bills › the bill) and in Stock › Products. */
+    if (done.oversold?.length) { const n = done.oversold.length, pcs = done.oversold.reduce((a, o) => a + o.qty, 0);
+      toast(n <= 2 ? "Billed more than in stock: " + done.oversold.map(o => `${o.item} (${o.qty})`).join(", ") : `${n} items (${pcs} pcs) billed more than was entered in stock — Stock › Products › “Stock not entered” lists them`, true); }
     await setSetting("draft_bill", null);
     if (bags) setBagBill(done);
     if (print) printWithSlips(done);
@@ -846,6 +855,11 @@ export default function Billing({ args }: { args: string[] }) {
                 <ScanBox inputRef={scanRef} setRef={setQRef} onCodeRef={onCodeRef} pickRef={pickRef} products={products} cd={cd} />
               </div>
               <button className={"btn " + (cam || sheet ? "p" : "g")} onClick={() => (small ? setSheet(true) : setCam(!cam))} title="Scan with the camera"><Icon n="scan" size={20} />Scan</button>
+              {/* Owner, 23 Nov (voice + photo): "in the old software the box number ran at the top like a serial number; here we
+                  go down to the boxes every time to see where we are". The box the next scans go into, always in sight;
+                  a tap starts the next box (same as scanning BB). */}
+              <button type="button" className="btn box-now" title="The box the next scans go into. Tap for the next box (or scan BB)." aria-label={`Box ${box}. Start box ${Math.max(boxCountRef.current, box, ...b.items.map(l => l.box_no || 1)) + 1}`}
+                onClick={() => { const n = nextBox(); beep(); toast("Box " + n); scanRef.current?.focus(); }}>Box <b style={{ fontSize: "1.25em" }}>{box}</b> <span className="xs">+ next</span></button>
               {!small && <button className={"btn " + (peers ? "p" : "")} onClick={() => setPairOpen(true)} title="Use a phone as the scanner"><Icon n="sell" size={18} />{peers ? "Phone linked" : "Phone as scanner"}</button>}
               <MicButton onAudio={a => doVoice(a)} busy={aiBusy} label="🎙 Speak order" />
               <button className="btn" aria-pressed={editorOpen} aria-expanded={editorOpen} aria-controls="pos-item-entry" disabled={saving} onClick={() => { setEditorOpen(x => small ? !x : true); setEntryFocus(n => n + 1); if (small) setTimeout(() => { const el = document.getElementById("pos-item-entry"); if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 180, behavior: "smooth" }); }, 120); }}><Plus size={18} />Add item</button>
@@ -1050,7 +1064,19 @@ function Payments({ pays, left, onChange, accounts = [], qr = NO_QR, onQr }: { p
   );
 }
 
-function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Partial<Bill>) => void; onClose: () => void }) {
+/* Owner, 23 Nov (voice + photo): "the customer told me everything, I typed it all, and suddenly the window jumped and
+   everything was gone — no way to save it". The new customer's form is kept on this computer as it is typed; if the
+   form closes by itself (estimates locked, app reloaded, another window), opening it again brings it all back.
+   Saving or pressing Close throws the kept copy away. */
+const CUST_DRAFT = "rj_new_customer_draft";
+type CustDraft = { form: Party; fu: { wants: string; callback: string }; at: number };
+export function readCustDraft(): CustDraft | null {
+  try { const d = JSON.parse(localStorage.getItem(CUST_DRAFT) || "null") as CustDraft | null; return d && Date.now() - d.at < 12 * 3600_000 ? d : null; } catch { return null; }
+}
+const keepCustDraft = (d: CustDraft | null) => { try { d ? localStorage.setItem(CUST_DRAFT, JSON.stringify(d)) : localStorage.removeItem(CUST_DRAFT); } catch { /* private mode */ } };
+function CustomerPicker({ bill, onPick: onPick0, onClose: onClose0 }: { bill: Bill; onPick: (p: Partial<Bill>) => void; onClose: () => void }) {
+  const onPick = (p: Partial<Bill>) => { keepCustDraft(null); onPick0(p); };
+  const onClose = () => { keepCustDraft(null); onClose0(); };
   const [q, setQ] = useState(bill.party_phone || bill.party_name || "");
   const [photo, setPhoto] = useState<string | undefined>();
   const parties = useLiveQuery(() => db.parties.filter(p => !p.deleted && p.kind !== "supplier").toArray(), [], []);
@@ -1058,8 +1084,11 @@ function CustomerPicker({ bill, onPick, onClose }: { bill: Bill; onPick: (p: Par
   const pick = (p: Party) => onPick({ party_id: p.id, party_name: p.name, party_phone: p.phone, party_gstin: p.gstin, party_state: p.state, party_address: [p.address, p.city, p.pin].filter(Boolean).join(", "), price_level: p.tier });
   /* Owner, 5 Nov (voice): a new customer stands at the counter and tells everything at once — the whole profile opens
      here, not just name and number. Enter goes to the next box; the bill stays as it is underneath. */
-  const [form, setForm] = useState<Party | null>(null);
-  const [fu, setFu] = useState({ wants: "", callback: "" });
+  const [draft0] = useState(readCustDraft);
+  const [form, setForm] = useState<Party | null>(draft0?.form || null);
+  const [fu, setFu] = useState(draft0?.fu || { wants: "", callback: "" });
+  useEffect(() => { if (draft0) toast("The customer you were typing is back — check and save"); }, []);
+  useEffect(() => { if (form && (form.name || form.phone || form.address || form.city)) keepCustDraft({ form, fu, at: Date.now() }); }, [form, fu]);
   const create = () => {
     const isPhone = /^\+?\d[\d\s]{7,}$/.test(q.trim());
     // State stays empty until the PIN fills it or it is typed (owner, 16 Nov: "Delhi" pre-filled sent a Meerut

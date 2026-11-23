@@ -227,10 +227,21 @@ export function guessPrinterName(kind: PrintKind, names: string[]): string {
   const hits = names.filter(n => re.test(n) && !other.test(n) && !/PDF|OneNote|XPS|Fax|AnyDesk|Ultra/i.test(n));
   return hits.length === 1 ? hits[0] : "";
 }
+const asked = new Set<PrintKind>();   // ask at most once per opening of the app
 async function guessPrinter(kind: PrintKind, desk: any) {
   try {
     const list: { name: string; label: string }[] = await desk.printers();
-    const name = guessPrinterName(kind, list.map(p => p.name));
+    let name = guessPrinterName(kind, list.map(p => p.name));
+    /* Owner, 23 Nov (photo): still the Print box (and the gap) — the printers' names didn't say which is which.
+       Then the app asks once, with the printers as buttons, and remembers the answer on this computer. */
+    if (!name && (kind === "bill" || kind === "label") && !asked.has(kind)) {
+      asked.add(kind);
+      const real = list.map(p => p.name).filter(n => !/PDF|OneNote|XPS|Fax|AnyDesk|Ultra/i.test(n));
+      if (real.length) {
+        const { askChoice } = await import("../components/AskHost");
+        name = (await askChoice(kind === "bill" ? "Which printer prints the bills (the roll printer, e.g. POS-80)? It is remembered on this computer — bills then print in one piece, no Print box." : "Which printer prints the stickers (e.g. TSC)? It is remembered on this computer.", real)) || "";
+      }
+    }
     if (!name) return;
     setDirectPrinter(kind, name);
     void import("./app").then(m => m.toast(`${kind === "bill" ? "Bills" : "Stickers"} now print straight to ${name} — one piece, no Print box. Change it in Settings › Printing.`));
