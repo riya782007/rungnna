@@ -342,7 +342,8 @@ export default function PurchasePhoto({ by, camera = false, typed = false }: { b
   const row = (i: number, key: Field, raw: string) => {
     // "328..00", "1,014.00": typed money is tidied as it is typed
     const value = key === "cost" || key === "rate" ? raw.replace(/\.{2,}/g, ".").replace(/,/g, "") : raw;
-    return set({ rows: d.rows.map((r, k) => k === i ? { ...r, ...(key !== "item" && !r.item.trim() && i > 0 && d.rows[i - 1].item.trim() ? { item: d.rows[i - 1].item, unit: d.rows[i - 1].unit || r.unit } : {}), [key]: value, ...(key === "style" ? { autoStyle: false } : {}), ...(key === "pack" ? { packSource: "manual" as const, stickers: "" } : {}), ...(["item", "unit"].includes(key) ? { item_code: undefined } : {}) } : r) });
+    return set({ rows: d.rows.map((r, k) => k === i ? { ...r, ...(key !== "item" && !r.item.trim() && i > 0 && d.rows[i - 1].item.trim() ? { item: d.rows[i - 1].item, unit: d.rows[i - 1].unit || r.unit } : {}), [key]: value, ...(key === "style" ? { autoStyle: false } : {}), ...(key === "pack" ? { packSource: "manual" as const, stickers: "" } : {}), ...(key === "qty" && value !== r.qty ? { stickers: "" } : {}), ...(["item", "unit"].includes(key) ? { item_code: undefined } : {}) } : r) });
+    // owner, 24 Nov: a new quantity counts the stickers again too (one per packet), never leaving the bill's old count
     // owner, 1 Nov: "the goods came packed differently from the bill" — a new X counts the stickers again (one per packet)
   };
 

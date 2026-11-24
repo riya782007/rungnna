@@ -112,3 +112,20 @@ describe("more stickers on one item, as an option (owner, 21 Oct)", () => {
     expect(() => stickersPerPacket(rows, 0)).toThrow("1 to 20");
   });
 });
+
+describe("Enter on Pcs in box (owner, 24 Nov: 144 pcs, packets of 1, 12 stickers)", () => {
+  const bill = (): PhotoRow[] => [
+    { review_id: "a", item: "KADA", style: "3045", color: "", unit: "PCS", hsn: "", qty: "156", pack: "12", packSource: "bill", stickers: "13", cost: "77", rate: "196" },
+    { review_id: "b", item: "KADA", style: "3TO70", color: "", unit: "PCS", hsn: "", qty: "144", pack: "12", packSource: "bill", stickers: "12", cost: "77", rate: "196" },
+    { review_id: "c", item: "JHUMKI", style: "1923", color: "", unit: "PCS", hsn: "", qty: "12", pack: "1", packSource: "default", stickers: "", cost: "70", rate: "178" },
+  ];
+  it("keeps the packet size the bill gave the next line", () => {
+    const rows = repeatPhotoCount(bill(), 0, "pack", "1");
+    expect(rows[1]).toMatchObject({ pack: "12", stickers: "12" });   // untouched
+    expect(rows[0]).toMatchObject({ pack: "1", stickers: "" });     // counted again: one per packet
+  });
+  it("fills a line that has no packet size of its own, and recounts its stickers", () => {
+    const rows = repeatPhotoCount(bill(), 1, "pack", "6");
+    expect(rows[2]).toMatchObject({ pack: "6", stickers: "" });
+  });
+});

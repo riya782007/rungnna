@@ -43,8 +43,14 @@ export function repeatPhotoCount(rows: PhotoRow[], index: number, field: Repeate
   } else {
     value = requiredCount(input, field === "qty" ? "Total quantity" : "Pieces per packet", field === "qty" ? 1000000 : 10000);
   }
-  return rows.map((row, i) => i === index || i === index + 1
-    ? { ...row, [field]: value, ...(field === "pack" ? { packSource: "manual" as const } : {}) }
+  /* Owner, 24 Nov (photo + video: "this error was fixed once, why has it come again?"): Enter on "Pcs in box" carried
+     the 1 down into the next line, over the 12 the bill had given it, and the stickers counted from the bill (12 for
+     144 pieces) stayed — 144 pieces in packets of 1 with 12 stickers. Now Enter fills the next line only where it
+     has nothing of its own (a packet size the bill or a saved article gave is kept), and a new packet size or
+     quantity counts that line's stickers again: one per packet. */
+  const own = (r: PhotoRow) => field === "pack" ? (r.packSource === "bill" || r.packSource === "saved" || r.packSource === "manual") : false;
+  return rows.map((row, i) => i === index || (i === index + 1 && !own(row))
+    ? { ...row, [field]: value, ...(field === "pack" ? { packSource: "manual" as const } : {}), ...(field !== "stickers" && row[field] !== value ? { stickers: "" } : {}) }
     : row);
 }
 
