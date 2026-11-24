@@ -279,7 +279,7 @@ export function PrintingCard() {
             const value = receiptFeed(e.target.value);
             try { await setSetting("receipt_feed", value); setFeed(value); done("Paper after bill saved"); } catch { toast("Could not save paper after bill", true); }
           }}>{RECEIPT_FEEDS.map(mm => <option key={mm} value={mm}>{mm ? mm + " mm" : "None"}</option>)}</select></Help>
-        <Help label="Longest bill page the printer takes" help="A long bill is printed in pieces of this length. If long bills come out with a blank gap in the middle, set the printer's paper in Windows to its long roll (Printer → Printing preferences → Paper size: 80 x 3276 mm), then choose 3 metres here.">
+        <Help label="Longest bill page the printer takes" help="A long bill is printed in pieces of this length. With the printer set to its long roll paper in Windows (Printer → Printing preferences → Paper size: 80 x 3276 mm), choose 1 m: each piece ends right after its last row, so there is no blank gap. Longer than 1 m in one piece is not offered: the roll printer loses part of such a long page and prints junk letters (24 Nov)">
           <select className="in" value={rollPg} onChange={async e => {
             const value = rollPage(e.target.value);
             try { await setSetting("roll_max_page", value); setRollPage(value); setRollMax(value); done("Page length saved"); } catch { toast("Could not save page length", true); }

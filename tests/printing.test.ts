@@ -99,3 +99,14 @@ describe("choosing the printer by itself (owner, 22 Nov: gap in the middle, 'app
     expect(guessPrinterName("bill", ["Canon LBP6030", "Microsoft Print to PDF"])).toBe("");
   });
 });
+
+import { thermalPage, rollPage, SAFE_ROLL_PAGE } from "../src/lib/printing";
+describe("long roll bills (owner, 24 Nov: junk letters and squashed rows in a 2 m estimate)", () => {
+  it("never sends a roll page longer than 1 m", () => {
+    const px = 2000 / 25.4 * 96;   // a 2-metre bill
+    const h = Number(/size:80mm (\d+)mm/.exec(thermalPage(80, px, SAFE_ROLL_PAGE))![1]);
+    expect(h).toBeLessThanOrEqual(SAFE_ROLL_PAGE);
+    expect(rollPage(3000)).toBe(1000);   // the old "3 m" setting becomes 1 m
+    expect(rollPage(280)).toBe(280);
+  });
+});

@@ -101,7 +101,7 @@ export async function printDocument(source: Document, frame: () => Promise<void>
     if (desk?.printHtml && directPrinter(jobKind(root))) {
       const device = directPrinter(jobKind(root));
       const page = root.querySelector<HTMLStyleElement>("style[data-thermal-width]");
-      if (page?.dataset.contentPx) page.textContent = thermalPage(Number(page.dataset.thermalWidth), Number(page.dataset.contentPx), 3000);
+      if (page?.dataset.contentPx) page.textContent = thermalPage(Number(page.dataset.thermalWidth), Number(page.dataset.contentPx), SAFE_ROLL_PAGE);
       const size = pageSizeOf(root);
       const css = Array.from(doc.querySelectorAll("style")).map(x => x.textContent).join("\n");
       const html = "<!doctype html><html><head><meta charset=\"utf-8\"><base href=\"" + source.baseURI + "\"><style>" + css + "</style></head><body>" + root.outerHTML + "</body></html>";
@@ -151,7 +151,7 @@ export async function preparePrint(doc: Document, frame: () => Promise<void>) {
       page.textContent = thermalPage(width, height);
       // Owner, 14 Nov (photo): a 45-line bill came out in two pieces with a gap and a cut between them.
       const mm = height * 25.4 / 96;
-      if (mm + 8 > rollMax && !directPrinter("bill")) void import("./app").then(m => m.toast(`This bill is ${Math.round(mm / 10)} cm long, so it prints in pieces. For one piece: Windows printer → Printing preferences → Paper 80 x 3276 mm, then Settings › Printing › Longest bill page → 3 m.`, true));
+      if (mm + 8 > rollMax && rollMax < SAFE_ROLL_PAGE && !directPrinter("bill")) void import("./app").then(m => m.toast(`This bill is ${Math.round(mm / 10)} cm long, so it prints in pieces. For no gap between them: Windows printer → Printing preferences → Paper 80 x 3276 mm, then Settings › Printing › Longest bill page → 1 m.`, true));
     } finally { root.style.cssText = old; }
   }
 }
@@ -162,8 +162,13 @@ export const MAX_ROLL_PAGE = 280;
 /* Owner, 13 Nov (photo): a 30-line bill came out in two pieces with a long blank between line 16 and 17 — his printer
    feeds paper at the end of every page. A printer set to its long roll paper ("80 x 3276 mm" in Windows) takes one long
    page without shrinking it, so each computer can say how long a page its printer takes (Settings › Bill printing). */
-export const ROLL_PAGES = [280, 600, 1200, 3000] as const;
-export const rollPage = (v: unknown) => (ROLL_PAGES as readonly number[]).includes(Number(v)) ? Number(v) : MAX_ROLL_PAGE;
+/* Owner, 24 Nov (photos): a 190-line estimate (about 2 m) came out with lines of junk letters ("p88 L L …") in the
+   middle and squashed, unreadable rows after them. One 2-metre page is more picture than the roll printer can take in
+   at once: it loses part of it and prints the rest wrongly. A roll page is now at most 1 m; a longer bill goes as
+   pages of equal length, each ending right after its last row (the printer on long roll paper leaves no gap). */
+export const SAFE_ROLL_PAGE = 1000;
+export const ROLL_PAGES = [280, 600, 1000] as const;
+export const rollPage = (v: unknown) => { const n = Number(v); return (ROLL_PAGES as readonly number[]).includes(n) ? n : n > SAFE_ROLL_PAGE ? SAFE_ROLL_PAGE : MAX_ROLL_PAGE; };
 let rollMax = MAX_ROLL_PAGE;
 export const setRollMax = (mm: unknown) => { rollMax = rollPage(mm); };
 
