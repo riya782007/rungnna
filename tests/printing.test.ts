@@ -110,3 +110,11 @@ describe("long roll bills (owner, 24 Nov: junk letters and squashed rows in a 2 
     expect(rollPage(280)).toBe(280);
   });
 });
+
+import { slipGap } from "../src/lib/printing";
+describe("next slip waits for the bill (owner, 24 Nov: junk where the discount line should be)", () => {
+  it("waits about the printing time of the bill", () => {
+    expect(slipGap(0)).toBe(3000);
+    expect(slipGap(200)).toBe(7000);   // a 20 cm bill
+  });
+});

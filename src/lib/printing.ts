@@ -36,8 +36,14 @@ export const slipFeed = (feed: number, _cut?: ReceiptCut) => feed;
 
 /** Wait between one roll slip and the next print job (bill → bag tag → cash slip). */
 export const SLIP_GAP_MS = 1500;
+/* Owner, 24 Nov (photo): a 6-line estimate came out with junk letters where "Discount 50%" should be — right at the end
+   of the bill, just as the bag tag was sent. The next slip was sent 1.5 s after the bill left the computer, while the
+   printer was still printing it, and the two mixed in the printer. The next slip now waits until the bill has printed:
+   about 50 mm a second (slow roll printers), plus 3 s. */
+export const slipGap = (mm: number) => Math.round(3000 + Math.max(0, mm) / 50 * 1000);
 
 export async function printDocument(source: Document, frame: () => Promise<void>, onDone = () => {}, cancelled = () => false) {
+  let gap = SLIP_GAP_MS;
   const content = source.getElementById("printroot");
   if (!content?.textContent?.trim() || !content.children.length) throw new Error("No printable content. Close print and try again.");
   const host = source.createElement("iframe");
@@ -84,6 +90,7 @@ export async function printDocument(source: Document, frame: () => Promise<void>
     reset.textContent = "html,body{margin:0!important;padding:0!important;height:auto!important;min-height:0!important;overflow:visible!important;background:white}#printroot{display:block!important}.inv-t tr{break-inside:avoid}.inv{max-width:100%;overflow-wrap:anywhere}";
     doc.head.appendChild(reset);
     await preparePrint(doc, frame);
+    { const px = Number(doc.getElementById?.("printroot")?.querySelector<HTMLStyleElement>("style[data-thermal-width]")?.dataset.contentPx); if (px > 0) gap = slipGap(px * 25.4 / 96); }
     if (cancelled()) { remove(); return remove; }
     // Android app: its web view cannot print, so the page goes to Android's print service
     // (any installed printer app, or "Save as PDF"). Styles are inlined: the print view
@@ -106,13 +113,20 @@ export async function printDocument(source: Document, frame: () => Promise<void>
       const css = Array.from(doc.querySelectorAll("style")).map(x => x.textContent).join("\n");
       const html = "<!doctype html><html><head><meta charset=\"utf-8\"><base href=\"" + source.baseURI + "\"><style>" + css + "</style></head><body>" + root.outerHTML + "</body></html>";
       try {
-        await desk.printHtml({ html, deviceName: device, widthMm: size?.[0], heightMm: size?.[1] });
-        sent = true; remove(); setTimeout(onDone, SLIP_GAP_MS);
+        /* Owner, 24 Nov (photos): since bills started going straight to the POS-80 (22–23 Nov), bills long and short came
+           out with lines of junk letters; through the Print box they had always printed clean. The straight route also
+           told the printer a page size of its own and sent shaded backgrounds as pictures. Bills now go the Print box's
+           way — the printer's own paper, plain black on white — only without the box. Stickers keep their exact size. */
+        const bill = jobKind(root) === "bill";
+        await desk.printHtml(bill
+          ? { html: html.replace("</style></head>", "#printroot *{background:transparent!important;box-shadow:none!important;-webkit-print-color-adjust:economy!important;print-color-adjust:economy!important}</style></head>"), deviceName: device }
+          : { html, deviceName: device, widthMm: size?.[0], heightMm: size?.[1] });
+        sent = true; remove(); setTimeout(onDone, gap);
         return remove;
       } catch { /* printer offline / renamed: fall back to the normal Print box below */ }
     }
     desk?.printing?.();   // the Print box holds the screen still: the Windows app must not call that "busy"
-    win.addEventListener("afterprint", () => { sent = true; remove(); setTimeout(onDone, SLIP_GAP_MS); }, { once: true });
+    win.addEventListener("afterprint", () => { sent = true; remove(); setTimeout(onDone, gap); }, { once: true });
     win.focus(); win.print();
     return remove;
   } catch (e) { remove(); throw e; }
