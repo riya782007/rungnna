@@ -299,6 +299,50 @@ ipcMain.handle("rj-print", async (_e, o) => {
     return await new Promise((resolve, reject) => pw.webContents.print(opts, (ok, why) => ok ? resolve(true) : reject(new Error(why || "Print failed"))));
   } finally { setTimeout(() => { try { pw.destroy(); } catch { /* closed */ } }, 60_000); }
 });
+/* Text-mode bills (owner, 24–25 Nov: junk letters on the roll): the screens build the bill as the printer's own
+   commands (ESC/POS) and this hands those bytes to the printer untouched (Windows "RAW" job), the way billing programs
+   do — no picture, no driver drawing, a few KB per bill. Windows' own winspool, reached through PowerShell. */
+const RAW_PS = `$ErrorActionPreference='Stop'
+Add-Type -TypeDefinition @"
+using System; using System.Runtime.InteropServices;
+public class RjRaw {
+  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public class DOCINFO { public string pDocName; public string pOutputFile; public string pDataType; }
+  [DllImport("winspool.drv", CharSet=CharSet.Unicode, SetLastError=true)] public static extern bool OpenPrinter(string n, out IntPtr h, IntPtr d);
+  [DllImport("winspool.drv", SetLastError=true)] public static extern bool ClosePrinter(IntPtr h);
+  [DllImport("winspool.drv", CharSet=CharSet.Unicode, SetLastError=true)] public static extern int StartDocPrinter(IntPtr h, int level, DOCINFO di);
+  [DllImport("winspool.drv", SetLastError=true)] public static extern bool EndDocPrinter(IntPtr h);
+  [DllImport("winspool.drv", SetLastError=true)] public static extern bool StartPagePrinter(IntPtr h);
+  [DllImport("winspool.drv", SetLastError=true)] public static extern bool EndPagePrinter(IntPtr h);
+  [DllImport("winspool.drv", SetLastError=true)] public static extern bool WritePrinter(IntPtr h, byte[] b, int n, out int w);
+  public static void Send(string printer, byte[] data) {
+    IntPtr h; if (!OpenPrinter(printer, out h, IntPtr.Zero)) throw new Exception("Printer not found: " + printer);
+    try {
+      var di = new DOCINFO(); di.pDocName = "Rungnna bill"; di.pDataType = "RAW";
+      if (StartDocPrinter(h, 1, di) == 0) throw new Exception("Printer refused the job (" + Marshal.GetLastWin32Error() + ")");
+      StartPagePrinter(h); int w;
+      bool ok = WritePrinter(h, data, data.Length, out w);
+      EndPagePrinter(h); EndDocPrinter(h);
+      if (!ok || w != data.Length) throw new Exception("Printer took " + w + " of " + data.Length + " bytes");
+    } finally { ClosePrinter(h); }
+  }
+}
+"@
+$o = [Console]::In.ReadToEnd() | ConvertFrom-Json
+[RjRaw]::Send($o.printer, [Convert]::FromBase64String($o.data))`;
+ipcMain.handle("rj-raw-print", async (_e, o) => {
+  const { deviceName, data } = o || {};
+  if (!deviceName || !data) throw new Error("No printer chosen");
+  if (process.platform !== "win32") throw new Error("Text printing needs Windows");
+  const { spawn } = require("node:child_process");
+  return await new Promise((resolve, reject) => {
+    const ps = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", Buffer.from(RAW_PS, "utf16le").toString("base64")], { windowsHide: true });
+    let err = "";
+    ps.stderr.on("data", d => { err += d; });
+    ps.on("error", reject);
+    ps.on("close", code => code === 0 ? resolve(true) : reject(new Error((err.split(/\r?\n/).find(l => /Exception|refused|not found|took/.test(l)) || err || "Text printing failed").slice(0, 300))));
+    ps.stdin.end(JSON.stringify({ printer: deviceName, data: Buffer.from(data).toString("base64") }));
+  });
+});
 app.on("second-instance", () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
 app.whenReady().then(() => {
   pickActive();

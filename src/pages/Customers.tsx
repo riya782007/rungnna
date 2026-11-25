@@ -25,6 +25,7 @@ import { usePrivate, isEstimate } from "../lib/privacy";
 import { usePrintJob } from "../lib/printing";
 import { customerStats, type CustomerStat } from "../lib/customerRank";
 import { newRoom } from "./Call";
+import { partyItems, billItemsText } from "../lib/itemSummary";
 
 /* Customers: who buys, what they owe, one tap to collect or remind. */
 export default function Customers({ args }: { args: string[] }) {
@@ -108,7 +109,7 @@ function PartyView({ id }: { id: string }) {
   const [amt, setAmt] = useState("");
   const [mode, setMode] = useState<Payment["mode"]>("cash");
   const [note, setNote] = useState("");
-  const [tab, setTab] = useState<"account" | "profit" | "bills" | "details">("account");
+  const [tab, setTab] = useState<"account" | "profit" | "bills" | "items" | "details">("account");
   const [pl, setPl] = useState<CustomerProfit | null>(null);
   const [printing, setPrinting] = useState(false);
   const [share, setShare] = useState(false);
@@ -143,9 +144,10 @@ function PartyView({ id }: { id: string }) {
 
       <div className="tabs" style={{ marginBottom: 14 }}>
         {/* owner, 23 Oct (voice): the customer's profit is for the owner only; staff see the khata (payments, receipts) */}
-        {(["account", "profit", "bills", "details"] as const).filter(t => t !== "profit" || me?.role === "owner").map(t => <a key={t} href={"#/customers/" + id} className={tab === t ? "on" : ""} onClick={e => { e.preventDefault(); setTab(t); }}>{t === "account" ? "Khata (journal)" : t === "profit" ? "Profit & pattern" : t === "bills" ? "Bills" : "Details"}</a>)}
+        {(["account", "profit", "bills", "items", "details"] as const).filter(t => t !== "profit" || me?.role === "owner").map(t => <a key={t} href={"#/customers/" + id} className={tab === t ? "on" : ""} onClick={e => { e.preventDefault(); setTab(t); }}>{t === "account" ? "Khata (journal)" : t === "profit" ? "Profit & pattern" : t === "bills" ? "Bills" : t === "items" ? "Items bought" : "Details"}</a>)}
       </div>
 
+      {tab === "items" && <PartyItems bills={bills} />}
       {tab === "account" && <div className="split">
         <div className="card pad stack">
           <b>Receive payment</b>
@@ -297,5 +299,24 @@ function FollowCard({ partyId }: { partyId: string }) {
     <div className="row"><button className="btn p" onClick={async () => { await saveFollow(partyId, { ...f, by: me?.name || "" }); toast("Saved"); }}>Save</button>
       {f.callback && !f.done && <button className="btn" onClick={async () => { const n = { ...f, done: new Date().toISOString().slice(0, 10), by: me?.name || "" }; await saveFollow(partyId, n); setF(n); toast("Call-back marked done"); }}>Called — done</button>}
       {f.done && <span className="xs mut">Called on {f.done}</span>}</div>
+  </div>;
+}
+
+/* Owner, 24 Nov (voice): how many bangles, chain lockets… this party took — all bills together, and bill by bill. */
+function PartyItems({ bills }: { bills: import("../lib/db").Bill[] }) {
+  const rows = partyItems(bills);
+  const sold = bills.filter(b => !b.deleted && b.status === "final" && isSale(b) && !b.converted_to && !b.merged_into);
+  return <div className="split">
+    <div className="card tw"><table>
+      <thead><tr><th>Item</th><th className="r">Pieces</th><th className="r">Value</th><th className="r">Bills</th><th>Last bought</th></tr></thead>
+      <tbody>{rows.map(r => <tr key={r.item}><td className="b">{r.item}</td><td className="r mono b">{r.qty}</td><td className="r mono">{rupees(r.value)}</td><td className="r mono">{r.bills}</td><td className="xs mut">{r.last ? new Date(r.last).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" }) : "—"}</td></tr>)}
+        {!rows.length && <tr><td colSpan={5} className="empty">No bills yet.</td></tr>}</tbody></table></div>
+    <div className="card pad stack" style={{ gap: 8 }}>
+      <b>Bill by bill</b>
+      {sold.slice(0, 60).map(b => <a key={b.id} href={"#/bills/" + b.id} className="item" style={{ textDecoration: "none", display: "block" }}>
+        <div className="row between sm"><b>{b.no}</b><span className="xs mut">{new Date(b.at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })} · {b.total_qty} pcs</span></div>
+        <div className="xs">{billItemsText(b)}</div></a>)}
+      {!sold.length && <div className="mut sm">No bills yet.</div>}
+    </div>
   </div>;
 }

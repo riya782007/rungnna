@@ -9,6 +9,7 @@ type Office = { name: string; words: string[]; pin: string; d: number; s: string
 type Table = { districts: string[]; offices: Office[]; byWord: Map<string, number[]>; byPin: Map<string, number[]>; districtWords: string[][] };
 
 const words = (s: string) => (s || "").toUpperCase().replace(/[^A-Z0-9 ]+/g, " ").split(/\s+/).filter(Boolean);
+const SECTORISH = new Set(["SEC", "SECTOR", "PH", "PHASE", "BLOCK", "BLK", "POCKET", "PKT", "PART", "EXTN", "EXTENSION"]);
 // words that say nothing about where a place is
 const WEAK = new Set(["NAGAR", "ROAD", "MARG", "COLONY", "BAZAR", "BAZAAR", "MARKET", "GALI", "LANE", "CHOWK", "NEW", "OLD", "EAST",
   "WEST", "NORTH", "SOUTH", "MAIN", "SECTOR", "PHASE", "BLOCK", "NEAR", "OPP", "SHOP", "NO", "HOUSE", "FLOOR", "STREET", "CITY", "TOWN"]);
@@ -65,15 +66,23 @@ export function pinsForAddress(t: Table, address: string, max = 4, near = ""): P
       const cityOnly = core.length > 0 && core.every(x => where.has(x));
       const need = cityOnly ? [] : o.words.filter(x => !where.has(x));
       const must = need.length ? need : cityOnly ? core : o.words;
-      if (!must.every(x => have.has(x))) continue;
-      const strong = must.filter(x => !WEAK.has(x) && x.length > 2);
+      /* Owner, 25 Nov (photo, "Pincode feature not working"): "rohini sector 20" offered 110001 New Delhi. The post
+         offices are "ROHINI SECTOR-7", "ROHINI SEC-11", "ROHINI SECTOR 15" — none is sector 20, so none matched and
+         only the city was left. An office whose place name is in the address counts even when its sector / block
+         number differs, below an exact match and above the bare city. */
+      const placeWords = must.filter(x => !/^\d+$/.test(x) && !WEAK.has(x) && !SECTORISH.has(x) && x.length > 2);
+      const exact = must.every(x => have.has(x));
+      // only the sector / block number (or "SEC" for "SECTOR") may differ — "JIND ROHTAK ROAD" is not "Rohtak"
+      const onlyNumberDiffers = must.filter(x => !have.has(x)).every(x => /^\d+$/.test(x) || SECTORISH.has(x));
+      if (!exact && !(need.length && placeWords.length && placeWords.every(x => have.has(x)) && onlyNumberDiffers)) continue;
+      const strong = (exact ? must : placeWords).filter(x => !WEAK.has(x) && x.length > 2);
       if (!strong.length) continue;                     // "NEW MARKET" alone says nothing
       // an office named only after its city ("NEW DELHI", "MEERUT") is the last choice: any named area beats it
-      let score = need.length ? 10 + strong.reduce((a, x) => a + x.length, 0) + must.length : 1;
+      let score = need.length ? (exact ? 10 : 4) + strong.reduce((a, x) => a + x.length, 0) + must.length : 1;
       if (need.length && o.words.every(x => have.has(x))) score += 1;
       if (t.districtWords[o.d]?.length && t.districtWords[o.d].every(x => have.has(x))) score += 6;
       if (words(GST_STATES[o.s] || "").every(x => have.has(x))) score += 4;
-      if (near && o.s === near && !states.size) score += 4;   // the shop's own state, when the address names no other
+      if (near && o.s === near && !states.size) score += 8;   // the shop's own state, when the address names no other
       if (states.size && !states.has(o.s)) continue;
       scored.set(k, score);
     }

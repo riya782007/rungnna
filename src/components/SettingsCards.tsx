@@ -1,6 +1,6 @@
 import { Switch } from "./common";
 import { viaPhone, setViaPhone } from "../lib/waRelay";
-import { PRINT_KINDS, directPrinter, setDirectPrinter } from "../lib/printing";
+import { PRINT_KINDS, directPrinter, setDirectPrinter, setTextBills } from "../lib/printing";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, put, now, getSetting, setSetting, type Party, type Product } from "../lib/db";
@@ -296,6 +296,7 @@ function DirectPrinters() {
   const desk = (window as any).rungnnaDesktop;
   const [list, setList] = useState<{ name: string; label: string }[]>([]);
   const [pick, setPick] = useState<Record<string, string>>(() => Object.fromEntries(PRINT_KINDS.map(([k]) => [k, directPrinter(k)])));
+  const [text, setText] = useState(() => { try { return localStorage.getItem("rj_bill_text") !== "0"; } catch { return true; } });
   useEffect(() => { desk?.printers?.().then(setList).catch(() => {}); }, []);
   if (!desk?.printers) return <div className="xs mut">Printing straight to a printer (no Print box) works in the Windows app from version 1.1.0.</div>;
   return <div className="stack" style={{ gap: 6 }}>
@@ -303,6 +304,9 @@ function DirectPrinters() {
     {PRINT_KINDS.map(([k, l]) => <label key={k} className="f">{l}<select className="in" value={pick[k] || ""} onChange={e => { setDirectPrinter(k, e.target.value); setPick({ ...pick, [k]: e.target.value }); toast(e.target.value ? `${l.split(" (")[0]} → ${e.target.value}` : "Print box will show"); }}>
       <option value="">Ask every time (Print box)</option>{list.map(p => <option key={p.name} value={p.name}>{p.label}</option>)}</select></label>)}
     <div className="xs mut">With a bill printer chosen here, a long bill prints as one piece of its own length — no gap, no cut in the middle.</div>
+    {desk.rawPrint ? <label className="row sm"><input type="checkbox" checked={text} onChange={e => { setTextBills(e.target.checked); setText(e.target.checked); toast(e.target.checked ? "Bills print as text on the roll printer" : "Bills print as a picture"); }} />
+      Bills as text — the printer's own letters: fast, one piece, no junk letters (recommended)</label>
+      : <div className="xs mut">Bills as text (no junk letters, no gaps) needs the Windows app 1.1.1 or newer.</div>}
   </div>;
 }
 

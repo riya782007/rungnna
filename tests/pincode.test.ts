@@ -35,3 +35,23 @@ describe("PIN code from the address, another state (owner, 15 Nov)", () => {
     expect(pinsForAddress(t, "KAROL BAGH Delhi", 4, "07").every(p => p.state === "Delhi")).toBe(true);
   });
 });
+
+describe("area with a different sector number (owner, 25 Nov: rohini sector 20 → 110001)", () => {
+  it("offers Rohini's PIN, not New Delhi's", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { parsePins, pinsForAddress } = await import("../src/lib/pincode");
+    const t = parsePins(readFileSync("public/pincodes.txt", "utf8"));
+    const hits = pinsForAddress(t, "rohini sector 20 jagdamba market, Delhi", 4, "07").map(p => p.pin);
+    expect(hits[0]).toMatch(/^1100(85|89)$/);
+    expect(hits.indexOf("110001")).not.toBe(0);
+  });
+});
+
+describe("no state typed: the shop's own state first (owner, 25 Nov)", () => {
+  it("rohini sector 20 with no state → Delhi's Rohini", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { parsePins, pinsForAddress } = await import("../src/lib/pincode");
+    const t = parsePins(readFileSync("public/pincodes.txt", "utf8"));
+    expect(pinsForAddress(t, "rohini sector 20 jagdamba market", 4, "07")[0].pin).toMatch(/^1100(85|89)$/);
+  });
+});

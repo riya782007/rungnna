@@ -102,6 +102,13 @@ const lines = page => page.locator(".pos-lines tbody tr.ln").count();
     await scan(page, "CHKCODE-h1");
     must((await page.locator(".pos-lines tr[aria-current=true] td[data-l=Box] input").inputValue()) === String(before + 1), "scan did not go into the new box");
   });
+  await step(page, "scanner with the cursor on a button still adds the item", async () => {
+    const before = await lines(page);
+    await page.getByRole("button", { name: /^Hold/ }).focus();
+    await page.keyboard.type("CHKCODE-n1", { delay: 1 }); await page.keyboard.press("Enter"); await page.waitForTimeout(700);
+    must(await page.locator(".pos-lines tr[aria-current=true] td[data-l=Style]").innerText() === "K5208/41", "scan with the cursor on a button was thrown away");
+    must(await lines(page) >= before, "lines lost");
+  });
   await step(page, "new customer typed, form closes by itself, details come back", async () => {
     await page.getByText("Walk-in / cash").first().click(); await page.waitForTimeout(400);
     await page.keyboard.type("9827877149"); await page.getByRole("button", { name: /New customer/ }).click(); await page.waitForTimeout(400);
@@ -139,6 +146,16 @@ const lines = page => page.locator(".pos-lines tbody tr.ln").count();
     await page.locator(".photo-tile button").first().click(); await page.waitForTimeout(600);
     must(await page.locator(".modal").count() === 1, "photo did not open");
     await page.keyboard.press("Escape");
+  });
+  await step(page, "PIN from address: rohini sector 20 → Rohini, not New Delhi", async () => {
+    await page.goto("https://rungnna.test/#/bill"); await page.waitForTimeout(1200);
+    await page.getByText("Walk-in / cash").first().click(); await page.waitForTimeout(400);
+    await page.keyboard.type("8700513510"); await page.getByRole("button", { name: /New customer/ }).click(); await page.waitForTimeout(400);
+    await page.locator(".modal textarea, .modal input[placeholder*=ddress], .modal label:has-text('Address') textarea, .modal label:has-text('Address') input").first().fill("rohini sector 20 jagdamba market");
+    await page.waitForTimeout(1500);
+    const text = await page.locator(".modal").innerText();
+    must(/11008[59]/.test(text), "no Rohini PIN offered");
+    await page.getByRole("button", { name: "Close" }).first().click();
   });
   await step(page, "customers page opens", async () => {
     await page.goto("https://rungnna.test/#/customers"); await page.waitForTimeout(1500);

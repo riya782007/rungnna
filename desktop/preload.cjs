@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("rungnnaDesktop", {
   started: () => ipcRenderer.send("rj-started"),
   printers: () => ipcRenderer.invoke("rj-printers"),
   printHtml: o => ipcRenderer.invoke("rj-print", o),
+  rawPrint: o => ipcRenderer.invoke("rj-raw-print", o),   // ESC/POS bytes straight to a printer (text-mode bills)
   printing: () => ipcRenderer.send("rj-printing"),   // the Print box is about to hold the screen still
   serialFor: kind => ipcRenderer.send("rj-serial-for", kind),
 });

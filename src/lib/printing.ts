@@ -247,7 +247,7 @@ export function guessPrinterName(kind: PrintKind, names: string[]): string {
   return hits.length === 1 ? hits[0] : "";
 }
 const asked = new Set<PrintKind>();   // ask at most once per opening of the app
-async function guessPrinter(kind: PrintKind, desk: any) {
+export async function guessPrinter(kind: PrintKind, desk: any) {
   try {
     const list: { name: string; label: string }[] = await desk.printers();
     let name = guessPrinterName(kind, list.map(p => p.name));
@@ -266,6 +266,14 @@ async function guessPrinter(kind: PrintKind, desk: any) {
     void import("./app").then(m => m.toast(`${kind === "bill" ? "Bills" : "Stickers"} now print straight to ${name} — one piece, no Print box. Change it in Settings › Printing.`));
   } catch { /* no list: the Print box shows as before */ }
 }
+/* Bills as text (owner, 24–25 Nov): on by itself in the Windows app that can send it (1.1.1+) once a bill printer is
+   chosen; Settings › Printing can switch a computer back to picture bills. */
+export function textBills(): boolean {
+  const desk = typeof window !== "undefined" ? (window as any).rungnnaDesktop : undefined;
+  let off = false; try { off = localStorage.getItem("rj_bill_text") === "0"; } catch { /* private mode */ }
+  return !!desk?.rawPrint && !!directPrinter("bill") && !off;
+}
+export function setTextBills(on: boolean) { try { on ? localStorage.removeItem("rj_bill_text") : localStorage.setItem("rj_bill_text", "0"); } catch { /* private mode */ } }
 /** The page's own size from its @page rule, in mm (null for auto / named sizes like A4). */
 export function pageSizeOf(root: HTMLElement): [number, number] | null {
   const css = Array.from(root.querySelectorAll("style")).map(x => x.textContent || "").join(" ");

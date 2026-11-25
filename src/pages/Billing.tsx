@@ -437,7 +437,12 @@ export default function Billing({ args }: { args: string[] }) {
   useScanOnlyIn(scanRef, (code, from) => {
     // Owner, 28 Oct: the cursor now waits on Qty in the hand-entry row after Add; a label scanned there is a
     // scan, not typing — it goes onto the bill (the row is put back as it was) and the cursor moves to the scan box
-    if (from?.closest("#pos-item-entry") && !document.querySelector(".modal,dialog[open]")) {
+    /* Owner, 25 Nov (video + voice): "the scanner beeps but the bill doesn't read it". After a click on a button or the
+       page (Save, Box + next, a chip…) the cursor was nowhere and the scan was thrown away. Only a scan into a box being
+       typed in is refused now (so typed text is never spoiled); a scan with the cursor on a button or the page goes
+       onto the bill. */
+    const typing = !!from && (from.matches?.("input:not([type=checkbox]):not([type=radio]):not([type=button]),textarea,select,[contenteditable=true]"));
+    if (!document.querySelector(".modal,dialog[open],.ask-back") && (!typing || from?.closest("#pos-item-entry"))) {
       scanRef.current?.focus({ preventScroll: true });
       void onCodeRef.current(code);
       return;

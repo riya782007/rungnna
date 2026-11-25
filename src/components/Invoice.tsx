@@ -2,7 +2,9 @@ import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { qrAccount, upiLink } from "../lib/upi";
 import { bagPayload, carryBags } from "../lib/bag-labels";
 import { getSetting } from "../lib/db";
-import { usePrintJob, receiptFeed, receiptCut, slipFeed, DEFAULT_RECEIPT_FEED } from "../lib/printing";
+import { usePrintJob, receiptFeed, receiptCut, slipFeed, DEFAULT_RECEIPT_FEED, textBills, directPrinter, guessPrinter, type ReceiptCut } from "../lib/printing";
+import { billJob } from "../lib/escpos";
+import { billItems, billItemsText } from "../lib/itemSummary";
 import { createPortal } from "react-dom";
 import type { Bill } from "../lib/db";
 import { due, docName, taxSummary, type Shop } from "../lib/billing";
@@ -104,6 +106,8 @@ export function InvoiceSheet({ b, shop, format, copy, feed = 0 }: { b: Bill; sho
       <div className="inv-foot">
         <div className="inv-left">
           <div><b>Total quantity:</b> {b.total_qty} · <b>Boxes:</b> {b.box_count}{b.carry_bags ? <> · <b>Carry bags:</b> {b.carry_bags}</> : null}</div>
+          {/* owner, 24 Nov: item-wise pieces on the bill ("BANGLE 12 · CHAIN LKT 8") */}
+          {billItems(b).length > 1 && <div className="inv-sub"><b>Items:</b> {billItemsText(b)}</div>}
           {format === "packing" && <div className="inv-boxes">{boxes.map(x => <span key={x}>Box {x}: {b.items.filter(l => l.box_no === x).reduce((a, l) => a + l.qty, 0)} pcs</span>)}</div>}
           {estimate && <div className="inv-sub">Approval challan · Not a tax invoice.</div>}
           {b.bill_type === "challan" && <div className="inv-sub">Goods sent on approval / for delivery. Not a tax invoice — the invoice follows.</div>}
@@ -163,12 +167,29 @@ export function rollSlips(b: Bill, format: PrintFormat, want?: RollSlips): RollS
 export function PrintBill(props: { b: Bill; shop: Shop; format: PrintFormat; onDone: () => void; slips?: RollSlips }) {
   const [copies, setCopies] = useState<number | null>(null);
   const [feed, setFeed] = useState<number | null>(null);
+  const [cut, setCut] = useState<ReceiptCut>("partial");
+  const [asText, setAsText] = useState<boolean | null>(null);
   useEffect(() => {
     getSetting<number>("invoice_copies", 1).then(n => setCopies(Number(n) || 1)).catch(() => setCopies(1));
     Promise.all([getSetting<number>("receipt_feed", DEFAULT_RECEIPT_FEED), getSetting("receipt_cut", "partial")])
-      .then(([n, cut]) => setFeed(slipFeed(receiptFeed(n), receiptCut(cut)))).catch(() => setFeed(DEFAULT_RECEIPT_FEED));
+      .then(([n, c]) => { setCut(receiptCut(c)); setFeed(slipFeed(receiptFeed(n), receiptCut(c))); }).catch(() => setFeed(DEFAULT_RECEIPT_FEED));
   }, []);
-  return copies === null || feed === null ? null : <PrintBillNow {...props} copies={copies} feed={feed} />;
+  // roll bills on a computer whose Windows app can send text, with the bill printer chosen: the printer's own letters
+  useEffect(() => {
+    if (feed === null) return;
+    const roll = props.format === "80mm" || props.format === "58mm";
+    const desk = (window as any).rungnnaDesktop;
+    void (async () => {
+    if (roll && desk?.rawPrint && desk?.printers && !directPrinter("bill")) await guessPrinter("bill", desk);
+    if (!roll || !textBills()) { setAsText(false); return; }
+    setAsText(true);
+    const data = billJob(props.b, props.shop, { width: props.format === "58mm" ? 58 : 80, feedMm: feed, cut, slips: rollSlips(props.b, props.format, props.slips) });
+    desk.rawPrint({ deviceName: directPrinter("bill"), data })
+      .then(() => { toast(`Printed ${props.b.no || "bill"} on ${directPrinter("bill")}`); props.onDone(); })
+      .catch((e: any) => { toast(`Text printing failed (${e?.message || e}) — printing as a picture instead`, true); setAsText(false); });
+    })();
+  }, [feed]);
+  return copies === null || feed === null || asText !== false ? null : <PrintBillNow {...props} copies={copies} feed={feed} />;
 }
 
 function PrintBillNow({ b, shop, format, onDone, copies = 1, feed = 0, slips }: { b: Bill; shop: Shop; format: PrintFormat; onDone: () => void; copies?: number; feed?: number; slips?: RollSlips }) {
